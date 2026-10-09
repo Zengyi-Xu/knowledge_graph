@@ -22,6 +22,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useIsMobile } from '@/hooks/use-mobile'
 import { Trash2, Download, Check, Upload, Palette, MoreVertical } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -47,6 +48,10 @@ interface Props {
 }
 
 export function NoteEditor({ note, allNotes, onChange, onDelete, onOpenNote, onCreateNote, splitView = false }: Props) {
+  // 手机（<768px）下左右分栏每一栏只剩几十像素，既不能读也不能写，
+  // 所以强制退回「预览/编辑」切换；桌面与平板仍沿用调用方给的分栏设置。
+  const isMobile = useIsMobile()
+  const useSplit = splitView && !isMobile
   const [tagInput, setTagInput] = useState('')
   const [tab, setTab] = useState<'edit' | 'preview'>('preview')
   const [theme, setTheme] = useState<PreviewTheme>(savedTheme)
@@ -358,7 +363,7 @@ export function NoteEditor({ note, allNotes, onChange, onDelete, onOpenNote, onC
       </div>
 
       {/* 编辑区：分栏（源码 | 渲染）或 预览/编辑切换 */}
-      {splitView ? (
+      {useSplit ? (
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2 md:px-4">
             <span className="text-xs text-muted-foreground">左：Markdown 源码 · 右：渲染结果</span>

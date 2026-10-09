@@ -1,0 +1,12 @@
+[
+  {
+    "id": "fixture-json-1",
+    "title": "示例数据占位（不应被采用）",
+    "type": "other",
+    "grade": "",
+    "tags": ["示例"],
+    "content": "这是 .tmp-e2e 测试实例专用的占位 notes.json，内容为人工编造的示例数据，不含任何真实笔记。",
+    "createdAt": 1700000000000,
+    "updatedAt": 1700000000000
+  }
+]

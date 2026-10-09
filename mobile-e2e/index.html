@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>移动端适配验证（合成测试数据）</title>
+    <!-- 先于应用启动注入合成笔记；不带任何个人笔记内容 -->
+    <script src="./seed.js"></script>
+    <!-- 测量探针：在应用挂载后收集布局指标 -->
+    <script src="./probe.js"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

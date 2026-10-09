@@ -113,9 +113,11 @@ export function PreviewContent({ content, notes, onOpenNote, onCreateNote, theme
                 background-color: transparent !important;
                 color: inherit !important;
               }
+              /* 行内 code 里的长单词也必须能断行：只给外层 p/li 设 overflow-wrap
+                 不会让 inline 元素内部产生断行机会（实测仍会溢出 12px） */
               #write code {
-                overflow-wrap: normal;
-                word-break: keep-all;
+                overflow-wrap: anywhere;
+                word-break: break-word;
                 color: var(--write-inline-code-color);
               }
               /* 表格在自身容器内横向滚动；单元格内的超长链接/长单词允许断行，
