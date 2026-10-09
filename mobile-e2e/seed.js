@@ -30,6 +30,9 @@
     'code-paper': { theme: 'paper', activeTitle: '示例技能 PyTorch' },
     'code-custom': { theme: 'custom', customCss: true, activeTitle: '示例技能 PyTorch' },
     'wide-edit': { theme: 'default', tab: 'edit', activeTitle: '示例项目 材料数据库' },
+    // 让抽屉保持展开（不指定 activeTitle 就不会触发「选中后自动收起」），
+    // 这样才能量到列表项与分组标题的触摸目标
+    'drawer-open': { theme: 'default', listOpenForced: true },
   }
 
   var FREE_URL =
@@ -192,6 +195,7 @@
     if (v.search) localStorage.setItem('__test_search', v.search)
     if (v.suggest) localStorage.setItem('__test_suggest', '1')
     if (v.activeTitle) localStorage.setItem('__test_active', v.activeTitle)
+    if (v.listOpenForced) localStorage.setItem('__test_drawer', '1')
   } catch (e) {
     document.documentElement.setAttribute('data-seed-error', String(e && e.message))
   }

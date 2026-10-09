@@ -264,6 +264,9 @@
           cls: l2.cls,
           text: l2.text,
           aria: l2.aria,
+          // 包在 <label> 里的控件（如双向同步开关）：真正的可点区域是整条 label
+          inLabel: !!t.closest('label'),
+          labelH: t.closest('label') ? Math.round(t.closest('label').getBoundingClientRect().height) : null,
         }
         if (info.min < 24) out.tap.small.push(info)
         if (info.min >= 44) out.tap.min44.push(info)
@@ -325,7 +328,9 @@
   function collectFacts() {
     var facts = { probe: 'ok' }
     var text = document.body.innerText || ''
-    facts.hydrated = text.indexOf('篇笔记') >= 0
+    // 手机端顶栏的「N 篇笔记」文案按设计被隐藏，所以不能用它判断水合；
+    // 改用「正文渲染出来了（Shadow DOM 有 #write）或编辑区在」来判定。
+    facts.hydrated = deepAll('#write').length > 0 || deepAll('textarea').length > 0
     facts.scenarioMarker = document.documentElement.getAttribute('data-test-scenario')
     facts.shellMobileOverride = !!document.getElementById('__shell_mobile')
     facts.bodyTextLen = text.length
@@ -483,7 +488,21 @@
         tabClicked: false,
         searchTyped: false,
         suggestTyped: false,
+        listForced: false,
       })
+
+    // -1) 需要量列表控件的场景：保持抽屉展开
+    if (localStorage.getItem('__test_drawer') === '1' && !st.listForced) {
+      var dToggle = findListToggle()
+      if (dToggle) {
+        if (isListOpen()) {
+          st.listForced = true
+        } else {
+          var cd = centerOf(dToggle)
+          return { op: 'click', x: cd.x, y: cd.y, why: 'open-note-list' }
+        }
+      }
+    }
 
     // 0) 先把顶层视图切到「笔记」：v1.1.0 默认可能是图谱/并列，
     //    而 NoteEditor 的「预览/编辑」切换只在「笔记」视图下存在。
@@ -541,12 +560,18 @@
     var search = localStorage.getItem('__test_search')
     if (search && !st.searchTyped) {
       var si = findSearchInput()
-      if (si) {
-        if (si.value === search) st.searchTyped = true
-        else {
-          var c3 = centerOf(si)
-          return { op: 'type', x: c3.x, y: c3.y, text: search, why: 'search' }
+      if (!si) {
+        // 搜索框在笔记列表里；手机端列表是抽屉，收起时它不在 DOM 中，先展开
+        var stoggle = findListToggle()
+        if (stoggle && !isListOpen()) {
+          var cs = centerOf(stoggle)
+          return { op: 'click', x: cs.x, y: cs.y, why: 'open-note-list-for-search' }
         }
+      } else if (si.value !== search) {
+        var c3 = centerOf(si)
+        return { op: 'type', x: c3.x, y: c3.y, text: search, why: 'search' }
+      } else {
+        st.searchTyped = true
       }
     }
 

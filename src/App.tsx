@@ -11,6 +11,13 @@ import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import {
   Network,
   NotebookText,
   Upload,
@@ -21,6 +28,7 @@ import {
   PanelLeft,
   RefreshCw,
   Columns2,
+  MoreVertical,
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import {
@@ -35,13 +43,19 @@ import {
   serializeNotes,
 } from '@/lib/syncFile'
 import { Switch } from '@/components/ui/switch'
+import { useIsMobile } from '@/hooks/use-mobile'
 
 type View = 'notes' | 'graph' | 'both'
 
 export default function App() {
   const api = useNotes()
   const { notes, hydrated, replaceAll } = api
+  // 手机断点来自仓库已有的 useIsMobile()（matchMedia），不散落全局事件监听
+  const isMobile = useIsMobile()
   const [view, setView] = useState<View>('notes')
+  // 「并列」是图谱 + 编辑器的左右并排，手机上两栏都不可用：
+  // 手机端把视图降级到「笔记」，并从折叠状态的列表进入详情（配合抽屉式列表）
+  const effectiveView: View = isMobile && view === 'both' ? 'notes' : view
   const [activeId, setActiveId] = useState<string | null>(null)
   const [focusId, setFocusId] = useState<string | null>(null)
   const [listOpen, setListOpen] = useState(() => localStorage.getItem('note-graph-list-open') !== '0')
@@ -320,6 +334,12 @@ export default function App() {
     localStorage.setItem('note-graph-list-open', listOpen ? '1' : '0')
   }, [listOpen])
 
+  // 手机：选中笔记后自动收起列表抽屉，让「列表 → 详情」这一步即完成导航
+  // （桌面端列表是常驻侧栏，不收起）
+  useEffect(() => {
+    if (isMobile) setListOpen(false)
+  }, [activeId, isMobile])
+
   const filterPanel = (
     <div className="shrink-0 space-y-4 overflow-y-auto rounded-lg border bg-card p-3 text-sm xl:w-52">
       <div>
@@ -404,32 +424,76 @@ export default function App() {
     />
   )
 
+  /* 手机上由「更多操作」菜单复用的动作，与桌面按钮调用同一批函数，功能不删减 */
+  const onPickSyncFile = () => void chooseSyncFile()
+  const onReloadFromJson = () => void reloadFromJson()
+  const onImportBackup = () => fileRef.current?.click()
+  const onImportMd = () => mdRef.current?.click()
+
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
-      {/* 顶栏 */}
-      <header className="flex h-14 items-center gap-3 border-b px-4">
-        <Network className="h-5 w-5 text-primary" />
-        <h1 className="text-base font-bold">本地笔记图谱</h1>
-        <span className="text-xs text-muted-foreground">{notes.length} 篇笔记</span>
-        <div className="ml-auto flex items-center gap-2">
+      {/* 顶栏：手机上标题收起、按钮组换行并把次要操作收进菜单 */}
+      <header className="flex h-auto min-h-14 flex-wrap items-center gap-x-3 gap-y-2 border-b px-3 py-2 md:h-14 md:flex-nowrap md:px-4 md:py-0">
+        <Network className="h-5 w-5 shrink-0 text-primary" />
+        <h1 className="hidden shrink-0 text-base font-bold md:block">本地笔记图谱</h1>
+        <span className="hidden shrink-0 text-xs text-muted-foreground md:block">{notes.length} 篇笔记</span>
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
           <input ref={fileRef} type="file" accept=".json" className="hidden" onChange={(e) => e.target.files?.[0] && importJson(e.target.files[0])} />
           <input ref={mdRef} type="file" accept=".md,.markdown" className="hidden" onChange={(e) => e.target.files?.[0] && importMd(e.target.files[0])} />
-          <Button variant="outline" size="sm" onClick={() => void syncNow()}>
+
+          {/* 桌面：保留原有的并排按钮 */}
+          <Button variant="outline" size="sm" className="hidden md:inline-flex" onClick={() => void syncNow()}>
             <Save className="mr-1 h-3.5 w-3.5" /> 保存到同步文件
           </Button>
-          <Button variant="outline" size="icon" title="选择同步文件" onClick={() => void chooseSyncFile()}>
+          <Button variant="outline" size="icon" className="hidden md:inline-flex" title="选择同步文件" aria-label="选择同步文件" onClick={onPickSyncFile}>
             <FolderSync className="h-4 w-4" />
           </Button>
-          <Button variant="outline" size="sm" title="用仓库里的 notes.json 覆盖本地笔记" onClick={() => void reloadFromJson()}>
+          <Button variant="outline" size="sm" className="hidden md:inline-flex" title="用仓库里的 notes.json 覆盖本地笔记" onClick={onReloadFromJson}>
             <RefreshCw className="mr-1 h-3.5 w-3.5" /> 重新载入
           </Button>
-          <Button variant="outline" size="sm" onClick={() => fileRef.current?.click()}>
+          <Button variant="outline" size="sm" className="hidden md:inline-flex" onClick={onImportBackup}>
             <Upload className="mr-1 h-3.5 w-3.5" /> 导入备份
           </Button>
-          <Button variant="outline" size="sm" onClick={() => mdRef.current?.click()}>
+          <Button variant="outline" size="sm" className="hidden md:inline-flex" onClick={onImportMd}>
             <FileUp className="mr-1 h-3.5 w-3.5" /> 导入 .md
           </Button>
-          <Button variant="outline" size="sm" onClick={exportJson}>导出备份</Button>
+          <Button variant="outline" size="sm" className="hidden md:inline-flex" onClick={exportJson}>导出备份</Button>
+
+          {/* 手机：同步与导出/导入收进菜单，功能不减 */}
+          <div className="flex items-center gap-2 md:hidden">
+            <Button variant="outline" size="icon" className="h-11 w-11" title="选择同步文件" aria-label="选择同步文件" onClick={onPickSyncFile}>
+              <FolderSync className="h-4 w-4" />
+            </Button>
+            <Button size="sm" className="h-11" onClick={() => void syncNow()}>
+              <Save className="mr-1 h-4 w-4" /> 保存到同步文件
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="icon" className="h-11 w-11" title="更多操作" aria-label="更多操作">
+                  <MoreVertical className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuItem className="min-h-11" onSelect={onReloadFromJson}>
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  重新载入 notes.json
+                </DropdownMenuItem>
+                <DropdownMenuItem className="min-h-11" onSelect={onImportBackup}>
+                  <Upload className="mr-2 h-4 w-4" />
+                  导入 JSON 备份
+                </DropdownMenuItem>
+                <DropdownMenuItem className="min-h-11" onSelect={onImportMd}>
+                  <FileUp className="mr-2 h-4 w-4" />
+                  导入 .md
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem className="min-h-11" onSelect={exportJson}>
+                  <Save className="mr-2 h-4 w-4" />
+                  导出备份
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
       </header>
 
@@ -441,7 +505,7 @@ export default function App() {
         </span>
         {conflict && <span className="shrink-0 text-destructive">有冲突待处理</span>}
         <label
-          className="ml-auto flex shrink-0 items-center gap-2"
+          className="ml-auto flex min-h-11 shrink-0 cursor-pointer items-center gap-2 py-1 md:min-h-0 md:py-0"
           title={
             !syncPath
               ? '请先点文件夹图标选择同步文件'
@@ -457,46 +521,62 @@ export default function App() {
         {!syncing && lastSyncAt && <span>已同步 {new Date(lastSyncAt).toLocaleTimeString()}</span>}
       </div>
 
-      <div className="flex min-h-0 flex-1">
-        {/* 左侧：笔记列表（可整栏折叠） */}
+      <div className="relative flex min-h-0 flex-1">
+        {/* 笔记列表：桌面是常驻侧栏；手机改为覆盖在正文之上的抽屉，
+            这样正文能拿到完整的手机宽度（256px 侧栏 + 360px 屏幕放不下） */}
         {listOpen && (
-          <aside className="w-64 shrink-0 border-r bg-muted/30">
-            <NoteList notes={notes} activeId={active?.id ?? null} onSelect={openNote} onCreate={() => createNote()} />
-          </aside>
+          <>
+            {/* 手机抽屉遮罩：点一下关闭列表 */}
+            <div
+              className="absolute inset-0 z-10 bg-black/30 md:hidden"
+              onClick={() => setListOpen(false)}
+              aria-hidden="true"
+            />
+            <aside className="absolute inset-y-0 left-0 z-20 w-[78%] max-w-64 shrink-0 border-r bg-background shadow-xl md:static md:z-auto md:w-64 md:bg-muted/30 md:shadow-none">
+              <NoteList notes={notes} activeId={active?.id ?? null} onSelect={openNote} onCreate={() => createNote()} />
+            </aside>
+          </>
         )}
 
         {/* 右侧主区 */}
         <main className="flex min-w-0 flex-1 flex-col">
-          <div className="flex items-center gap-3 border-b px-4 py-2">
+          <div className="flex items-center gap-1.5 border-b px-2 py-2 md:gap-3 md:px-4">
             <Button
               variant="ghost"
               size="icon"
+              className="h-11 w-11 shrink-0 md:h-9 md:w-9"
               title={listOpen ? '收起笔记列表' : '展开笔记列表'}
+              aria-label={listOpen ? '收起笔记列表' : '展开笔记列表'}
               onClick={() => setListOpen((v) => !v)}
             >
               <PanelLeft className="h-4 w-4" />
             </Button>
-            <Tabs value={view} onValueChange={(v) => setView(v as View)}>
+            <Tabs value={effectiveView} onValueChange={(v) => setView(v as View)} className="min-w-0">
               <TabsList>
-                <TabsTrigger value="notes">
-                  <NotebookText className="mr-1.5 h-4 w-4" /> 笔记
+                {/* 手机：标签只留图标，避免三个文字标签把主区最小宽度撑到约 228px */}
+                <TabsTrigger value="notes" className="px-1.5 md:px-2">
+                  <NotebookText className="h-4 w-4 md:mr-1.5" />
+                  <span className="hidden md:inline">笔记</span>
                 </TabsTrigger>
-                <TabsTrigger value="graph">
-                  <Network className="mr-1.5 h-4 w-4" /> 图谱
+                <TabsTrigger value="graph" className="px-1.5 md:px-2">
+                  <Network className="h-4 w-4 md:mr-1.5" />
+                  <span className="hidden md:inline">图谱</span>
                 </TabsTrigger>
-                <TabsTrigger value="both">
-                  <Columns2 className="mr-1.5 h-4 w-4" /> 并列
+                {/* 「并列」是图谱+编辑器的左右并排，手机上两栏都不可用，故只在平板及以上出现 */}
+                <TabsTrigger value="both" className="hidden px-1.5 md:inline-flex md:px-2">
+                  <Columns2 className="h-4 w-4 md:mr-1.5" />
+                  <span className="hidden md:inline">并列</span>
                 </TabsTrigger>
               </TabsList>
             </Tabs>
-            {view !== 'notes' && (
-              <span className="text-xs text-muted-foreground">
+            {effectiveView !== 'notes' && (
+              <span className="hidden text-xs text-muted-foreground md:inline">
                 单击节点选中，再次单击打开笔记 · 右键聚焦/取消聚焦 · 拖动可移动节点
               </span>
             )}
           </div>
 
-          {view === 'notes' ? (
+          {effectiveView === 'notes' ? (
             active ? (
               <div className="min-h-0 flex-1">{editorFor(active, true)}</div>
             ) : (
@@ -504,7 +584,7 @@ export default function App() {
                 <Button onClick={() => createNote()}>新建第一篇笔记</Button>
               </div>
             )
-          ) : view === 'graph' ? (
+          ) : effectiveView === 'graph' ? (
             <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 xl:flex-row">
               {filterPanel}
               <div className="min-w-0 flex-1">
@@ -512,11 +592,12 @@ export default function App() {
               </div>
             </div>
           ) : (
-            <div className="flex min-h-0 flex-1 gap-3 p-3">
-              <div className="min-w-0 flex-1">
+            /* 并列：手机上改为上下堆叠，「并列」标签本身也在手机端隐藏（见上） */
+            <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 md:flex-row">
+              <div className="min-h-0 min-w-0 flex-1 md:h-auto">
                 <GraphView notes={notes} onOpenNote={openNote} filters={filters} focusId={focusId} onFocusChange={setFocusId} />
               </div>
-              <div className="min-w-0 flex-1 overflow-hidden rounded-lg border bg-card">
+              <div className="min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border bg-card">
                 {active ? (
                   editorFor(active, false)
                 ) : (

@@ -91,7 +91,7 @@ export function NoteList({ notes, activeId, onSelect, onCreate }: Props) {
                 type="button"
                 onClick={() => toggleGroup(type)}
                 title={isCollapsed ? '展开该分组' : '收起该分组'}
-                className="mb-1 flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs font-medium text-muted-foreground transition-colors hover:bg-muted"
+                className="mb-1 flex min-h-11 w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs font-medium text-muted-foreground transition-colors hover:bg-muted md:min-h-0"
               >
                 {isCollapsed ? (
                   <ChevronRight className="h-3 w-3 shrink-0" />

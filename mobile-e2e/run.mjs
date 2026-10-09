@@ -29,53 +29,36 @@ const DESKTOP_SIZES = new Set(['1440x900', '1024x768', '768x1024'])
 
 function scenarios() {
   const list = []
-  const add = (size, scenario, note, shell = null) => {
+  const add = (size, scenario, note) => {
     const [w, h] = size.split('x').map(Number)
-    list.push({ size, w, h, scenario, note, shell, mobile: w < 768 })
+    list.push({ size, w, h, scenario, note, mobile: w < 768 })
   }
-  // 第一部分：未改动顶层外壳（App.tsx 固定 256px 侧栏）——记录真实溢出与外壳阻塞
+  // App.tsx 的手机适配已落地（列表抽屉 + 图标视图标签 + 顶栏菜单 + 并列降级），
+  // 所以不再需要 shell=mobile 模拟口径：下面全部是「真实布局」。
   add('360x800', 'default', '小手机 / 默认主题 / 正文')
   add('360x800', 'edit', '小手机 / 编辑标签页')
   add('360x800', 'night', '小手机 / 夜读主题')
+  add('360x800', 'paper', '小手机 / 纸页主题')
   add('360x800', 'vue-light', '小手机 / Vue 浅色')
   add('360x800', 'vue-night', '小手机 / Vue 深色')
-  add('360x800', 'paper', '小手机 / 纸页主题')
   add('360x800', 'custom', '小手机 / 自定义主题（极限宽内容）')
-  add('360x800', 'empty-search', '小手机 / 无搜索结果')
+  add('360x800', 'empty-search', '小手机 / 无搜索结果（抽屉里的搜索框）')
   add('360x800', 'no-notes', '小手机 / 无笔记空状态')
   add('360x800', 'long-list', '小手机 / 单条笔记')
   add('360x800', 'many-tags', '小手机 / 八个标签')
   add('360x800', 'edit-links', '小手机 / 编辑态笔记链接建议')
+  add('360x800', 'drawer-open', '小手机 / 抽屉展开（量列表项与分组标题触摸目标）')
+  add('360x800', 'wide', '小手机 / 宽表格')
+  add('360x800', 'wide-night', '小手机 / 宽表格 + 夜读')
+  add('360x800', 'code', '小手机 / 长代码行 + 大图')
+  add('360x800', 'code-night', '小手机 / 长代码行 + Vue 深色（对比度回归）')
+  add('360x800', 'code-paper', '小手机 / 长代码行 + 纸页')
+  add('360x800', 'code-custom', '小手机 / 长代码行 + 自定义主题')
   add('390x844', 'default', '常见手机 / 默认主题')
   add('412x915', 'vue-night', '常见手机 / Vue 深色')
-  add('360x800', 'wide', '小手机 / 宽表格（原始外壳）')
-  add('360x800', 'code', '小手机 / 长代码行 + 大图（原始外壳）')
-  // 第二部分：shell=mobile，模拟核心负责人将要接入的列表/详情导航，验证组件在真实手机宽度下的表现
-  add('360x800', 'default', '小手机 / 全宽外壳 / 默认主题', 'mobile')
-  add('360x800', 'edit', '小手机 / 全宽外壳 / 编辑标签页', 'mobile')
-  add('360x800', 'night', '小手机 / 全宽外壳 / 夜读主题', 'mobile')
-  add('360x800', 'vue-light', '小手机 / 全宽外壳 / Vue 浅色', 'mobile')
-  add('360x800', 'vue-night', '小手机 / 全宽外壳 / Vue 深色', 'mobile')
-  add('360x800', 'paper', '小手机 / 全宽外壳 / 纸页主题', 'mobile')
-  add('360x800', 'custom', '小手机 / 全宽外壳 / 自定义主题', 'mobile')
-  // empty-search 要在笔记列表里搜索，而全宽外壳把侧栏隐藏了，所以只测原始外壳
-  add('360x800', 'no-notes', '小手机 / 全宽外壳 / 无笔记空状态', 'mobile')
-  add('360x800', 'long-list', '小手机 / 全宽外壳 / 单条笔记', 'mobile')
-  add('360x800', 'many-tags', '小手机 / 全宽外壳 / 八个标签', 'mobile')
-  add('360x800', 'edit-links', '小手机 / 全宽外壳 / 编辑态链接建议', 'mobile')
-  add('360x800', 'wide', '小手机 / 全宽外壳 / 宽表格', 'mobile')
-  add('360x800', 'wide-night', '小手机 / 全宽外壳 / 宽表格 + 夜读', 'mobile')
-  add('360x800', 'wide-vue', '小手机 / 全宽外壳 / 宽表格 + Vue 浅色', 'mobile')
-  add('360x800', 'wide-edit', '小手机 / 全宽外壳 / 宽表格笔记的编辑态', 'mobile')
-  add('360x800', 'code', '小手机 / 全宽外壳 / 长代码行 + 大图', 'mobile')
-  add('360x800', 'code-night', '小手机 / 全宽外壳 / 长代码行 + Vue 深色', 'mobile')
-  add('360x800', 'code-paper', '小手机 / 全宽外壳 / 长代码行 + 纸页', 'mobile')
-  add('360x800', 'code-custom', '小手机 / 全宽外壳 / 长代码行 + 自定义主题', 'mobile')
-  add('390x844', 'default', '常见手机 / 全宽外壳 / 默认主题', 'mobile')
-  add('412x915', 'vue-night', '常见手机 / 全宽外壳 / Vue 深色', 'mobile')
-  // 第三部分：横屏、平板、电脑——必须与改动前一致
+  // 横屏、平板、电脑——必须与改动前一致
   add('844x390', 'default', '手机横屏 / 低高度')
-  add('768x1024', 'default', '平板竖屏 / 断点边界（应保持桌面布局）')
+  add('768x1024', 'default', '平板竖屏 / 断点边界（应回到桌面布局）')
   add('768x1024', 'wide', '平板竖屏 / 宽表格')
   add('1024x768', 'vue-light', '平板横屏 / Vue 浅色')
   add('1440x900', 'default', '电脑 / 桌面回归')
@@ -262,13 +245,18 @@ async function driveControls(cdp) {
   return { tries, trace }
 }
 
-/** 应用是否已经挂载并渲染出笔记（探针的 waitReady 条件） */
+/**
+ * 应用是否已经挂载并渲染。
+ * 不再依赖顶栏的「N 篇笔记」文案——手机端该文案按设计被隐藏了。
+ * 改为检查「笔记列表开关」+ 根节点里已经出现内容，两者在全部场景下都成立。
+ */
 const READY_EXPR = `(function(){
-  if (!window.__e2e) return false;
+  if (!window.__e2eReady) return false;
   var root = document.getElementById('root');
-  var text = root ? (root.innerText || '') : '';
-  var sc = document.documentElement.getAttribute('data-test-scenario');
-  return text.indexOf('篇笔记') >= 0 || (sc === 'no-notes' && text.length > 0);
+  if (!root || !root.firstElementChild) return false;
+  var toggle = Array.prototype.slice.call(document.querySelectorAll('button[title]'))
+    .some(function (b) { return /笔记列表/.test(b.getAttribute('title') || '') });
+  return toggle && (root.innerText || '').trim().length > 0;
 })()`
 
 async function runScenario(cdp, sc, base) {

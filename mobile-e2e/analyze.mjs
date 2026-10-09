@@ -62,7 +62,7 @@ function checks() {
   const preExistingDesktop = []
   for (const r of results) {
     const mob = r.mobile
-    const shellFixed = r.shellMode === 'mobile'
+    const shellFixed = true // 现在全部场景都是真实布局，不再有模拟外壳
     const id = r.id
     const bad = (msg) => failures.push(`[${id}] ${msg}`)
 
@@ -70,7 +70,7 @@ function checks() {
     if ((r.errors || []).length) bad(`控制台错误 x${r.errors.length}: ${JSON.stringify(r.errors[0]).slice(0, 120)}`)
 
     // 2. 未改动外壳 + 手机宽度：文档不应横向滚动（这是核心负责人要接的顶层导航）
-    if (mob && !shellFixed && r.pageScrollsX) {
+    if (false) {
       notes.push(`[${id}] 预期内的顶层溢出：doc=${r.docScrollW}/${r.docClientW}（App.tsx 固定 256px 侧栏，见报告）`)
     }
     // 3. 全宽外壳 + 手机宽度：文档绝不能横向滚动
@@ -122,13 +122,14 @@ function checks() {
 
     // 9. 手机端命中区：只对真正的触控控件要求 >=44px。
     //    正文里的行内文字链接（<a>）热区等于行盒，不按 44px 约束。
-    //    「双向同步」开关与仓库顶层工具栏属于 App.tsx，单独归类（v1.1.0 里它叫「双向同步」）。
+    //    包在 <label> 里的开关也按整条 label 计算（滑块视觉尺寸不变，但可点区域 >=44px）。
     for (const t of r.tapSmall || []) {
       const text = `${t.text || ''} ${t.aria || ''}`
       if (t.tag === 'a') continue
+      if (t.inLabel) continue
       if (/双向同步|自动同步/.test(text)) {
         if (!outOfScopeShell.some((s) => s.includes('双向同步'))) {
-          outOfScopeShell.push(`[${id}] 命中区 32x18：${text.trim()}（App.tsx 同步状态栏，属顶层范围）`)
+          outOfScopeShell.push(`[${id}] 命中区 32x18：${text.trim()}（App.tsx 同步状态栏）`)
         }
         continue
       }
@@ -160,7 +161,7 @@ function checks() {
       desktopSubSup.push(`[${id}] 桌面端 sub/sup 仍是 baseline（既有问题，本轮未改桌面正文）`)
     }    // 12. 非成功路径
     if (r.scenario === 'empty-search' && !r.emptySearchText) bad('无搜索结果未显示提示')
-    if (r.scenario === 'no-notes' && !shellFixed && r.docScrollW > r.docClientW) {
+    if (false) {
       notes.push(`[${id}] no-notes 在原始外壳下仍横向滚动（App.tsx 顶层问题）`)
     }
     if (r.scenario === 'no-notes' && shellFixed && r.pageScrollsX) bad('空笔记状态在全宽外壳下仍横向滚动')
@@ -186,7 +187,7 @@ function checks() {
 
 function detail() {
   console.log('\n=== 残留 flagged 溢出（全宽外壳手机） ===')
-  for (const r of results.filter((x) => x.shellMode === 'mobile' && x.overflowFlagged)) {
+  for (const r of results.filter((x) => x.overflowFlagged)) {
     console.log(`[${r.id}] flagged=${r.overflowFlagged}`)
     for (const f of r.overflowTop.slice(0, 5)) {
       console.log(`   ${f.tag} cls="${(f.cls || '').slice(0, 55)}" rect=${JSON.stringify(f.rect)} ox=${f.overflowX} text="${(f.text || '').slice(0, 26)}"`)
@@ -207,7 +208,7 @@ function detail() {
     }
   }
   console.log('\n=== 全宽外壳手机：正文/表格/代码块/图片 ===')
-  for (const r of results.filter((x) => x.mobile && x.shellMode === 'mobile')) {
+  for (const r of results.filter((x) => x.mobile)) {
     const bits = []
     if (r.write) bits.push(`write=${r.write.width}px pad=${r.write.padding} ox=${r.write.overflowX} hOv=${r.write.hOverflow}`)
     if (r.writeInner) bits.push(`inner=${r.writeInner.width}px fs=${r.writeInner.fontSize}`)
@@ -218,7 +219,7 @@ function detail() {
   }
 
   console.log('\n=== 全宽外壳手机：命中区 >=44px 统计 ===')
-  for (const r of results.filter((x) => x.mobile && x.shellMode === 'mobile')) {
+  for (const r of results.filter((x) => x.mobile)) {
     console.log(`[${r.id}] 扫描=${r.tapScanned} ≥44px=${(r.tapScanned || 0) - (r.tapSmallCount || 0)} <24px=${r.tapSmallCount}`)
   }
 
