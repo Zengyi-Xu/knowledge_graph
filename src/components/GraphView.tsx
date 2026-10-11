@@ -3,6 +3,7 @@ import { NOTE_TYPE_META, GRADE_META, GRADE_COLORS } from '@/types/note'
 import type { Note } from '@/types/note'
 import { extractLinks } from '@/types/note'
 import { readSetting, writeSetting } from '@/lib/env'
+import { buildTopicEdges, type TopicEdge } from '@/lib/topicLinks'
 import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
 import { RotateCcw, SlidersHorizontal, X } from 'lucide-react'
@@ -46,6 +47,18 @@ export type GraphTier = 'no-literature' | 'linked' | 'all' | 'literature-only'
 
 const TIER_KEY = 'graph-tier-v1'
 const LINK_THRESHOLD_KEY = 'graph-link-threshold-v1'
+const TOPIC_KEY = 'graph-topic-links-v1'
+
+/** 话题相关边默认开；关掉后回到纯 [[双链]] 视图 */
+function loadTopicLinks(): boolean {
+  try {
+    const raw = readSetting(TOPIC_KEY)
+    if (raw === '0') return false
+  } catch {
+    /* ignore */
+  }
+  return true
+}
 
 export const TIER_OPTIONS: { id: GraphTier; label: string; hint: string }[] = [
   { id: 'no-literature', label: '无文献', hint: '只显示普通笔记（旧行为）' },
@@ -229,6 +242,8 @@ export function GraphView({
   const [tier, setTier] = useState<GraphTier>(loadTier)
   /** 「仅有关联」档的度数阈值：度数 ≥ N 的文献才显示 */
   const [linkThreshold, setLinkThreshold] = useState<number>(loadLinkThreshold)
+  /** 话题相关边（分类共现 + 标题相似）：让文献按相关性自组织成簇 */
+  const [topicOn, setTopicOn] = useState<boolean>(loadTopicLinks)
   /**
    * 疏布模式下用户手动改过力参数后为 true：本会话内不再自动覆盖。
    * 节点数回落到阈值以下时自动复位。
@@ -260,7 +275,30 @@ export function GraphView({
     writeSetting(LINK_THRESHOLD_KEY, String(v))
   }, [])
 
+  const changeTopicOn = useCallback((next: boolean) => {
+    setTopicOn(next)
+    writeSetting(TOPIC_KEY, next ? '1' : '0')
+  }, [])
+
+  /** 文献内容签名：变了才重算话题边（O(n²)，结果必须缓存） */
+  const topicSignature = notes
+    .filter((n) => n.type === 'literature')
+    .map((n) => `${n.id}|${n.updatedAt}|${(n.literature?.collections ?? []).join(',')}|${n.title}`)
+    .join(';')
+
+  /**
+   * 话题相关边。按 (id|updatedAt|collections) 签名缓存：
+   * 签名不变直接复用上次结果，避免每次渲染都跑 O(n²)。
+   */
+  const topicEdges: TopicEdge[] = useMemo(() => {
+    if (!topicOn) return []
+    const literature = notes.filter((n) => n.type === 'literature')
+    return buildTopicEdges(literature)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [topicOn, topicSignature])
+
   // 全量边 + 每个节点的度数（在文献档位过滤之前算，避免「只显示有连线的」变成自指）
+  // 话题相关边也计入度数：「仅有关联」档因此包含「按分类/标题相关」的文献
   const { degreeById } = useMemo(() => {
     const degree = new Map<string, number>()
     const bump = (id: string) => degree.set(id, (degree.get(id) ?? 0) + 1)
@@ -272,8 +310,12 @@ export function GraphView({
         bump(o.id)
       }
     }
+    for (const e of topicEdges) {
+      bump(e.a)
+      bump(e.b)
+    }
     return { degreeById: degree }
-  }, [notes])
+  }, [notes, topicEdges])
 
   // 可见节点：先按筛选条件过滤，再按文献档位过滤
   const visible = useMemo(
@@ -293,10 +335,11 @@ export function GraphView({
   )
 
   // 边 + 聚焦跳数。聚焦时不再隐藏节点，而是按到焦点的跳数逐层虚化
+  // topicWeight > 0 表示这是话题相关边（样式与弹簧参数都和 [[双链]] 不同）
   const { shownIds, shownEdges, hopById } = useMemo(() => {
     const ids = new Set(visible.map((n) => n.id))
     const edgeSet = new Set<string>()
-    const edges: { source: string; target: string }[] = []
+    const edges: { source: string; target: string; topicWeight?: number }[] = []
     for (const n of notes) {
       for (const t of extractLinks(n.content)) {
         const o = notes.find((x) => x.title.toLowerCase() === t.toLowerCase())
@@ -306,6 +349,10 @@ export function GraphView({
         edgeSet.add(key)
         edges.push({ source: n.id, target: o.id })
       }
+    }
+    for (const e of topicEdges) {
+      if (edgeSet.has(`${e.a}|${e.b}`) || edgeSet.has(`${e.b}|${e.a}`)) continue
+      edges.push({ source: e.a, target: e.b, topicWeight: e.weight })
     }
     const kept = edges.filter((e) => ids.has(e.source) && ids.has(e.target))
     const hop = new Map<string, number>()
@@ -331,7 +378,7 @@ export function GraphView({
       }
     }
     return { shownIds: ids, shownEdges: kept, hopById: hop }
-  }, [notes, visible, focusId])
+  }, [notes, visible, focusId, topicEdges])
 
   const shownNotes = useMemo(() => visible.filter((n) => shownIds.has(n.id)), [visible, shownIds])
   const focusActive = Boolean(focusId)
@@ -567,14 +614,18 @@ export function GraphView({
       }
 
       // 双链引力：类似弹簧，长度 > linkDistance 时相吸、短于目标才推开
+      // 话题相关边：目标距离更短（0.7×）、弹簧强度按相关度缩放 → 相关文献自然抱簇
       for (const e of shownEdges) {
         const a = map.get(e.source)
         const b = map.get(e.target)
         if (!a || !b) continue
+        const topic = e.topicWeight !== undefined
+        const target = topic ? effPhysics.linkDistance * 0.7 : effPhysics.linkDistance
+        const k = topic ? springK * (0.4 + e.topicWeight! * 1.6) : springK
         const dx = b.x - a.x
         const dy = b.y - a.y
         const d = Math.max(Math.sqrt(dx * dx + dy * dy), 1)
-        const f = ((d - effPhysics.linkDistance) * springK) / d
+        const f = ((d - target) * k) / d
         a.vx += dx * f
         a.vy += dy * f
         b.vx -= dx * f
@@ -846,6 +897,22 @@ export function GraphView({
                 </div>
               ))}
 
+            {/* 话题相关边开关 */}
+            <label className="mb-2 flex cursor-pointer items-center gap-2 rounded border px-2 py-1.5 text-[11px]">
+              <input
+                type="checkbox"
+                checked={topicOn}
+                onChange={(e) => changeTopicOn(e.target.checked)}
+                className="h-3.5 w-3.5 accent-teal-600"
+              />
+              <span className="min-w-0">
+                <span className="font-medium">话题相关边</span>
+                <span className="block text-muted-foreground">
+                  按 Zotero 分类共现 + 标题相似连接相关文献（青绿色虚线）
+                </span>
+              </span>
+            </label>
+
             <PhysicsSlider
               label="节点斥力"
               hint="调大 → 节点之间更松散"
@@ -930,6 +997,7 @@ export function GraphView({
             const a = map.get(e.source)
             const b = map.get(e.target)
             if (!a || !b) return null
+            const isTopic = e.topicWeight !== undefined
             const active =
               hoverId === e.source || hoverId === e.target || focusId === e.source || focusId === e.target
             const nearFocus =
@@ -938,6 +1006,7 @@ export function GraphView({
             const fadedByHub =
               !focusActive && Boolean(hubLayer) && (!hubLayer!.sharp.has(e.source) || !hubLayer!.sharp.has(e.target))
             let opacity = focusActive ? (nearFocus ? 0.6 : 0.07) : active ? 0.7 : 0.22
+            if (isTopic) opacity = focusActive ? (nearFocus ? 0.4 : 0.05) : active ? 0.55 : 0.12
             if (fadedByHub && !active) opacity = Math.min(opacity, 0.08)
             const width = focusActive ? (nearFocus ? 1.6 : 1) : active ? 1.8 : 1.2
             return (
@@ -947,9 +1016,16 @@ export function GraphView({
                 y1={a.y}
                 x2={b.x}
                 y2={b.y}
-                stroke={active ? 'hsl(var(--primary))' : 'hsl(var(--muted-foreground))'}
+                stroke={
+                  isTopic
+                    ? '#2aa1a8'
+                    : active
+                      ? 'hsl(var(--primary))'
+                      : 'hsl(var(--muted-foreground))'
+                }
                 strokeOpacity={opacity}
-                strokeWidth={width / cam.zoom}
+                strokeWidth={(isTopic ? width * 0.8 : width) / cam.zoom}
+                strokeDasharray={isTopic ? `${6 / cam.zoom} ${4 / cam.zoom}` : undefined}
               />
             )
           })}

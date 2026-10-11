@@ -54,3 +54,7 @@ npm-debug.log*
 
 # Kimi Work runtime files
 *.local
+
+# electron-builder 临时输出（本机 .asar 被锁时会残留）
+release-out/
+release[0-9]/

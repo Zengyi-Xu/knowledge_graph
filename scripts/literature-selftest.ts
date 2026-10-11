@@ -434,6 +434,56 @@ async function main() {
     assert.equal(r.ok, false)
   })
 
+  console.log('\nK. 话题相关边（tokenize / buildTopicEdges）')
+  const { tokenize, buildTopicEdges } = await import('@/lib/topicLinks')
+  const lit = (id: string, title: string, collections: string[]): Note => ({
+    ...litNote(),
+    id,
+    title,
+    literature: { ...litNote().literature!, collections },
+  })
+  await check('tokenize：英文按词、中文按字、停用词剔除', () => {
+    const t = tokenize('Silicon Photonics: A Review of the State of the Art 硅光研究')
+    assert.ok(t.includes('silicon') && t.includes('photonics'))
+    assert.ok(!t.includes('a') && !t.includes('the') && !t.includes('of'))
+    assert.ok(t.includes('硅') && t.includes('光'))
+  })
+  await check('共享分类 → 共现边，权重 = Jaccard；同集合成员相连', () => {
+    const edges = buildTopicEdges([
+      lit('a', 'Alpha waves', ['硅光/调制器']),
+      lit('b', 'Beta particles', ['硅光/调制器']),
+      lit('c', 'Gamma rays', ['量子计算']),
+    ])
+    const ab = edges.find((e) => (e.a === 'a' && e.b === 'b') || (e.a === 'b' && e.b === 'a'))
+    assert.ok(ab, '同分类的两篇应有共现边')
+    assert.equal(ab!.kind, 'collection')
+    assert.ok(Math.abs(ab!.weight - 1) < 1e-6)
+    assert.ok(!edges.some((e) => e.a === 'a' && e.b === 'c' || e.a === 'c' && e.b === 'a'))
+  })
+  await check('标题相似（无共享分类）→ 文本边，需共享 ≥2 词', () => {
+    const edges = buildTopicEdges([
+      lit('a', 'On-chip lithium niobate modulators', []),
+      lit('b', 'On-chip lithium niobate photonics', []),
+      lit('c', 'Completely different topic here', []),
+    ])
+    const ab = edges.find((e) => (e.a === 'a' && e.b === 'b') || (e.a === 'b' && e.b === 'a'))
+    assert.ok(ab, '标题高度相似应有文本边')
+    assert.equal(ab!.kind, 'title')
+    assert.ok(!edges.some((e) => (e.a === 'a' && e.b === 'c') || (e.a === 'c' && e.b === 'a')))
+  })
+  await check('maxPerNode 截断：hub 不会连出超过上限的边', () => {
+    const all = ['a', 'b', 'c', 'd', 'e'].map((id, i) =>
+      lit(id, `Shared collection paper ${i}`, ['大方向/共同'])
+    )
+    const edges = buildTopicEdges(all, { maxPerNode: 2 })
+    const deg = new Map<string, number>()
+    for (const e of edges) {
+      deg.set(e.a, (deg.get(e.a) ?? 0) + 1)
+      deg.set(e.b, (deg.get(e.b) ?? 0) + 1)
+    }
+    for (const [, d] of deg) assert.ok(d <= 2, `度数 ${d} 超过 maxPerNode=2`)
+  })
+
   console.log(`\n结果：${passed} 通过，${failures.length} 失败`)
   if (failures.length) {
     for (const f of failures) console.log(`  - ${f}`)
