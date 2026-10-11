@@ -544,6 +544,7 @@ export function useNotes() {
       content: partial.content ?? '',
       createdAt: now,
       updatedAt: now,
+      ...(partial.literature ? { literature: partial.literature } : {}),
     }
     setNotes((prev) => [note, ...prev])
     return note

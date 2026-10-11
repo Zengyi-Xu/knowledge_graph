@@ -23,9 +23,10 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Trash2, Download, Check, Upload, Palette, MoreVertical, RefreshCw, Pencil } from 'lucide-react'
+import { Trash2, Download, Check, Upload, Palette, MoreVertical, RefreshCw, Pencil, ClipboardCopy } from 'lucide-react'
 import { toast } from 'sonner'
 import { readSetting, writeSetting } from '@/lib/env'
+import { copyCitationFor } from '@/lib/copyCitation'
 
 const THEME_KEY = 'preview-theme-v1'
 const CUSTOM_THEME_KEY = 'custom-preview-theme-v1'
@@ -438,6 +439,20 @@ function LiteratureFields({
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs font-medium text-muted-foreground">文献信息</span>
         <span className="text-xs text-muted-foreground">作者一行一个，如 Zhang, San</span>
+        <div className="ml-auto">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="h-7 text-xs">
+                <ClipboardCopy className="mr-1 h-3 w-3" /> 复制引用
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => void copyCitationFor(note, 'gb')}>GB/T 7714</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => void copyCitationFor(note, 'apa')}>APA</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => void copyCitationFor(note, 'bibtex')}>BibTeX</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
       <div className="grid gap-2 md:grid-cols-2">
         <Textarea

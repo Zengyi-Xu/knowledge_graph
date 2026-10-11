@@ -4,6 +4,9 @@ import { NoteList } from '@/components/NoteList'
 import { NoteEditor } from '@/components/NoteEditor'
 import { GraphView } from '@/components/GraphView'
 import type { Filters } from '@/components/GraphView'
+import { LiteratureView } from '@/components/LiteratureView'
+import { makeCitekey } from '@/lib/citekey'
+import { toLiteratureMeta, type ImportedLit } from '@/lib/literature'
 import { ConflictDialog } from '@/components/ConflictDialog'
 import { FolderMoveDialog } from '@/components/FolderMoveDialog'
 import { NOTE_TYPE_META, GRADE_META } from '@/types/note'
@@ -24,6 +27,7 @@ import {
   PanelLeft,
   RefreshCw,
   Columns2,
+  BookOpen,
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import {
@@ -43,7 +47,7 @@ import { APP_NAME, ENV_LABEL, isDevApp, readSetting, storageKey, writeSetting } 
 import type { GraphPhysics } from '@/components/GraphView'
 import { loadPhysics, savePhysics } from '@/components/GraphView'
 
-type View = 'notes' | 'graph' | 'both'
+type View = 'notes' | 'graph' | 'both' | 'literature'
 
 export default function App() {
   const api = useNotes()
@@ -130,6 +134,29 @@ export default function App() {
     setActiveId(n.id)
     setView((v) => (v === 'both' ? 'both' : 'notes'))
     return n
+  }
+
+  /** 文献导入：逐条创建 literature 笔记，citekey 撞名自动追加后缀 */
+  const importLiterature = (items: ImportedLit[]) => {
+    const existing = new Set(
+      notes.filter((n) => n.literature?.citekey).map((n) => n.literature!.citekey),
+    )
+    let lastId: string | null = null
+    for (const item of items) {
+      const citekey = makeCitekey({ authors: item.authors, year: item.year }, item.title, existing)
+      existing.add(citekey)
+      const n = api.createNote({
+        title: item.title || '未命名文献',
+        type: 'literature',
+        grade: '',
+        tags: [],
+        content: '',
+        literature: toLiteratureMeta(item, citekey),
+      })
+      lastId = n.id
+    }
+    if (lastId) setActiveId(lastId)
+    toast.success(`已导入 ${items.length} 篇文献`)
   }
 
   const exportJson = () => {
@@ -636,6 +663,9 @@ export default function App() {
                 <TabsTrigger value="both">
                   <Columns2 className="mr-1.5 h-4 w-4" /> 并列
                 </TabsTrigger>
+                <TabsTrigger value="literature">
+                  <BookOpen className="mr-1.5 h-4 w-4" /> 文献
+                </TabsTrigger>
               </TabsList>
             </Tabs>
             {view !== 'notes' && (
@@ -653,6 +683,8 @@ export default function App() {
                 <Button onClick={() => createNote()}>新建第一篇笔记</Button>
               </div>
             )
+          ) : view === 'literature' ? (
+            <LiteratureView notes={notes} onOpenNote={openNote} onImport={importLiterature} />
           ) : view === 'graph' ? (
             <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 xl:flex-row">
               {filterPanel}
