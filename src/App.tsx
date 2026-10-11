@@ -10,6 +10,7 @@ import { toLiteratureMeta, type ImportedLit } from '@/lib/literature'
 import type { ZoteroSyncUpdate } from '@/lib/zoteroSync'
 import { ConflictDialog } from '@/components/ConflictDialog'
 import { FolderMoveDialog } from '@/components/FolderMoveDialog'
+import { AiPanel } from '@/components/AiPanel'
 import { NOTE_TYPE_META, GRADE_META } from '@/types/note'
 import type { NoteType, Grade, Note } from '@/types/note'
 import { Button } from '@/components/ui/button'
@@ -29,6 +30,7 @@ import {
   RefreshCw,
   Columns2,
   BookOpen,
+  Sparkles,
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import {
@@ -50,6 +52,25 @@ import { loadPhysics, savePhysics } from '@/components/GraphView'
 
 type View = 'notes' | 'graph' | 'both' | 'literature'
 
+const AI_LOG_KEY = 'ai-log-v1'
+interface AiLogEntry {
+  at: number
+  applied: number
+  created: number
+  updated: number
+}
+
+/** AI 运行日志（脱敏：时间/条数，不含内容不含 key），失败不阻塞 */
+function appendAiLog(entry: AiLogEntry) {
+  try {
+    const list = JSON.parse(readSetting(AI_LOG_KEY) ?? '[]') as AiLogEntry[]
+    list.unshift(entry)
+    writeSetting(AI_LOG_KEY, JSON.stringify(list.slice(0, 50)))
+  } catch {
+    /* 日志失败静默 */
+  }
+}
+
 export default function App() {
   const api = useNotes()
   const { notes, hydrated, replaceAll, vault } = api
@@ -61,6 +82,8 @@ export default function App() {
   const fileRef = useRef<HTMLInputElement>(null)
   const mdRef = useRef<HTMLInputElement>(null)
   const [syncPath, setSyncPath] = useState(() => readSetting(SYNC_PATH_KEY) ?? '')
+  const [aiOpen, setAiOpen] = useState(false)
+  const [aiTask, setAiTask] = useState<import('@/lib/aiPrompts').AiTask | null>(null)
   const [autoSync, setAutoSync] = useState(() => readSetting(AUTO_SYNC_KEY) === '1')
   const [physics, setPhysics] = useState<GraphPhysics>(() => loadPhysics())
   const [syncing, setSyncing] = useState(false)
@@ -174,6 +197,40 @@ export default function App() {
       count++
     }
     toast.success(`已同步 ${count} 篇文献的分类与标签`)
+  }
+
+  /**
+   * AI 统筹：应用确认后的 operations。
+   * create 走 createNote；update/retag 按 id 或标题定位后 updateNote。
+   * 运行日志写 localStorage（脱敏：只记任务、模型、条数）。
+   */
+  const applyAiOps = (ops: import('@/lib/aiOps').AiOperation[]) => {
+    const byId = new Map(notes.map((n) => [n.id, n]))
+    const byTitle = new Map(notes.map((n) => [n.title.trim(), n]))
+    let created = 0
+    let updated = 0
+    for (const op of ops) {
+      if (op.type === 'create') {
+        api.createNote({ title: op.title, type: op.noteType, grade: '', tags: op.tags, content: op.content })
+        created++
+        continue
+      }
+      const target = (op.id && byId.get(op.id)) || (op.title && byTitle.get(op.title.trim()))
+      if (!target) continue
+      if (op.type === 'retag') {
+        const next = new Set(target.tags)
+        for (const t of op.addTags) next.add(t)
+        for (const t of op.removeTags) next.delete(t)
+        api.updateNote(target.id, { tags: [...next] })
+      } else {
+        api.updateNote(target.id, {
+          ...(op.content !== undefined ? { content: op.content } : {}),
+          ...(op.tags ? { tags: op.tags } : {}),
+        })
+      }
+      updated++
+    }
+    appendAiLog({ at: Date.now(), applied: ops.length, created, updated })
   }
 
   const exportJson = () => {
@@ -315,6 +372,17 @@ export default function App() {
     },
     [syncPath, setBaseline],
   )
+
+  /** AI 运行前的硬门槛：先快照到同步文件，失败拒绝运行 */
+  const ensureAiSnapshot = useCallback(async () => {
+    if (!syncPath) {
+      toast.error('AI 运行前需要快照：请先用顶栏「选择同步文件」按钮设置同步文件位置')
+      return false
+    }
+    const ok = await pushToFile(true)
+    if (!ok) toast.error('快照保存失败，已拒绝 AI 运行')
+    return ok
+  }, [syncPath, pushToFile])
 
   /** 比较本地与同步文件：谁改了推谁；两边都改了就开冲突面板 */
   const checkSync = useCallback(async () => {
@@ -524,6 +592,14 @@ export default function App() {
       }}
       onOpenNote={openNote}
       onCreateNote={(t) => createNote(t)}
+      onAiUpdate={
+        n.type === 'summary'
+          ? () => {
+              setAiTask({ kind: 'update-summary', noteId: n.id })
+              setAiOpen(true)
+            }
+          : undefined
+      }
     />
   )
 
@@ -565,6 +641,9 @@ export default function App() {
           </Button>
           <Button variant="outline" size="sm" onClick={() => mdRef.current?.click()}>
             <FileUp className="mr-1 h-3.5 w-3.5" /> 导入 .md
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => { setAiTask(null); setAiOpen(true) }} title="调用本机 Kimi 模型网关，统筹整理笔记（改动需确认后落盘）">
+            <Sparkles className="mr-1 h-3.5 w-3.5 text-amber-500" /> AI 统筹
           </Button>
           <Button variant="outline" size="sm" onClick={exportJson}>导出备份</Button>
         </div>
@@ -768,6 +847,19 @@ export default function App() {
           }}
         />
       )}
+
+      <AiPanel
+        open={aiOpen}
+        onClose={() => {
+          setAiOpen(false)
+          setAiTask(null)
+        }}
+        notes={notes}
+        ensureSnapshot={ensureAiSnapshot}
+        onApply={applyAiOps}
+        onGoLiterature={() => setView('literature')}
+        initialTask={aiTask}
+      />
 
       <Toaster position="bottom-right" richColors />
     </div>

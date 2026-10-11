@@ -4,6 +4,7 @@ const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 const { listVault, readVaultFiles, writeVault } = require('./vaultFs.cjs')
 const { readZotero } = require('./zoteroFs.cjs')
+const { aiStatus, aiComplete } = require('./aiGateway.cjs')
 const attachmentFs = require('./attachmentFs.cjs')
 
 const APP_SCHEME = 'kg'
@@ -216,6 +217,36 @@ function registerZoteroHandlers() {
 }
 
 /**
+ * AI 网关通道：状态查询（脱敏）与非流式补全。
+ * 渲染端只能传 prompt/system/maxTokens，端点与 key 全部由主进程从
+ * Kimi Code 配置里读，调用方无法指定任意 URL。
+ */
+function registerAiHandlers() {
+  ipcMain.handle('ai:status', async (_event, payload) => {
+    const configPath =
+      payload && typeof payload.configPath === 'string' && payload.configPath
+        ? payload.configPath
+        : undefined
+    return aiStatus(configPath)
+  })
+
+  ipcMain.handle('ai:complete', async (_event, payload) => {
+    if (!payload || typeof payload !== 'object' || typeof payload.prompt !== 'string') {
+      throw new Error('Invalid ai payload')
+    }
+    return aiComplete({
+      prompt: payload.prompt,
+      system: typeof payload.system === 'string' ? payload.system : undefined,
+      maxTokens: typeof payload.maxTokens === 'number' ? payload.maxTokens : undefined,
+      configPath:
+        typeof payload.configPath === 'string' && payload.configPath
+          ? payload.configPath
+          : undefined,
+    })
+  })
+}
+
+/**
  * 附件（vault 内 attachments/ 目录）相关通道。
  * 参数校验风格与 vault 通道一致：dir 必须是字符串，rel 由 attachmentFs 做路径白名单校验。
  */
@@ -291,6 +322,7 @@ if (!hasSingleInstanceLock) {
     registerVaultHandlers()
     registerAttachmentHandlers()
     registerZoteroHandlers()
+    registerAiHandlers()
     createWindow()
 
     app.on('activate', () => {

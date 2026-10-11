@@ -72,6 +72,21 @@ declare global {
           collectionPaths: string[]
         }[]
       }>
+
+      // AI 网关：状态里的 keyPreview 已脱敏，绝不包含完整 key
+      aiStatus: (configPath?: string) => Promise<
+        | { configured: true; baseUrl: string; model: string; keyPreview: string }
+        | { configured: false; error: string }
+      >
+      aiComplete: (payload: {
+        prompt: string
+        system?: string
+        maxTokens?: number
+        configPath?: string
+      }) => Promise<
+        | { ok: true; text: string; model: string; usage: unknown }
+        | { ok: false; error: string }
+      >
     }
   }
 }

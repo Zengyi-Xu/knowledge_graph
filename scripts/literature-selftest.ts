@@ -391,6 +391,49 @@ async function main() {
     assert.equal(plan.unmatchedZotero[0].zoteroKey, 6)
   })
 
+  console.log('\nJ. AI operations 校验（parseAiOperations / resolveOps）')
+  const { parseAiOperations, resolveOps } = await import('@/lib/aiOps')
+  await check('纯 JSON 与 ```json 代码块都能解析', () => {
+    const bare = parseAiOperations('{"operations":[{"type":"create","noteType":"summary","title":"T","tags":[],"content":"c"}]}')
+    assert.equal(bare.ok, true)
+    const fenced = parseAiOperations('说明文字\n```json\n{"operations":[]}\n```\n尾巴')
+    assert.equal(fenced.ok, true)
+    if (fenced.ok) assert.equal(fenced.ops.length, 0)
+  })
+  await check('非法 JSON 拒绝并附原始输出预览', () => {
+    const r = parseAiOperations('operations: [create]')
+    assert.equal(r.ok, false)
+    if (!r.ok) assert.ok(r.rawPreview.length > 0)
+  })
+  await check('schema 校验失败给出字段级原因（缺 title / 未知 noteType / 未知操作）', () => {
+    const noTitle = parseAiOperations('{"operations":[{"type":"create","noteType":"summary"}]}')
+    assert.equal(noTitle.ok, false)
+    const badType = parseAiOperations('{"operations":[{"type":"create","noteType":"wizard","title":"x"}]}')
+    assert.equal(badType.ok, false)
+    const badOp = parseAiOperations('{"operations":[{"type":"delete","id":"x"}]}')
+    assert.equal(badOp.ok, false)
+    const badField = parseAiOperations('{"operations":[{"type":"retag","id":"x","addTags":["ok"],"bogus":1}]}')
+    // zod 默认 strip 未知键，retag 结构合法即通过
+    assert.equal(badField.ok, true)
+  })
+  await check('resolveOps：id 精确匹配、标题匹配、找不到目标记 error', () => {
+    const note = litNote({ doi: '' })
+    const ops = [
+      { type: 'retag', id: note.id, addTags: ['a'], removeTags: [] },
+      { type: 'update', title: note.title, content: '新正文' },
+      { type: 'retag', id: 'ghost', addTags: ['b'], removeTags: [] },
+    ] as import('@/lib/aiOps').AiOperation[]
+    const planned = resolveOps(ops, [note])
+    assert.equal(planned[0].kind, 'update')
+    assert.equal(planned[1].kind, 'update')
+    assert.equal(planned[2].kind, 'error')
+  })
+  await check('超上限的操作数（>500）被拒绝', () => {
+    const many = { operations: Array.from({ length: 501 }, () => ({ type: 'retag', id: 'x', addTags: [], removeTags: [] })) }
+    const r = parseAiOperations(JSON.stringify(many))
+    assert.equal(r.ok, false)
+  })
+
   console.log(`\n结果：${passed} 通过，${failures.length} 失败`)
   if (failures.length) {
     for (const f of failures) console.log(`  - ${f}`)

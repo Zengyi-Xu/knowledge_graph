@@ -24,4 +24,8 @@ contextBridge.exposeInMainWorld('knowledgeGraphDesktop', {
 
   // Zotero：只读同步 zotero.sqlite（需先退出 Zotero 释放锁）
   readZotero: (dbPath) => ipcRenderer.invoke('zotero:read', { dbPath }),
+
+  // AI 网关：状态（脱敏）与补全；端点/key 由主进程从 Kimi Code 配置读取
+  aiStatus: (configPath) => ipcRenderer.invoke('ai:status', { configPath }),
+  aiComplete: (payload) => ipcRenderer.invoke('ai:complete', payload),
 })

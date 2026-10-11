@@ -24,7 +24,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Trash2, Download, Check, Upload, Palette, MoreVertical, RefreshCw, Pencil, ClipboardCopy } from 'lucide-react'
+import { Trash2, Download, Check, Upload, Palette, MoreVertical, RefreshCw, Pencil, ClipboardCopy, Sparkles } from 'lucide-react'
 import { toast } from 'sonner'
 import { readSetting, writeSetting } from '@/lib/env'
 import { copyCitationFor } from '@/lib/copyCitation'
@@ -49,11 +49,13 @@ interface Props {
   onDelete: () => void
   onOpenNote: (id: string) => void
   onCreateNote: (title: string) => void
+  /** 汇总笔记专属：「AI 更新」入口（未提供则不显示提示条） */
+  onAiUpdate?: () => void
   /** true：左源码右渲染同时显示；false：保留「预览/编辑」切换 */
   splitView?: boolean
 }
 
-export function NoteEditor({ note, allNotes, onChange, onDelete, onOpenNote, onCreateNote, splitView = false }: Props) {
+export function NoteEditor({ note, allNotes, onChange, onDelete, onOpenNote, onCreateNote, onAiUpdate, splitView = false }: Props) {
   const [tagInput, setTagInput] = useState('')
   const [tab, setTab] = useState<'edit' | 'preview'>('preview')
   const [theme, setTheme] = useState<PreviewTheme>(savedTheme)
@@ -322,6 +324,15 @@ export function NoteEditor({ note, allNotes, onChange, onDelete, onOpenNote, onC
             </Button>
           </div>
         </div>
+        {note.type === 'summary' && onAiUpdate && (
+          <div className="flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-700 dark:text-amber-400">
+            <Sparkles className="h-3.5 w-3.5 shrink-0" />
+            <span className="min-w-0 flex-1">此笔记由 AI 统筹生成，可人工修订。</span>
+            <Button variant="outline" size="sm" className="h-7 shrink-0" onClick={onAiUpdate}>
+              <Sparkles className="mr-1 h-3 w-3" /> AI 更新
+            </Button>
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-2">
           <Select
             value={note.type}
