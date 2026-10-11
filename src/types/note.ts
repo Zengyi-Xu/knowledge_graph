@@ -1,4 +1,4 @@
-export type NoteType = 'person' | 'task' | 'skill' | 'question' | 'other'
+export type NoteType = 'person' | 'task' | 'skill' | 'question' | 'literature' | 'other'
 
 export type Grade = 'pi' | 'postdoc' | 'phd' | 'master' | 'undergrad' | 'engineer' | 'staff' | ''
 
@@ -12,6 +12,24 @@ export interface Note {
   content: string
   createdAt: number
   updatedAt: number
+  /** 文献元数据，仅 type === 'literature' 时有值 */
+  literature?: LiteratureMeta
+}
+
+/** 文献笔记的元数据（frontmatter 里的 authors/venue/year/doi/citekey/attachments） */
+export interface LiteratureMeta {
+  /** 全名，如 ["Zhang, San", "Li, Si"] */
+  authors: string[]
+  /** 期刊/会议名，可为空 */
+  venue: string
+  /** 发表年；未知为空串 */
+  year: number | ''
+  /** 可为空 */
+  doi: string
+  /** 引用键，如 zhang2024silicon；库内唯一 */
+  citekey: string
+  /** 附件 id 列表（见 docs/VAULT_FORMAT.md 的 attachments/ 约定） */
+  attachments: string[]
 }
 
 export const NOTE_TYPE_META: Record<NoteType, { label: string; color: string; bg: string }> = {
@@ -19,6 +37,7 @@ export const NOTE_TYPE_META: Record<NoteType, { label: string; color: string; bg
   task: { label: '项目', color: '#4a90e8', bg: 'rgba(74,144,232,0.14)' },
   skill: { label: '技能', color: '#3fae7a', bg: 'rgba(63,174,122,0.14)' },
   question: { label: '学习', color: '#b06ee0', bg: 'rgba(176,110,224,0.14)' },
+  literature: { label: '文献', color: '#2aa1a8', bg: 'rgba(42,161,168,0.14)' },
   other: { label: '其他', color: '#8a93a6', bg: 'rgba(138,147,166,0.14)' },
 }
 

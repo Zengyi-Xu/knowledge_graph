@@ -52,6 +52,7 @@ function mk(title: string, extra: Partial<Note> = {}): Note {
     content: extra.content ?? '正文',
     createdAt,
     updatedAt: extra.updatedAt ?? createdAt + 1000,
+    ...(extra.literature ? { literature: extra.literature } : {}),
   }
 }
 
@@ -262,6 +263,64 @@ async function main() {
     const plan = planFor(renamed, index, ['人物/甲.md'], written, '')
     assert.deepEqual(plan.writes.map((w) => w.file), ['人物/甲（改）.md'])
     assert.deepEqual(plan.deletes, ['人物/甲.md'])
+  })
+
+  console.log('\nD2. 文献类型（literature）')
+  const litNote = mk('Silicon photonics', {
+    id: 'lit-1',
+    type: 'literature',
+    grade: '',
+    tags: ['方向:硅光'],
+    content: '文献笔记正文',
+    literature: {
+      authors: ['Zhang, San', 'Li, Si'],
+      venue: 'Nature Photonics',
+      year: 2024,
+      doi: '10.1038/s41566-024-xxxx',
+      citekey: 'zhang2024silicon',
+      attachments: ['abc123'],
+    },
+  })
+  await check('文献六字段 md 往返全部还原', () => {
+    const back = parseNoteMarkdown(toMarkdown(litNote), 'x')
+    assert.equal(back.needsRewrite, false)
+    assert.deepEqual(back.note, litNote)
+  })
+  await check('文献空值字段也稳定写出并还原', () => {
+    const empty: Note = {
+      ...litNote,
+      id: 'lit-2',
+      literature: { authors: [], venue: '', year: '', doi: '', citekey: '', attachments: [] },
+    }
+    const text = toMarkdown(empty)
+    assert.ok(text.includes('authors: []'))
+    assert.ok(text.includes('venue: ""'))
+    assert.ok(text.includes('year: ""'))
+    assert.deepEqual(parseNoteMarkdown(text, 'x').note, empty)
+  })
+  await check('旧格式 md（无文献字段）解析后 literature 为 undefined', () => {
+    const old = mk('老笔记', { id: 'old-1', type: 'other', grade: '' })
+    const back = parseNoteMarkdown(toMarkdown(old), 'x')
+    assert.equal(back.note.literature, undefined)
+  })
+  await check('非 literature 类型即使带文献字段也不挂 literature', () => {
+    const text = toMarkdown(litNote).replace('type: literature', 'type: other')
+    const back = parseNoteMarkdown(text, 'x')
+    assert.equal(back.note.type, 'other')
+    assert.equal(back.note.literature, undefined)
+  })
+  await check('literature 笔记落「文献/」文件夹', () => {
+    const names = assignFileNames([litNote], null, [])
+    assert.equal(names.get('lit-1'), '文献/Silicon photonics.md')
+  })
+  await check('citekey 生成与撞名追加 b/c/d', async () => {
+    const { makeCitekey } = await import('@/lib/citekey')
+    const lit = { authors: ['Zhang, San'], year: 2024 as number | '' }
+    assert.equal(makeCitekey(lit, 'Silicon photonics for quantum', new Set()), 'zhang2024silicon')
+    // 无逗号作者：整个首词作为姓
+    assert.equal(makeCitekey({ authors: ['Zhang San'], year: 2024 }, 'Silicon', new Set()), 'zhang2024silicon')
+    assert.equal(makeCitekey(lit, 'Silicon', new Set(['zhang2024silicon'])), 'zhang2024siliconb')
+    assert.equal(makeCitekey(lit, 'Silicon', new Set(['zhang2024silicon', 'zhang2024siliconb'])), 'zhang2024siliconc')
   })
 
   console.log('\nE. 真实磁盘往返（electron/vaultFs.cjs）')

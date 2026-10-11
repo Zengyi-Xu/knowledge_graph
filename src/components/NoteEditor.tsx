@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { NOTE_TYPE_META, GRADE_META } from '@/types/note'
-import type { Note, NoteType, Grade } from '@/types/note'
+import type { Note, NoteType, Grade, LiteratureMeta } from '@/types/note'
+import { makeCitekey } from '@/lib/citekey'
 import { PreviewContent } from './PreviewContent'
 import type { PreviewTheme } from './PreviewContent'
 import { Button } from '@/components/ui/button'
@@ -22,7 +23,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Trash2, Download, Check, Upload, Palette, MoreVertical } from 'lucide-react'
+import { Trash2, Download, Check, Upload, Palette, MoreVertical, RefreshCw, Pencil } from 'lucide-react'
 import { toast } from 'sonner'
 import { readSetting, writeSetting } from '@/lib/env'
 
@@ -292,7 +293,17 @@ export function NoteEditor({ note, allNotes, onChange, onDelete, onOpenNote, onC
         <div className="flex flex-wrap items-center gap-2">
           <Select
             value={note.type}
-            onValueChange={(v) => onChange({ type: v as NoteType, ...(v !== 'person' ? { grade: '' as Grade } : {}) })}
+            onValueChange={(v) => {
+              const t = v as NoteType
+              onChange({
+                type: t,
+                ...(t !== 'person' ? { grade: '' as Grade } : {}),
+                // 切到文献时补一个空元数据对象，编辑区才有所依托
+                ...(t === 'literature' && !note.literature
+                  ? { literature: { authors: [], venue: '', year: '', doi: '', citekey: '', attachments: [] } }
+                  : {}),
+              })
+            }}
           >
             <SelectTrigger className="w-[130px]">
               <SelectValue />
@@ -358,6 +369,11 @@ export function NoteEditor({ note, allNotes, onChange, onDelete, onOpenNote, onC
         </div>
       </div>
 
+      {/* 文献元数据编辑区：仅文献类型显示 */}
+      {note.type === 'literature' && (
+        <LiteratureFields note={note} allNotes={allNotes} onChange={onChange} />
+      )}
+
       {/* 编辑区：分栏（源码 | 渲染）或 预览/编辑切换 */}
       {splitView ? (
         <div className="flex min-h-0 flex-1 flex-col">
@@ -384,6 +400,109 @@ export function NoteEditor({ note, allNotes, onChange, onDelete, onOpenNote, onC
           </div>
         </Tabs>
       )}
+    </div>
+  )
+}
+
+/** 文献笔记的元数据编辑区：作者（一行一个）、venue、year、doi、citekey */
+function LiteratureFields({
+  note,
+  allNotes,
+  onChange,
+}: {
+  note: Note
+  allNotes: Note[]
+  onChange: (patch: Partial<Note>) => void
+}) {
+  const lit = note.literature ?? { authors: [], venue: '', year: '', doi: '', citekey: '', attachments: [] }
+  const [editingKey, setEditingKey] = useState(false)
+
+  const patch = (p: Partial<LiteratureMeta>) => onChange({ literature: { ...lit, ...p } })
+
+  const existingKeys = useMemo(
+    () =>
+      new Set(
+        allNotes.filter((n) => n.id !== note.id && n.literature?.citekey).map((n) => n.literature!.citekey),
+      ),
+    [allNotes, note.id],
+  )
+
+  // 按「第一作者姓 + 年份 + 标题首词」重新生成，撞名自动追加后缀
+  const regenerate = () => {
+    patch({ citekey: makeCitekey(lit, note.title, existingKeys) })
+    setEditingKey(false)
+  }
+
+  return (
+    <div className="space-y-2 border-b p-3 md:p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-medium text-muted-foreground">文献信息</span>
+        <span className="text-xs text-muted-foreground">作者一行一个，如 Zhang, San</span>
+      </div>
+      <div className="grid gap-2 md:grid-cols-2">
+        <Textarea
+          value={lit.authors.join('\n')}
+          onChange={(e) =>
+            patch({ authors: e.target.value.split('\n').map((s) => s.trim()).filter(Boolean) })
+          }
+          placeholder={'作者（一行一个）\nZhang, San\nLi, Si'}
+          className="min-h-20 resize-none font-mono text-sm"
+        />
+        <div className="grid content-start gap-2">
+          <Input
+            value={lit.venue}
+            onChange={(e) => patch({ venue: e.target.value })}
+            placeholder="期刊 / 会议（可为空）"
+            className="h-9 text-sm"
+          />
+          <div className="flex gap-2">
+            <Input
+              value={lit.year === '' ? '' : String(lit.year)}
+              onChange={(e) => {
+                const s = e.target.value.trim()
+                patch({ year: /^\d{1,4}$/.test(s) ? Number(s) : '' })
+              }}
+              placeholder="年份"
+              inputMode="numeric"
+              className="h-9 w-24 text-sm"
+            />
+            <Input
+              value={lit.doi}
+              onChange={(e) => patch({ doi: e.target.value })}
+              placeholder="DOI（可为空）"
+              className="h-9 min-w-0 flex-1 font-mono text-sm"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            {editingKey ? (
+              <Input
+                value={lit.citekey}
+                onChange={(e) => patch({ citekey: e.target.value.trim() })}
+                onBlur={() => setEditingKey(false)}
+                autoFocus
+                placeholder="citekey"
+                className="h-9 w-48 font-mono text-sm"
+              />
+            ) : (
+              <code className="rounded bg-muted px-2 py-1 text-xs text-muted-foreground">
+                {lit.citekey || '（未生成 citekey）'}
+              </code>
+            )}
+            <Button variant="outline" size="icon" className="h-8 w-8" title="按作者/年份/标题重新生成" onClick={regenerate}>
+              <RefreshCw className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-8 w-8"
+              title="手动修改 citekey"
+              onClick={() => setEditingKey(true)}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

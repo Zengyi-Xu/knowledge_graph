@@ -1,4 +1,4 @@
-import type { Note } from '@/types/note'
+import type { LiteratureMeta, Note } from '@/types/note'
 import { uid } from '@/types/note'
 
 /** 设置键基名；实际键由 src/lib/env.ts 加 `kg-` / `kg-dev-` 前缀 */
@@ -11,18 +11,38 @@ export function isDesktop(): boolean {
   return Boolean(window.knowledgeGraphDesktop?.isElectron)
 }
 
+/** 解析同步 JSON 里的 literature 字段：字段类型逐个校验，坏字段回空值 */
+function parseLiterature(raw: unknown): LiteratureMeta | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const o = raw as Record<string, unknown>
+  const year = typeof o.year === 'number' && Number.isFinite(o.year) ? o.year : ''
+  return {
+    authors: Array.isArray(o.authors) ? o.authors.filter((a): a is string => typeof a === 'string') : [],
+    venue: typeof o.venue === 'string' ? o.venue : '',
+    year,
+    doi: typeof o.doi === 'string' ? o.doi : '',
+    citekey: typeof o.citekey === 'string' ? o.citekey : '',
+    attachments: Array.isArray(o.attachments)
+      ? o.attachments.filter((a): a is string => typeof a === 'string')
+      : [],
+  }
+}
+
 /** 固定字段顺序，保证同一份笔记每次序列化结果一致，才能可靠比对 */
 function canonNote(n: Note) {
-  return {
+  const out: Record<string, unknown> = {
     id: n.id,
     title: n.title,
     type: n.type ?? 'other',
     grade: n.grade ?? '',
-    tags: Array.isArray(n.tags) ? [...n.tags] : [],
-    content: n.content ?? '',
-    createdAt: n.createdAt ?? 0,
-    updatedAt: n.updatedAt ?? 0,
   }
+  // 位置固定在 grade 之后、tags 之前；旧数据（无 literature）序列化结果不变
+  if (n.literature !== undefined) out.literature = n.literature
+  out.tags = Array.isArray(n.tags) ? [...n.tags] : []
+  out.content = n.content ?? ''
+  out.createdAt = n.createdAt ?? 0
+  out.updatedAt = n.updatedAt ?? 0
+  return out
 }
 
 /** 稳定序列化：既用于写入同步文件，也用于比对两边是否一致 */
@@ -38,16 +58,20 @@ export function parseNotes(text: string): Note[] | null {
     const now = Date.now()
     return arr
       .filter((n) => n && typeof n.title === 'string' && typeof n.content === 'string')
-      .map((n) => ({
-        id: typeof n.id === 'string' && n.id ? n.id : uid(),
-        title: n.title as string,
-        type: (n.type ?? 'other') as Note['type'],
-        grade: (n.grade ?? '') as Note['grade'],
-        tags: Array.isArray(n.tags) ? (n.tags as unknown[]).filter((t): t is string => typeof t === 'string') : [],
-        content: n.content as string,
-        createdAt: typeof n.createdAt === 'number' ? n.createdAt : now,
-        updatedAt: typeof n.updatedAt === 'number' ? n.updatedAt : now,
-      }))
+      .map((n) => {
+        const literature = n.type === 'literature' ? parseLiterature(n.literature) : undefined
+        return {
+          id: typeof n.id === 'string' && n.id ? n.id : uid(),
+          title: n.title as string,
+          type: (n.type ?? 'other') as Note['type'],
+          grade: (n.grade ?? '') as Note['grade'],
+          ...(literature ? { literature } : {}),
+          tags: Array.isArray(n.tags) ? (n.tags as unknown[]).filter((t): t is string => typeof t === 'string') : [],
+          content: n.content as string,
+          createdAt: typeof n.createdAt === 'number' ? n.createdAt : now,
+          updatedAt: typeof n.updatedAt === 'number' ? n.updatedAt : now,
+        }
+      })
   } catch {
     return null
   }

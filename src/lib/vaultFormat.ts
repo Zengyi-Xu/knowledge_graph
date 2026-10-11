@@ -7,7 +7,7 @@
  *
  * md 是唯一事实来源；meta.json 只是索引，丢了也能靠 md 里的 frontmatter 完整还原。
  */
-import type { Grade, Note, NoteType } from '@/types/note'
+import type { Grade, LiteratureMeta, Note, NoteType } from '@/types/note'
 import { GRADE_META, NOTE_TYPE_META, uid } from '@/types/note'
 
 /** meta.json 的格式标记与版本 */
@@ -107,6 +107,7 @@ export const TYPE_FOLDERS: Record<NoteType, string> = {
   task: '项目',
   skill: '技能',
   question: '学习',
+  literature: '文献',
   other: 'Inbox',
 }
 
@@ -181,6 +182,16 @@ export function toMarkdown(note: Note): string {
     `type: ${note.type}`,
   ]
   if (note.grade) fm.push(`grade: ${note.grade}`)
+  // 文献元数据：空数组/空串也写出来，字段稳定存在，解析端简单
+  if (note.type === 'literature' && note.literature) {
+    const lit = note.literature
+    fm.push(`authors: ${JSON.stringify(lit.authors ?? [])}`)
+    fm.push(`venue: ${JSON.stringify(lit.venue ?? '')}`)
+    fm.push(`year: ${typeof lit.year === 'number' ? lit.year : '""'}`)
+    fm.push(`doi: ${JSON.stringify(lit.doi ?? '')}`)
+    fm.push(`citekey: ${JSON.stringify(lit.citekey ?? '')}`)
+    fm.push(`attachments: ${JSON.stringify(lit.attachments ?? [])}`)
+  }
   fm.push(`tags: ${JSON.stringify(note.tags ?? [])}`)
   fm.push(`created: ${new Date(note.createdAt).toISOString()}`)
   fm.push(`updated: ${new Date(note.updatedAt).toISOString()}`)
@@ -307,6 +318,22 @@ export function parseNoteMarkdown(text: string, fallbackBase: string): ParsedNot
   const created = parseTime(fm.created, now)
   const updated = parseTime(fm.updated, created)
 
+  // 文献元数据：只有 literature 类型才挂载（非 literature 的 md 即使带这些字段也忽略），
+  // 缺字段时用空值补齐完整对象
+  let literature: LiteratureMeta | undefined
+  if (type === 'literature') {
+    const rawYear = str('year')
+    const yearNum = /^\d+$/.test(rawYear) ? Number(rawYear) : NaN
+    literature = {
+      authors: parseTagValue(typeof fm.authors === 'string' ? fm.authors : ''),
+      venue: str('venue'),
+      year: Number.isFinite(yearNum) ? yearNum : '',
+      doi: str('doi'),
+      citekey: str('citekey'),
+      attachments: parseTagValue(typeof fm.attachments === 'string' ? fm.attachments : ''),
+    }
+  }
+
   const needsRewrite =
     !id ||
     !str('title') ||
@@ -315,7 +342,17 @@ export function parseNoteMarkdown(text: string, fallbackBase: string): ParsedNot
     str('format') !== NOTE_FORMAT
 
   return {
-    note: { id: id || uid(), title, type, grade, tags, content: body, createdAt: created, updatedAt: updated },
+    note: {
+      id: id || uid(),
+      title,
+      type,
+      grade,
+      tags,
+      content: body,
+      createdAt: created,
+      updatedAt: updated,
+      ...(literature ? { literature } : {}),
+    },
     needsRewrite,
   }
 }

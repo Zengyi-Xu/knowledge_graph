@@ -13,6 +13,8 @@
     某仿真软件.md
   学习/                              ← 学习
     （想学的东西、想问的问题）
+  文献/                              ← 文献（literature）
+    某篇论文.md
   Inbox/                             ← 其他（未分类默认落点）
   sync/
     notes.json                       ← 全量导出：只用于同步 / 备份
@@ -30,6 +32,7 @@ frontmatter 完整还原（重建索引后文件名可能按标题重新对齐�
 | `task` 项目 | `项目/` | 课题、论文、实验任务 |
 | `skill` 技能 | `技能/` | 具体技术点、软件、方法 |
 | `question` 学习 | `学习/` | 想学的东西、想问的问题 |
+| `literature` 文献 | `文献/` | 论文、专利等文献（元数据见下） |
 | `other` 其他 | `Inbox/` | 暂时不归类的内容 |
 
 新建笔记按类型落进对应文件夹；**改类型时会弹窗确认，确认后文件连同内容一起迁移到新文件夹**。
@@ -62,12 +65,47 @@ updated: 2026-10-08T17:10:12.478Z
 | `format` | 固定 `kaust-kg-note`，用来识别「这是本应用的笔记」（历史标识，保持不变以免旧 vault 被当成外来文件） |
 | `id` | 稳定标识；改名、改内容都不变，图谱连线靠标题，同步合并靠它 |
 | `title` | 笔记标题，也是文件名来源（两者可以不同，见下） |
-| `type` | `person` / `task` / `skill` / `question` / `other` |
+| `type` | `person` / `task` / `skill` / `question` / `literature` / `other` |
 | `grade` | 仅人物笔记用：`pi` / `postdoc` / `phd` / `master` / `undergrad` / `engineer` / `staff` |
 | `tags` | 字符串数组；`功能:xxx` 这类带冒号的标签整套照原样保留 |
 | `created` / `updated` | ISO 时间，精确到毫秒 |
 
 正文取 frontmatter 之后的全部内容，原样保存（不做 trim、不动内部换行）。
+
+## 文献类型（literature）的 frontmatter 字段
+
+`type: literature` 的笔记在通用字段之外多六个字段，**空数组/空串也写出来**（字段稳定存在）：
+
+```markdown
+---
+format: kaust-kg-note
+id: "a5j48a0muwbz8dl"
+title: "Silicon photonics for quantum computing"
+type: literature
+authors: ["Zhang, San", "Li, Si"]
+venue: "Nature Photonics"
+year: 2024
+doi: "10.1038/s41566-024-xxxx"
+citekey: "zhang2024silicon"
+attachments: []
+tags: ["方向:硅光"]
+created: 2026-10-06T07:01:57.417Z
+updated: 2026-10-08T17:10:12.478Z
+---
+```
+
+| 字段 | 说明 |
+| --- | --- |
+| `authors` | 作者全名数组，一行一个的输入在文件里是 JSON 数组；`"Family, Given"` 或 `"Given Family"` 均可 |
+| `venue` | 期刊/会议名，可为空串 |
+| `year` | 发表年（数字）；未知时写 `year: ""` |
+| `doi` | DOI 字符串，可为空 |
+| `citekey` | 引用键（第一作者姓小写 + 年份 + 标题首词），库内唯一；由应用生成，也可手改 |
+| `attachments` | 附件 id 数组（见下文 attachments/ 约定） |
+
+非 literature 类型的 md 即使带这些字段也会被忽略（按 `type` 判断）；旧 vault 里没有这些字段的
+literature 笔记照常可读（解析端用空值补齐）。同步 JSON 里 `literature` 固定在 `grade` 之后、
+`tags` 之前输出；没有文献数据的旧笔记序列化结果逐字节不变。
 
 ## meta.json
 
