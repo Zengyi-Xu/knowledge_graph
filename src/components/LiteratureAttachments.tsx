@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { FileText, FolderOpen, Paperclip, Trash2, Upload } from 'lucide-react'
 import type { Note } from '@/types/note'
-import { uid } from '@/types/note'
+import { uid, emptyLiterature } from '@/types/note'
 import { Button } from '@/components/ui/button'
 import {
   AlertDialog,
@@ -111,7 +111,7 @@ export function LiteratureAttachments({ note, onChange, children }: Props) {
     try {
       const id = await addPdfToVault(file)
       const cur = litRef.current
-      onChange({ literature: { ...(cur ?? { authors: [], venue: '', year: '', doi: '', citekey: '', attachments: [] }), attachments: [...(cur?.attachments ?? []), id] } })
+      onChange({ literature: { ...(cur ?? emptyLiterature()), attachments: [...(cur?.attachments ?? []), id] } })
       toast.success(`已添加附件「${file.name}」`)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '添加附件失败')

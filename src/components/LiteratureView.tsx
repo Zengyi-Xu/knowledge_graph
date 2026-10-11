@@ -36,6 +36,7 @@ import { CITATION_STYLES, litToCSL } from '@/lib/literature'
 import type { CitationStyleId } from '@/lib/literature'
 import { copyCitationFor } from '@/lib/copyCitation'
 import { writeBibliographyClipboard, writeCitationClipboard } from '@/lib/rtfField'
+import { planZoteroSync, type ZoteroSyncPlan, type ZoteroSyncUpdate } from '@/lib/zoteroSync'
 import {
   Select,
   SelectContent,
@@ -49,6 +50,8 @@ interface Props {
   onOpenNote: (id: string) => void
   /** 批量创建文献笔记（citekey 撞名由调用方处理） */
   onImport: (items: ImportedLit[]) => void
+  /** 应用 Zotero 同步计划：合并 collections 与新增标签（调用方负责写库） */
+  onApplySync: (updates: ZoteroSyncUpdate[]) => void
 }
 
 type SortKey = 'title' | 'author' | 'year' | 'venue' | 'citekey'
@@ -60,12 +63,13 @@ function firstAuthorLabel(note: Note): string {
   return authors.length > 1 ? `${authors[0]} et al.` : authors[0]
 }
 
-export function LiteratureView({ notes, onOpenNote, onImport }: Props) {
+export function LiteratureView({ notes, onOpenNote, onImport, onApplySync }: Props) {
   const [search, setSearch] = useState('')
   const [sortKey, setSortKey] = useState<SortKey>('year')
   const [sortAsc, setSortAsc] = useState(false)
   const [doiOpen, setDoiOpen] = useState(false)
   const [bibOpen, setBibOpen] = useState(false)
+  const [zoteroOpen, setZoteroOpen] = useState(false)
   const [styleId, setStyleId] = useState<CitationStyleId>('gb')
 
   const literature = useMemo(() => notes.filter((n) => n.type === 'literature'), [notes])
@@ -149,6 +153,9 @@ export function LiteratureView({ notes, onOpenNote, onImport }: Props) {
           <Button variant="outline" size="sm" onClick={() => setBibOpen(true)}>
             <Import className="mr-1 h-3.5 w-3.5" /> 导入 BibTeX / RIS
           </Button>
+          <Button variant="outline" size="sm" title="读取本机 Zotero 数据库，为文献笔记同步分类并自动打标签" onClick={() => setZoteroOpen(true)}>
+            <BookOpen className="mr-1 h-3.5 w-3.5" /> 同步 Zotero 分类
+          </Button>
         </div>
       </div>
 
@@ -224,6 +231,15 @@ export function LiteratureView({ notes, onOpenNote, onImport }: Props) {
 
       <DoiImportDialog open={doiOpen} onClose={() => setDoiOpen(false)} onImport={onImport} />
       <BibImportDialog open={bibOpen} onClose={() => setBibOpen(false)} onImport={onImport} />
+      <ZoteroSyncDialog
+        open={zoteroOpen}
+        notes={notes}
+        onClose={() => setZoteroOpen(false)}
+        onApply={(updates) => {
+          onApplySync(updates)
+          setZoteroOpen(false)
+        }}
+      />
     </div>
   )
 }
@@ -330,6 +346,102 @@ function BibImportDialog({
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>取消</Button>
           <Button onClick={() => void run()} disabled={!text.trim()}>导入</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/** 默认的 Zotero 数据库位置（Windows 安装版）；用户可在弹窗里改 */
+const DEFAULT_ZOTERO_DB = 'C:\\Users\\Administrator\\Zotero\\zotero.sqlite'
+
+/** Zotero 分类同步弹窗：选库 → 读取 → 预览计划 → 确认应用 */
+function ZoteroSyncDialog({
+  open,
+  notes,
+  onClose,
+  onApply,
+}: {
+  open: boolean
+  notes: Note[]
+  onClose: () => void
+  onApply: (updates: ZoteroSyncUpdate[]) => void
+}) {
+  const [dbPath, setDbPath] = useState(DEFAULT_ZOTERO_DB)
+  const [busy, setBusy] = useState(false)
+  const [plan, setPlan] = useState<ZoteroSyncPlan | null>(null)
+
+  const desktop = typeof window !== 'undefined' ? window.knowledgeGraphDesktop : undefined
+
+  const run = async () => {
+    if (!desktop || busy) return
+    setBusy(true)
+    setPlan(null)
+    try {
+      const data = await desktop.readZotero(dbPath.trim())
+      setPlan(planZoteroSync(data.items, notes))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '读取 Zotero 失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const close = () => {
+    setPlan(null)
+    onClose()
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && close()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>同步 Zotero 分类</DialogTitle>
+        </DialogHeader>
+        {!desktop ? (
+          <p className="text-sm text-muted-foreground">仅桌面版可用：请在 Electron 应用内使用。</p>
+        ) : !plan ? (
+          <div className="space-y-2 text-sm text-muted-foreground">
+            <p>只读打开本机 Zotero 数据库，按 DOI / 标题匹配文献笔记，同步 Zotero 分类（与已有分类取并集）并自动补充「方向:」「期刊:」「年份:」标签。<strong className="text-foreground">请先把 Zotero 完全退出</strong>，否则会因数据库锁定而失败。</p>
+            <Input
+              value={dbPath}
+              onChange={(e) => setDbPath(e.target.value)}
+              placeholder="zotero.sqlite 的完整路径"
+              className="font-mono text-xs"
+            />
+          </div>
+        ) : (
+          <div className="space-y-2 text-sm text-muted-foreground">
+            <p>匹配到 {plan.matchedCount} 篇文献笔记；其中 {plan.updates.length} 篇需要更新分类或标签。</p>
+            <p>Zotero 中有 {plan.unmatchedZotero.length} 条带题名的条目在本库没有对应笔记（忽略即可，不会创建）。</p>
+            {plan.updates.length > 0 && (
+              <ul className="max-h-40 space-y-1 overflow-auto rounded border p-2 text-xs">
+                {plan.updates.slice(0, 50).map((u) => {
+                  const note = notes.find((n) => n.id === u.noteId)
+                  return (
+                    <li key={u.noteId}>
+                      <span className="font-medium text-foreground">{note?.title ?? u.noteId}</span>
+                      {u.collections.length > 0 && <span>{' · 分类 → '}{u.collections.join('；')}</span>}
+                      {u.tagsToAdd.length > 0 && <span>{' · +标签 '}{u.tagsToAdd.map((t) => `#${t}`).join(' ')}</span>}
+                    </li>
+                  )
+                })}
+                {plan.updates.length > 50 && <li>…… 共 {plan.updates.length} 条，其余从略</li>}
+              </ul>
+            )}
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={close}>取消</Button>
+          {!plan ? (
+            <Button onClick={() => void run()} disabled={busy || !dbPath.trim()}>
+              {busy ? '读取中…' : '读取并预览'}
+            </Button>
+          ) : (
+            <Button onClick={() => onApply(plan.updates)} disabled={plan.updates.length === 0}>
+              应用 {plan.updates.length} 条更新
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

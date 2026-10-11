@@ -283,5 +283,6 @@ export function toLiteratureMeta(
     doi: imported.doi,
     citekey,
     attachments: [],
+    collections: [],
   }
 }

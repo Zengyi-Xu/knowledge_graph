@@ -21,4 +21,7 @@ contextBridge.exposeInMainWorld('knowledgeGraphDesktop', {
   removeAttachment: (dir, rel) => ipcRenderer.invoke('attachments:remove', { dir, rel }),
   chooseOpenAttachment: () => ipcRenderer.invoke('attachments:choose-open'),
   chooseSaveAttachment: (defaultName) => ipcRenderer.invoke('attachments:choose-save', { defaultName }),
+
+  // Zotero：只读同步 zotero.sqlite（需先退出 Zotero 释放锁）
+  readZotero: (dbPath) => ipcRenderer.invoke('zotero:read', { dbPath }),
 })

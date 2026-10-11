@@ -192,6 +192,7 @@ export function toMarkdown(note: Note): string {
     fm.push(`doi: ${JSON.stringify(lit.doi ?? '')}`)
     fm.push(`citekey: ${JSON.stringify(lit.citekey ?? '')}`)
     fm.push(`attachments: ${JSON.stringify(lit.attachments ?? [])}`)
+    fm.push(`collections: ${JSON.stringify(lit.collections ?? [])}`)
   }
   fm.push(`tags: ${JSON.stringify(note.tags ?? [])}`)
   fm.push(`created: ${new Date(note.createdAt).toISOString()}`)
@@ -332,6 +333,7 @@ export function parseNoteMarkdown(text: string, fallbackBase: string): ParsedNot
       doi: str('doi'),
       citekey: str('citekey'),
       attachments: parseTagValue(typeof fm.attachments === 'string' ? fm.attachments : ''),
+      collections: parseTagValue(typeof fm.collections === 'string' ? fm.collections : ''),
     }
   }
 

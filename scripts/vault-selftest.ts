@@ -280,18 +280,33 @@ async function main() {
       doi: '10.1038/s41566-024-xxxx',
       citekey: 'zhang2024silicon',
       attachments: ['abc123'],
+      collections: ['硅光集成/电光调制器'],
     },
   })
-  await check('文献六字段 md 往返全部还原', () => {
+  await check('文献七字段 md 往返全部还原', () => {
     const back = parseNoteMarkdown(toMarkdown(litNote), 'x')
     assert.equal(back.needsRewrite, false)
     assert.deepEqual(back.note, litNote)
+  })
+  await check('collections 含层级路径与特殊字符时往返稳定', () => {
+    const rich: Note = {
+      ...litNote,
+      id: 'lit-col',
+      literature: {
+        ...litNote.literature!,
+        collections: ['01_论文库/Silicon Photonics / 硅光集成', '学位论文写作'],
+      },
+    }
+    const text = toMarkdown(rich)
+    const back = parseNoteMarkdown(text, 'x')
+    assert.equal(back.needsRewrite, false)
+    assert.deepEqual(back.note, rich)
   })
   await check('文献空值字段也稳定写出并还原', () => {
     const empty: Note = {
       ...litNote,
       id: 'lit-2',
-      literature: { authors: [], venue: '', year: '', doi: '', citekey: '', attachments: [] },
+      literature: { authors: [], venue: '', year: '', doi: '', citekey: '', attachments: [], collections: [] },
     }
     const text = toMarkdown(empty)
     assert.ok(text.includes('authors: []'))

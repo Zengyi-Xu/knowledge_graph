@@ -25,6 +25,9 @@ function parseLiterature(raw: unknown): LiteratureMeta | undefined {
     attachments: Array.isArray(o.attachments)
       ? o.attachments.filter((a): a is string => typeof a === 'string')
       : [],
+    collections: Array.isArray(o.collections)
+      ? o.collections.filter((a): a is string => typeof a === 'string')
+      : [],
   }
 }
 

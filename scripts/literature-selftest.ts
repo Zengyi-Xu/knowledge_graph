@@ -50,6 +50,7 @@ function litNote(partial: Partial<Note['literature']> = {}): Note {
       doi: '10.1038/s41566-024-xxxx',
       citekey: 'zhang2024silicon',
       attachments: [],
+      collections: [],
       ...partial,
     },
   }
@@ -328,6 +329,66 @@ async function main() {
     const b = buildClipboardParts([rtfItem], 'apa', 'bibliography')
     assert.ok(!b.rtf.includes('ZOTERO_ITEM'))
     assert.ok(b.plain.includes('Zhang'))
+  })
+
+  console.log('\nI. Zotero 分类同步计划（planZoteroSync）')
+  const { planZoteroSync, normalizeTitle } = await import('@/lib/zoteroSync')
+  type ZItem = import('@/lib/zoteroSync').ZoteroItem
+  const zItem = (partial: Partial<ZItem>): ZItem => ({
+    zoteroKey: 0,
+    itemType: 'journalArticle',
+    title: '',
+    doi: '',
+    year: null,
+    venue: '',
+    authors: [],
+    collectionPaths: [],
+    ...partial,
+  })
+  await check('normalizeTitle 忽略大小写 / 标点 / 空格', () => {
+    assert.equal(normalizeTitle('Silicon Photonics: A Review!'), normalizeTitle('silicon photonics a review'))
+  })
+  await check('DOI 小写一致优先匹配，产出并集 collections', () => {
+    const note = litNote({
+      doi: '10.1038/S41566-024-XXXX',
+      collections: ['已有分类'],
+    })
+    const plan = planZoteroSync(
+      [zItem({ zoteroKey: 1, doi: '10.1038/s41566-024-xxxx', title: '别的题目', collectionPaths: ['硅光/调制器'] })],
+      [note],
+    )
+    assert.equal(plan.matchedCount, 1)
+    assert.deepEqual(plan.updates[0].collections, ['已有分类', '硅光/调制器'])
+  })
+  await check('标题归一化匹配兜底（无 DOI 时）', () => {
+    const note = litNote({ doi: '' })
+    const plan = planZoteroSync(
+      [zItem({ zoteroKey: 2, title: 'Silicon Photonics for Quantum Computing!' })],
+      [note],
+    )
+    assert.equal(plan.matchedCount, 1)
+    assert.equal(plan.unmatchedZotero.length, 0)
+  })
+  await check('自动标签：方向首段 / 期刊 / 年份，且不重复已有标签', () => {
+    const note = litNote()
+    const withTags: Note = { ...note, tags: ['方向:硅光', '期刊:Nature Photonics'] }
+    const plan = planZoteroSync(
+      [zItem({ zoteroKey: 3, title: note.title, venue: 'Nature Photonics', year: 2024, collectionPaths: ['硅光/调制器', '硅光/探测器'] })],
+      [withTags],
+    )
+    assert.deepEqual(plan.updates[0].tagsToAdd, ['年份:2024'])
+    const fresh = planZoteroSync([zItem({ zoteroKey: 4, title: note.title, venue: 'Nature Photonics', year: 2024, collectionPaths: ['硅光/调制器'] })], [note])
+    assert.deepEqual(fresh.updates[0].tagsToAdd.sort(), ['期刊:Nature Photonics', '年份:2024', '方向:硅光'].sort())
+  })
+  await check('无变化时不产出更新；未匹配条目进入 unmatchedZotero', () => {
+    const base = litNote({ collections: ['硅光/调制器'] })
+    const note: Note = { ...base, tags: ['方向:硅光', '期刊:Nature Photonics', '年份:2024'] }
+    const same = zItem({ zoteroKey: 5, title: note.title, venue: 'Nature Photonics', year: 2024, collectionPaths: ['硅光/调制器'] })
+    const plan = planZoteroSync([same, zItem({ zoteroKey: 6, title: '库里没有的论文' })], [note])
+    assert.equal(plan.updates.length, 0)
+    assert.equal(plan.matchedCount, 1)
+    assert.equal(plan.unmatchedZotero.length, 1)
+    assert.equal(plan.unmatchedZotero[0].zoteroKey, 6)
   })
 
   console.log(`\n结果：${passed} 通过，${failures.length} 失败`)

@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { NOTE_TYPE_META, GRADE_META } from '@/types/note'
 import type { Note, NoteType, Grade, LiteratureMeta } from '@/types/note'
+import { emptyLiterature } from '@/types/note'
 import { makeCitekey } from '@/lib/citekey'
 import { PreviewContent } from './PreviewContent'
 import type { PreviewTheme } from './PreviewContent'
@@ -331,7 +332,7 @@ export function NoteEditor({ note, allNotes, onChange, onDelete, onOpenNote, onC
                 ...(t !== 'person' ? { grade: '' as Grade } : {}),
                 // 切到文献时补一个空元数据对象，编辑区才有所依托
                 ...(t === 'literature' && !note.literature
-                  ? { literature: { authors: [], venue: '', year: '', doi: '', citekey: '', attachments: [] } }
+                  ? { literature: emptyLiterature() }
                   : {}),
               })
             }}
@@ -427,7 +428,7 @@ function LiteratureFields({
   allNotes: Note[]
   onChange: (patch: Partial<Note>) => void
 }) {
-  const lit = note.literature ?? { authors: [], venue: '', year: '', doi: '', citekey: '', attachments: [] }
+  const lit = note.literature ?? emptyLiterature()
   const [editingKey, setEditingKey] = useState(false)
 
   const patch = (p: Partial<LiteratureMeta>) => onChange({ literature: { ...lit, ...p } })

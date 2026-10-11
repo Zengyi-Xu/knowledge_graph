@@ -7,6 +7,7 @@ import type { Filters } from '@/components/GraphView'
 import { LiteratureView } from '@/components/LiteratureView'
 import { makeCitekey } from '@/lib/citekey'
 import { toLiteratureMeta, type ImportedLit } from '@/lib/literature'
+import type { ZoteroSyncUpdate } from '@/lib/zoteroSync'
 import { ConflictDialog } from '@/components/ConflictDialog'
 import { FolderMoveDialog } from '@/components/FolderMoveDialog'
 import { NOTE_TYPE_META, GRADE_META } from '@/types/note'
@@ -157,6 +158,22 @@ export default function App() {
     }
     if (lastId) setActiveId(lastId)
     toast.success(`已导入 ${items.length} 篇文献`)
+  }
+
+  /** 应用 Zotero 同步计划：合并 collections、追加新标签（不动 venue/year 等已有元数据） */
+  const applyZoteroSync = (updates: ZoteroSyncUpdate[]) => {
+    const byId = new Map(notes.map((n) => [n.id, n]))
+    let count = 0
+    for (const u of updates) {
+      const note = byId.get(u.noteId)
+      if (!note || !note.literature) continue
+      api.updateNote(u.noteId, {
+        tags: [...new Set([...note.tags, ...u.tagsToAdd])],
+        literature: { ...note.literature, collections: u.collections },
+      })
+      count++
+    }
+    toast.success(`已同步 ${count} 篇文献的分类与标签`)
   }
 
   const exportJson = () => {
@@ -684,7 +701,7 @@ export default function App() {
               </div>
             )
           ) : view === 'literature' ? (
-            <LiteratureView notes={notes} onOpenNote={openNote} onImport={importLiterature} />
+            <LiteratureView notes={notes} onOpenNote={openNote} onImport={importLiterature} onApplySync={applyZoteroSync} />
           ) : view === 'graph' ? (
             <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 xl:flex-row">
               {filterPanel}

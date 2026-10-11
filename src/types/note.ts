@@ -30,6 +30,13 @@ export interface LiteratureMeta {
   citekey: string
   /** 附件 id 列表（见 docs/VAULT_FORMAT.md 的 attachments/ 约定） */
   attachments: string[]
+  /** Zotero 分类路径（层级用 / 压平），如 ["硅光/电光调制器"] */
+  collections: string[]
+}
+
+/** 全空文献元数据：所有「手动构造 literature 对象」的代码都应从这里起步，避免漏字段 */
+export function emptyLiterature(): LiteratureMeta {
+  return { authors: [], venue: '', year: '', doi: '', citekey: '', attachments: [], collections: [] }
 }
 
 export const NOTE_TYPE_META: Record<NoteType, { label: string; color: string; bg: string }> = {

@@ -3,6 +3,7 @@ const fs = require('node:fs/promises')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 const { listVault, readVaultFiles, writeVault } = require('./vaultFs.cjs')
+const { readZotero } = require('./zoteroFs.cjs')
 const attachmentFs = require('./attachmentFs.cjs')
 
 const APP_SCHEME = 'kg'
@@ -202,6 +203,19 @@ function registerVaultHandlers() {
 }
 
 /**
+ * Zotero 只读同步通道：仅接受用户显式给出的 zotero.sqlite 路径，
+ * 以 readonly 打开（Zotero 运行时锁库会返回友好错误），绝不写入。
+ */
+function registerZoteroHandlers() {
+  ipcMain.handle('zotero:read', async (_event, payload) => {
+    if (!payload || typeof payload.dbPath !== 'string' || !payload.dbPath) {
+      throw new Error('Invalid zotero db path')
+    }
+    return readZotero(payload.dbPath)
+  })
+}
+
+/**
  * 附件（vault 内 attachments/ 目录）相关通道。
  * 参数校验风格与 vault 通道一致：dir 必须是字符串，rel 由 attachmentFs 做路径白名单校验。
  */
@@ -276,6 +290,7 @@ if (!hasSingleInstanceLock) {
     registerSyncHandlers()
     registerVaultHandlers()
     registerAttachmentHandlers()
+    registerZoteroHandlers()
     createWindow()
 
     app.on('activate', () => {

@@ -55,6 +55,23 @@ declare global {
       } | null>
       /** 原生保存对话框选目标路径；取消返回 null */
       chooseSaveAttachment: (defaultName: string) => Promise<string | null>
+
+      // Zotero：只读同步 zotero.sqlite（需先退出 Zotero 释放锁）
+      readZotero: (
+        dbPath: string,
+      ) => Promise<{
+        collections: string[]
+        items: {
+          zoteroKey: number
+          itemType: string
+          title: string
+          doi: string
+          year: number | null
+          venue: string
+          authors: string[]
+          collectionPaths: string[]
+        }[]
+      }>
     }
   }
 }
