@@ -18,15 +18,16 @@ export const APP_NAME = '知识图谱'
 /** 构建期注入的版本号（来自 package.json），用于「关于/版本」显示 */
 export const APP_VERSION = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '0.0.0'
 
-/** 环境标签：正式版显示版本号，开发版明确标注，避免误把试验环境当正式环境 */
-export const ENV_LABEL = isDevApp() ? '开发版' : APP_VERSION
-
 /**
  * 构建期环境：由 vite.config.ts 的 `define` 注入。
  * 浏览器开发服务器 / `--mode development` 构建 = development，其余 = production。
+ * 注意：必须在 ENV_LABEL 之前初始化——ENV_LABEL 的求值会调用 isDevApp() 读到这里。
  */
 export const BUILD_ENV: 'development' | 'production' =
   typeof __APP_ENV__ === 'string' && __APP_ENV__ === 'development' ? 'development' : 'production'
+
+/** 环境标签：正式版显示版本号，开发版明确标注，避免误把试验环境当正式环境 */
+export const ENV_LABEL = isDevApp() ? '开发版' : APP_VERSION
 
 /**
  * 当前是否运行在开发环境：
