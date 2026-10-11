@@ -10,7 +10,8 @@ npm run release:portable
 
 1. `npm run build`（`tsc -b` + 生产构建到 `dist/`）；
 2. `electron-builder --win portable --publish never`；
-3. 把产物放在 `release/v<版本>/知识图谱-Portable-<版本>-x64.exe`；
+3. 把产物放在 `release/v<版本>/知识图谱-Portable-<版本>-x64.exe`
+   （electron-builder 先输出到系统临时目录，脚本再把 exe 收进 `release/v<版本>/`）；
 4. 写 `release/v<版本>/MANIFEST.json`：版本、git commit（以及是否 dirty）、构建时间、
    electron 版本、该目录下所有 exe 的 SHA-256；
 5. 往 `release/CHANGELOG.md` 追加一行。
@@ -31,9 +32,12 @@ npm run release:portable
 ## 安装程序
 
 ```bash
-npm run desktop:installer   # NSIS 安装包，同样落在 release/v<版本>/
+npm run desktop:installer   # NSIS 安装包（直接输出到 release/ 根目录，文件名带版本号）
 npm run desktop:dist        # 免安装 + 安装包
 ```
+
+需要按版本分目录归档时，用 `npm run release:portable`（免安装 exe）或手动把
+`release/` 根目录里带版本号的文件移进 `release/v<版本>/`。
 
 ## 发布到 GitHub Releases
 

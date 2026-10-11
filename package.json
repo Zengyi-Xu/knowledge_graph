@@ -44,7 +44,7 @@
       ]
     },
     "nsis": {
-      "artifactName": "v${version}/${productName}-Setup-${version}-${arch}.${ext}",
+      "artifactName": "${productName}-Setup-${version}-${arch}.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
@@ -52,7 +52,7 @@
       "shortcutName": "知识图谱"
     },
     "portable": {
-      "artifactName": "v${version}/${productName}-Portable-${version}-${arch}.${ext}"
+      "artifactName": "${productName}-Portable-${version}-${arch}.${ext}"
     }
   },
   "dependencies": {
