@@ -1,7 +1,7 @@
 {
   "name": "knowledge-graph",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "本地优先的知识图谱笔记应用",
   "author": "Zengyi Xu",
   "main": "electron/main.cjs",
@@ -36,7 +36,8 @@
       "electron/**/*",
       "package.json"
     ],
-    "asar": true,
+    "asar": false,
+    "npmRebuild": false,
     "win": {
       "icon": "build/icon.svg",
       "target": [
