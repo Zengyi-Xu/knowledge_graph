@@ -148,19 +148,32 @@ export default function App() {
     }
   }
 
+  /** 用同步文件（notes.json）覆盖当前本地笔记；仓库不再内置 notes.json */
   const reloadFromJson = async () => {
-    if (!window.confirm('将用仓库里的 notes.json 覆盖当前本地笔记，本地尚未同步的改动会丢失。继续？')) return
+    if (!isDesktop()) {
+      toast.info('浏览器版没有本地文件读取权限，请用「导入备份」选择 JSON 文件')
+      return
+    }
+    let path = syncPath
+    if (!path) {
+      const chosen = await chooseSyncFile()
+      if (!chosen) return
+      path = chosen
+    }
+    if (!window.confirm(`将用同步文件覆盖当前本地笔记：\n${path}\n\n本地尚未同步的改动会丢失。继续？`)) return
     try {
-      const r = await fetch(`${import.meta.env.BASE_URL}notes.json`, { cache: 'no-cache' })
-      if (!r.ok) throw new Error('not found')
-      const arr = (await r.json()) as Note[]
-      if (!Array.isArray(arr)) throw new Error('bad format')
-      const count = api.replaceAll(arr)
+      const text = await readSyncFileText(path)
+      if (text === null) throw new Error('not found')
+      const arr = parseNotes(text)
+      if (!arr) throw new Error('bad format')
+      const count = replaceAll(arr)
+      // 覆盖后本地与同步文件一致，刷新基线，避免下一轮轮询误判「两边都改了」
+      setBaseline(serializeNotes(arr))
       setActiveId(null)
       setFocusId(null)
-      toast.success(`已从 notes.json 重新载入 ${count} 篇笔记`)
+      toast.success(`已从同步文件重新载入 ${count} 篇笔记`)
     } catch {
-      toast.error('重新载入失败：读不到 notes.json')
+      toast.error('重新载入失败：读不到有效的同步文件')
     }
   }
 
@@ -500,7 +513,7 @@ export default function App() {
           <Button variant="outline" size="icon" title="选择同步文件" onClick={() => void chooseSyncFile()}>
             <FolderSync className="h-4 w-4" />
           </Button>
-          <Button variant="outline" size="sm" title="用仓库里的 notes.json 覆盖本地笔记" onClick={() => void reloadFromJson()}>
+          <Button variant="outline" size="sm" title="用同步文件（notes.json）覆盖本地笔记" onClick={() => void reloadFromJson()}>
             <RefreshCw className="mr-1 h-3.5 w-3.5" /> 重新载入
           </Button>
           <Button variant="outline" size="sm" onClick={() => fileRef.current?.click()}>
