@@ -108,6 +108,7 @@ export const TYPE_FOLDERS: Record<NoteType, string> = {
   skill: '技能',
   question: '学习',
   literature: '文献',
+  summary: '汇总',
   other: 'Inbox',
 }
 

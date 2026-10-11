@@ -1,4 +1,4 @@
-export type NoteType = 'person' | 'task' | 'skill' | 'question' | 'literature' | 'other'
+export type NoteType = 'person' | 'task' | 'skill' | 'question' | 'literature' | 'summary' | 'other'
 
 export type Grade = 'pi' | 'postdoc' | 'phd' | 'master' | 'undergrad' | 'engineer' | 'staff' | ''
 
@@ -38,6 +38,7 @@ export const NOTE_TYPE_META: Record<NoteType, { label: string; color: string; bg
   skill: { label: '技能', color: '#3fae7a', bg: 'rgba(63,174,122,0.14)' },
   question: { label: '学习', color: '#b06ee0', bg: 'rgba(176,110,224,0.14)' },
   literature: { label: '文献', color: '#2aa1a8', bg: 'rgba(42,161,168,0.14)' },
+  summary: { label: '汇总', color: '#e8a34a', bg: 'rgba(232,163,74,0.14)' },
   other: { label: '其他', color: '#8a93a6', bg: 'rgba(138,147,166,0.14)' },
 }
 

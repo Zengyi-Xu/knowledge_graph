@@ -314,6 +314,14 @@ async function main() {
     const names = assignFileNames([litNote], null, [])
     assert.equal(names.get('lit-1'), '文献/Silicon photonics.md')
   })
+  await check('summary 类型落「汇总/」文件夹且不挂文献字段', () => {
+    const s = mk('每周文献汇总', { id: 'sum-1', type: 'summary', grade: '' })
+    const back = parseNoteMarkdown(toMarkdown(s), 'x')
+    assert.equal(back.note.type, 'summary')
+    assert.equal(back.note.literature, undefined)
+    const names = assignFileNames([s], null, [])
+    assert.equal(names.get('sum-1'), '汇总/每周文献汇总.md')
+  })
   await check('citekey 生成与撞名追加 b/c/d', async () => {
     const { makeCitekey } = await import('@/lib/citekey')
     const lit = { authors: ['Zhang, San'], year: 2024 as number | '' }
