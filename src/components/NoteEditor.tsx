@@ -27,6 +27,7 @@ import { Trash2, Download, Check, Upload, Palette, MoreVertical, RefreshCw, Penc
 import { toast } from 'sonner'
 import { readSetting, writeSetting } from '@/lib/env'
 import { copyCitationFor } from '@/lib/copyCitation'
+import { LiteratureAttachments } from '@/components/LiteratureAttachments'
 
 const THEME_KEY = 'preview-theme-v1'
 const CUSTOM_THEME_KEY = 'custom-preview-theme-v1'
@@ -239,6 +240,33 @@ export function NoteEditor({ note, allNotes, onChange, onDelete, onOpenNote, onC
     </div>
   )
 
+  // 编辑区：分栏（源码 | 渲染）或 预览/编辑切换
+  const editorArea = splitView ? (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2 md:px-4">
+        <span className="text-xs text-muted-foreground">左：Markdown 源码 · 右：渲染结果</span>
+        {themeControls}
+      </div>
+      <div className="flex min-h-0 flex-1">
+        <div className="relative min-h-0 w-1/2 border-r">{editorBody}</div>
+        <div className="min-h-0 w-1/2 overflow-hidden">{previewBody}</div>
+      </div>
+    </div>
+  ) : (
+    <Tabs value={tab} onValueChange={(v) => setTab(v as 'edit' | 'preview')} className="flex min-h-0 flex-1 flex-col">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2 md:px-4">
+        <TabsList>
+          <TabsTrigger value="preview">预览</TabsTrigger>
+          <TabsTrigger value="edit">编辑</TabsTrigger>
+        </TabsList>
+        {themeControls}
+      </div>
+      <div className="relative min-h-0 flex-1">
+        {tab === 'edit' ? editorBody : previewBody}
+      </div>
+    </Tabs>
+  )
+
   return (
     <div className="flex h-full flex-col">
       {/* 头部：标题与元信息 */}
@@ -375,31 +403,13 @@ export function NoteEditor({ note, allNotes, onChange, onDelete, onOpenNote, onC
         <LiteratureFields note={note} allNotes={allNotes} onChange={onChange} />
       )}
 
-      {/* 编辑区：分栏（源码 | 渲染）或 预览/编辑切换 */}
-      {splitView ? (
-        <div className="flex min-h-0 flex-1 flex-col">
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2 md:px-4">
-            <span className="text-xs text-muted-foreground">左：Markdown 源码 · 右：渲染结果</span>
-            {themeControls}
-          </div>
-          <div className="flex min-h-0 flex-1">
-            <div className="relative min-h-0 w-1/2 border-r">{editorBody}</div>
-            <div className="min-h-0 w-1/2 overflow-hidden">{previewBody}</div>
-          </div>
-        </div>
+      {/* 编辑区；文献笔记外包一层附件工作区（附件工具条 + 可拖拽 PDF 面板） */}
+      {note.type === 'literature' ? (
+        <LiteratureAttachments note={note} onChange={onChange}>
+          {editorArea}
+        </LiteratureAttachments>
       ) : (
-        <Tabs value={tab} onValueChange={(v) => setTab(v as 'edit' | 'preview')} className="flex min-h-0 flex-1 flex-col">
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2 md:px-4">
-            <TabsList>
-              <TabsTrigger value="preview">预览</TabsTrigger>
-              <TabsTrigger value="edit">编辑</TabsTrigger>
-            </TabsList>
-            {themeControls}
-          </div>
-          <div className="relative min-h-0 flex-1">
-            {tab === 'edit' ? editorBody : previewBody}
-          </div>
-        </Tabs>
+        editorArea
       )}
     </div>
   )

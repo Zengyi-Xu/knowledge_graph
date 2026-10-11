@@ -107,6 +107,42 @@ updated: 2026-10-08T17:10:12.478Z
 literature 笔记照常可读（解析端用空值补齐）。同步 JSON 里 `literature` 固定在 `grade` 之后、
 `tags` 之前输出；没有文献数据的旧笔记序列化结果逐字节不变。
 
+## attachments/：PDF 附件与划词标注
+
+文献笔记可挂 PDF 附件。二进制与标注都存在 vault 根目录的 `attachments/` 下，
+**文件名即附件 id**（原始文件名另存在标注 JSON 里）：
+
+```
+<vault>/
+  attachments/
+    <附件id>.pdf                 ← PDF 二进制（应用内用 PDF.js 渲染，不放宽 md sanitizer）
+    <附件id>.annotations.json    ← 划词标注（JSON）
+```
+
+frontmatter 的 `attachments: ["<id>"]` 只记 id；删除附件会连同标注 JSON 一起删除。
+附件读写只能落在 `attachments/` 内的一层文件名（`^attachments/[^/]+$`，主进程白名单 +
+`normalizeRel`/`resolveInside` 双重校验），渲染进程不直接碰磁盘。
+
+标注 JSON 结构（`format` 标记 + 版本号，便于将来迁移）：
+
+```json
+{
+  "format": "kaust-kg-pdf-annotations",
+  "version": 1,
+  "fileName": "原始文件名.pdf",
+  "items": [
+    {
+      "id": "…", "page": 3, "color": "#ffd54a",
+      "anchor": { "exact": "选中的原文", "prefix": "前文≤40字", "suffix": "后文≤40字" },
+      "comment": "", "createdAt": 1728600000000
+    }
+  ]
+}
+```
+
+锚定策略：重新打开时先按 `exact` 匹配；匹配不到再用 `prefix`+`suffix` 模糊找回；
+都找不到就标记为失效（UI 不渲染，但数据保留在 JSON 里不丢）。
+
 ## meta.json
 
 ```json

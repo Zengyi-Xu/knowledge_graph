@@ -181,4 +181,4 @@ async function writeVault(dir, payload) {
   return { written, deleted, filePath: abs }
 }
 
-module.exports = { listVault, readVaultFiles, writeVault, META_NAME }
+module.exports = { listVault, readVaultFiles, writeVault, META_NAME, normalizeRel, resolveInside, withRetry }

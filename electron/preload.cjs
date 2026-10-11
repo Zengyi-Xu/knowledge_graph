@@ -13,4 +13,12 @@ contextBridge.exposeInMainWorld('knowledgeGraphDesktop', {
   readVaultFiles: (dir, names) => ipcRenderer.invoke('vault:read-files', { dir, names }),
   writeVault: (dir, plan) => ipcRenderer.invoke('vault:write', { dir, ...plan }),
   openVaultDir: (dir) => ipcRenderer.invoke('vault:open-dir', { dir }),
+
+  // 附件：vault 内 attachments/ 目录（一层文件名白名单，路径校验在主进程）
+  listAttachments: (dir) => ipcRenderer.invoke('attachments:list', { dir }),
+  readAttachment: (dir, rel) => ipcRenderer.invoke('attachments:read', { dir, rel }),
+  writeAttachment: (dir, rel, data) => ipcRenderer.invoke('attachments:write', { dir, rel, data }),
+  removeAttachment: (dir, rel) => ipcRenderer.invoke('attachments:remove', { dir, rel }),
+  chooseOpenAttachment: () => ipcRenderer.invoke('attachments:choose-open'),
+  chooseSaveAttachment: (defaultName) => ipcRenderer.invoke('attachments:choose-save', { defaultName }),
 })

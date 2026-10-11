@@ -23,6 +23,7 @@ import {
 } from '@/lib/vaultFormat'
 // 真实的主进程实现（.cjs，esbuild 会一并打进产物）
 import * as vaultFs from '../electron/vaultFs.cjs'
+import * as attachmentFs from '../electron/attachmentFs.cjs'
 
 let passed = 0
 const failures: string[] = []
@@ -457,6 +458,80 @@ async function main() {
   })
 
   await fs.rm(path.resolve(process.cwd(), '.tmp-vault-test'), { recursive: true, force: true })
+
+  console.log('\nF. 附件（attachments/ 一层文件名白名单）')
+  const attDir = path.resolve(process.cwd(), '.tmp-vault-test', 'att')
+  await fs.rm(attDir, { recursive: true, force: true })
+  await fs.mkdir(attDir, { recursive: true })
+
+  await check('附件路径越界全部被拒（../ 、二层目录、绝对路径）', async () => {
+    const bad = ['attachments/../../x.pdf', 'attachments/a/b.pdf', '/abs/path.pdf', 'C:\\evil.pdf', 'attachments/../secret.pdf', 'notes/x.md']
+    for (const rel of bad) {
+      await assert.rejects(() => attachmentFs.write(attDir, rel, Buffer.from('x')), null, `write 应拒绝 ${rel}`)
+      await assert.rejects(() => attachmentFs.read(attDir, rel), null, `read 应拒绝 ${rel}`)
+      await assert.rejects(() => attachmentFs.remove(attDir, rel), null, `remove 应拒绝 ${rel}`)
+    }
+  })
+  await check('原子写后读回一致；list 可见', async () => {
+    const payload = Buffer.from('%PDF-1.4 fake')
+    await attachmentFs.write(attDir, 'attachments/abc.pdf', payload)
+    const back = await attachmentFs.read(attDir, 'attachments/abc.pdf')
+    assert.deepEqual(back, payload)
+    const files = await attachmentFs.list(attDir)
+    assert.ok(files.some((f) => f.name === 'attachments/abc.pdf' && f.size === payload.length))
+  })
+  await check('annotations JSON 可写读；目录不存在时 list 返回空', async () => {
+    await attachmentFs.write(attDir, 'attachments/abc.annotations.json', Buffer.from('{"format":"kaust-kg-pdf-annotations"}'))
+    const text = (await attachmentFs.read(attDir, 'attachments/abc.annotations.json'))?.toString('utf8')
+    assert.ok(text?.includes('kaust-kg-pdf-annotations'))
+    assert.deepEqual(await attachmentFs.list(path.join(attDir, '不存在')), [])
+  })
+  await check('删除附件：PDF 与标注级联删除，且不留临时文件', async () => {
+    await attachmentFs.remove(attDir, 'attachments/abc.pdf')
+    await attachmentFs.remove(attDir, 'attachments/abc.annotations.json')
+    assert.equal(await attachmentFs.read(attDir, 'attachments/abc.pdf'), null)
+    const leftovers: string[] = []
+    const walk = async (rel: string) => {
+      const entries = await fs.readdir(rel ? path.join(attDir, rel) : attDir, { withFileTypes: true })
+      for (const e of entries) {
+        const child = rel ? `${rel}/${e.name}` : e.name
+        if (e.isDirectory()) await walk(child)
+        else if (e.name.startsWith('.kg-tmp-')) leftovers.push(child)
+      }
+    }
+    await walk('')
+    assert.deepEqual(leftovers, [])
+    assert.deepEqual(await attachmentFs.list(attDir), [])
+  })
+  await fs.rm(attDir, { recursive: true, force: true })
+
+  console.log('\nG. 标注锚定（pdfAnchor 纯函数）')
+  const { buildAnchor, locateAnchor } = await import('@/lib/pdfAnchor')
+  const pageText = '物理学是一门研究物质与能量的学科。量子计算利用叠加与纠缠特性。硅光集成是热点。'
+  const start = pageText.indexOf('量子计算')
+  const end = start + '量子计算'.length
+  const anchor = buildAnchor(pageText, start, end)
+  await check('buildAnchor 取 exact 与前后文（各 ≤40 字）', () => {
+    assert.equal(anchor.exact, '量子计算')
+    assert.equal(anchor.prefix, '物理学是一门研究物质与能量的学科。')
+    assert.equal(anchor.suffix, '利用叠加与纠缠特性。硅光集成是热点。')
+  })
+  await check('exact 命中', () => {
+    const m = locateAnchor(pageText, anchor)
+    assert.deepEqual(m, { status: 'exact', index: start, length: 4 })
+  })
+  await check('原文被改写后 prefix+suffix 模糊找回', () => {
+    // “量子计算”被插字改成“量子科技计算”：exact 不再命中，但前后文仍在
+    const changed = pageText.replace('量子计算', '量子科技计算')
+    const direct = locateAnchor(changed, anchor)
+    assert.equal(direct.status, 'fuzzy')
+    assert.equal(direct.index, anchor.prefix.length)
+    assert.equal(direct.length, 6) // 前缀尾到后缀头 = “量子科技计算”
+  })
+  await check('找不到时标记 missing，不丢数据', () => {
+    const m = locateAnchor('完全不相干的一页文字内容。', anchor)
+    assert.deepEqual(m, { status: 'missing', index: -1, length: 0 })
+  })
 
   console.log(`\n结果：${passed} 通过，${failures.length} 失败`)
   if (failures.length) {

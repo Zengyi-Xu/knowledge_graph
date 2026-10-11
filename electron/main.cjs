@@ -3,6 +3,7 @@ const fs = require('node:fs/promises')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 const { listVault, readVaultFiles, writeVault } = require('./vaultFs.cjs')
+const attachmentFs = require('./attachmentFs.cjs')
 
 const APP_SCHEME = 'kg'
 const APP_HOST = 'desktop'
@@ -200,8 +201,64 @@ function registerVaultHandlers() {
   })
 }
 
-const hasSingleInstanceLock = app.requestSingleInstanceLock()
+/**
+ * 附件（vault 内 attachments/ 目录）相关通道。
+ * 参数校验风格与 vault 通道一致：dir 必须是字符串，rel 由 attachmentFs 做路径白名单校验。
+ */
+function registerAttachmentHandlers() {
+  ipcMain.handle('attachments:list', async (_event, payload) => {
+    if (!payload || typeof payload.dir !== 'string' || !payload.dir) {
+      throw new Error('Invalid attachments list payload')
+    }
+    return attachmentFs.list(payload.dir)
+  })
 
+  ipcMain.handle('attachments:read', async (_event, payload) => {
+    if (!payload || typeof payload.dir !== 'string' || typeof payload.rel !== 'string') {
+      throw new Error('Invalid attachments read payload')
+    }
+    return attachmentFs.read(payload.dir, payload.rel)
+  })
+
+  ipcMain.handle('attachments:write', async (_event, payload) => {
+    if (!payload || typeof payload.dir !== 'string' || typeof payload.rel !== 'string' || !payload.data) {
+      throw new Error('Invalid attachments write payload')
+    }
+    return attachmentFs.write(payload.dir, payload.rel, Buffer.from(payload.data))
+  })
+
+  ipcMain.handle('attachments:remove', async (_event, payload) => {
+    if (!payload || typeof payload.dir !== 'string' || typeof payload.rel !== 'string') {
+      throw new Error('Invalid attachments remove payload')
+    }
+    return attachmentFs.remove(payload.dir, payload.rel)
+  })
+
+  ipcMain.handle('attachments:choose-open', async () => {
+    const result = await dialog.showOpenDialog({
+      title: '选择 PDF 附件',
+      buttonLabel: '添加',
+      filters: [{ name: 'PDF 文件', extensions: ['pdf'] }],
+      properties: ['openFile'],
+    })
+    if (result.canceled || !result.filePaths.length) return null
+    const filePath = result.filePaths[0]
+    const buf = await fs.readFile(filePath)
+    return { filePath, name: path.basename(filePath), data: buf }
+  })
+
+  ipcMain.handle('attachments:choose-save', async (_event, payload) => {
+    const defaultName = payload && typeof payload.defaultName === 'string' ? payload.defaultName : 'annotations.txt'
+    const result = await dialog.showSaveDialog({
+      title: '选择保存位置',
+      defaultPath: defaultName,
+    })
+    if (result.canceled || !result.filePath) return null
+    return result.filePath
+  })
+}
+
+const hasSingleInstanceLock = app.requestSingleInstanceLock()
 if (!hasSingleInstanceLock) {
   app.quit()
 } else {
@@ -218,6 +275,7 @@ if (!hasSingleInstanceLock) {
     registerAppProtocol()
     registerSyncHandlers()
     registerVaultHandlers()
+    registerAttachmentHandlers()
     createWindow()
 
     app.on('activate', () => {
