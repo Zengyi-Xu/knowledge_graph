@@ -2,6 +2,69 @@ import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { NOTE_TYPE_META, GRADE_META, GRADE_COLORS } from '@/types/note'
 import type { Note } from '@/types/note'
 import { extractLinks } from '@/types/note'
+import { readSetting, writeSetting } from '@/lib/env'
+import { Button } from '@/components/ui/button'
+import { Slider } from '@/components/ui/slider'
+import { RotateCcw, SlidersHorizontal, X } from 'lucide-react'
+
+/**
+ * 图谱物理参数（都写成「倍数」，方便用滑杆调）。
+ * - repulsion    节点之间的斥力：越大越散
+ * - linkStrength 双链带来的引力：越大相连节点拉得越近（也就是越「紧」）
+ * - linkDistance 双链的目标长度（px）
+ * - gravity      向心力：越大整体越往画布中心收
+ */
+export interface GraphPhysics {
+  repulsion: number
+  linkStrength: number
+  linkDistance: number
+  gravity: number
+}
+
+/** 1.0 倍对应的基础常数（旧版是 repulsion 2600 / gravity 0.003，整体偏紧） */
+const PHYSICS_BASE = { repulsion: 2600, linkStrength: 0.02, gravity: 0.003 }
+
+/** 默认值：比旧版明显松一些，解决「节点挤成一团」的问题 */
+export const DEFAULT_PHYSICS: GraphPhysics = {
+  repulsion: 1.9,
+  linkStrength: 0.55,
+  linkDistance: 170,
+  gravity: 0.45,
+}
+
+export const PHYSICS_PRESETS: { id: string; label: string; physics: GraphPhysics }[] = [
+  { id: 'tight', label: '紧凑', physics: { repulsion: 1.0, linkStrength: 1.4, linkDistance: 120, gravity: 1.0 } },
+  { id: 'standard', label: '标准', physics: DEFAULT_PHYSICS },
+  { id: 'loose', label: '宽松', physics: { repulsion: 2.7, linkStrength: 0.45, linkDistance: 190, gravity: 0.4 } },
+  { id: 'sparse', label: '极散', physics: { repulsion: 3.8, linkStrength: 0.28, linkDistance: 230, gravity: 0.25 } },
+]
+
+const PHYSICS_KEY = 'graph-physics-v1'
+
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
+
+/** 从 localStorage 读物理参数；缺字段/非法值一律回落到默认值 */
+export function loadPhysics(): GraphPhysics {
+  try {
+    const raw = readSetting(PHYSICS_KEY)
+    if (!raw) return DEFAULT_PHYSICS
+    const parsed = JSON.parse(raw) as Partial<GraphPhysics>
+    const num = (v: unknown, fallback: number, lo: number, hi: number) =>
+      typeof v === 'number' && Number.isFinite(v) ? clamp(v, lo, hi) : fallback
+    return {
+      repulsion: num(parsed.repulsion, DEFAULT_PHYSICS.repulsion, 0.4, 4),
+      linkStrength: num(parsed.linkStrength, DEFAULT_PHYSICS.linkStrength, 0, 2),
+      linkDistance: num(parsed.linkDistance, DEFAULT_PHYSICS.linkDistance, 80, 320),
+      gravity: num(parsed.gravity, DEFAULT_PHYSICS.gravity, 0, 2),
+    }
+  } catch {
+    return DEFAULT_PHYSICS
+  }
+}
+
+export function savePhysics(p: GraphPhysics): void {
+  writeSetting(PHYSICS_KEY, JSON.stringify(p))
+}
 
 // 多维分类：标签前缀 -> 维度颜色
 const DIM_META: Record<string, { label: string; color: string }> = {
@@ -48,6 +111,9 @@ interface Props {
   filters: Filters
   focusId: string | null
   onFocusChange: (id: string | null) => void
+  /** 力导向布局参数（斥力 / 双链引力 / 目标长度 / 向心力） */
+  physics: GraphPhysics
+  onPhysicsChange: (next: GraphPhysics) => void
 }
 
 export interface Filters {
@@ -90,10 +156,19 @@ export function noteMatches(n: Note, f: Filters): boolean {
   return true
 }
 
-export function GraphView({ notes, onOpenNote, filters, focusId, onFocusChange }: Props) {
+export function GraphView({
+  notes,
+  onOpenNote,
+  filters,
+  focusId,
+  onFocusChange,
+  physics,
+  onPhysicsChange,
+}: Props) {
   const svgRef = useRef<SVGSVGElement>(null)
   const [size, setSize] = useState({ w: 800, h: 600 })
   const [hoverId, setHoverId] = useState<string | null>(null)
+  const [panelOpen, setPanelOpen] = useState(false)
   const nodesRef = useRef<Map<string, SimNode>>(new Map())
   const dragRef = useRef<{ id: string; dx: number; dy: number; sx: number; sy: number } | null>(null)
   const movedRef = useRef(false)
@@ -182,12 +257,17 @@ export function GraphView({ notes, onOpenNote, filters, focusId, onFocusChange }
   // 力导向模拟
   useEffect(() => {
     let raf = 0
+    // 画布越大越松：把斥力按面积缩放，避免小窗口爆炸、大窗口又挤在一起
+    const areaScale = clamp((size.w * size.h) / (1000 * 700), 0.55, 2.4)
+    const repulsionConst = PHYSICS_BASE.repulsion * physics.repulsion * areaScale
+    const springK = PHYSICS_BASE.linkStrength * physics.linkStrength
+    const gravity = PHYSICS_BASE.gravity * physics.gravity
     const step = () => {
       const map = nodesRef.current
       const arr = [...map.values()]
       const cx = size.w / 2
       const cy = size.h / 2
-      // 斥力
+      // 斥力：任意两点互相推开，系数越大节点越分散
       for (let i = 0; i < arr.length; i++) {
         for (let j = i + 1; j < arr.length; j++) {
           const a = arr[i]
@@ -200,7 +280,7 @@ export function GraphView({ notes, onOpenNote, filters, focusId, onFocusChange }
             dy = Math.random() - 0.5
             d2 = 1
           }
-          const f = 2600 / d2
+          const f = repulsionConst / d2
           const d = Math.sqrt(d2)
           const fx = (dx / d) * f
           const fy = (dy / d) * f
@@ -210,7 +290,7 @@ export function GraphView({ notes, onOpenNote, filters, focusId, onFocusChange }
           b.vy += fy
         }
       }
-      // 引力（边）
+      // 双链引力：类似弹簧，长度 > linkDistance 时相吸、短于目标才推开
       for (const e of shownEdges) {
         const a = map.get(e.source)
         const b = map.get(e.target)
@@ -218,17 +298,17 @@ export function GraphView({ notes, onOpenNote, filters, focusId, onFocusChange }
         const dx = b.x - a.x
         const dy = b.y - a.y
         const d = Math.max(Math.sqrt(dx * dx + dy * dy), 1)
-        const f = (d - 120) * 0.004
-        a.vx += (dx / d) * f * d * 0.05
-        a.vy += (dy / d) * f * d * 0.05
-        b.vx -= (dx / d) * f * d * 0.05
-        b.vy -= (dy / d) * f * d * 0.05
+        const f = ((d - physics.linkDistance) * springK) / d
+        a.vx += dx * f
+        a.vy += dy * f
+        b.vx -= dx * f
+        b.vy -= dy * f
       }
       // 向心 & 阻尼
       for (const n of arr) {
         if (dragRef.current?.id === n.id) continue
-        n.vx += (cx - n.x) * 0.003
-        n.vy += (cy - n.y) * 0.003
+        n.vx += (cx - n.x) * gravity
+        n.vy += (cy - n.y) * gravity
         n.vx *= 0.82
         n.vy *= 0.82
         n.x += Math.max(-12, Math.min(12, n.vx))
@@ -244,7 +324,7 @@ export function GraphView({ notes, onOpenNote, filters, focusId, onFocusChange }
     }
     raf = requestAnimationFrame(step)
     return () => cancelAnimationFrame(raf)
-  }, [shownEdges, size, simNonce])
+  }, [shownEdges, size, simNonce, physics])
 
   const onPointerDown = useCallback((e: React.PointerEvent, id: string) => {
     const svg = svgRef.current
@@ -280,8 +360,117 @@ export function GraphView({ notes, onOpenNote, filters, focusId, onFocusChange }
   const noteById = useMemo(() => new Map(notes.map((n) => [n.id, n])), [notes])
   const map = nodesRef.current
 
+  /** 把节点重新随机撒开，让布局在当前参数下重新收敛（参数改动很大时很好用） */
+  const relayout = useCallback(() => {
+    for (const n of nodesRef.current.values()) {
+      n.x = size.w / 2 + (Math.random() - 0.5) * size.w * 0.7
+      n.y = size.h / 2 + (Math.random() - 0.5) * size.h * 0.7
+      n.vx = 0
+      n.vy = 0
+    }
+    setSimNonce((v) => v + 1)
+  }, [size.w, size.h])
+
+  const activePreset = PHYSICS_PRESETS.find(
+    (p) =>
+      Math.abs(p.physics.repulsion - physics.repulsion) < 1e-6 &&
+      Math.abs(p.physics.linkStrength - physics.linkStrength) < 1e-6 &&
+      Math.abs(p.physics.linkDistance - physics.linkDistance) < 1e-6 &&
+      Math.abs(p.physics.gravity - physics.gravity) < 1e-6,
+  )?.id
+
   return (
     <div className="relative h-full w-full overflow-hidden rounded-lg border bg-card">
+      {/* 力参数面板：斥力 / 双链引力 / 连线长度 / 中心聚集 */}
+      <div className="absolute right-3 top-3 z-10 flex flex-col items-end gap-2">
+        <div className="flex items-center gap-1.5">
+          <Button variant="outline" size="sm" onClick={relayout} title="把节点重新随机撒开，按当前参数重新收敛">
+            <RotateCcw className="mr-1 h-3.5 w-3.5" /> 重新布局
+          </Button>
+          <Button
+            variant={panelOpen ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setPanelOpen((v) => !v)}
+            title="节点斥力与双链引力"
+          >
+            {panelOpen ? (
+              <X className="mr-1 h-3.5 w-3.5" />
+            ) : (
+              <SlidersHorizontal className="mr-1 h-3.5 w-3.5" />
+            )}
+            力参数
+          </Button>
+        </div>
+
+        {panelOpen && (
+          <div className="w-64 rounded-lg border bg-background/95 p-3 text-xs shadow-lg backdrop-blur">
+            <div className="mb-2 flex flex-wrap gap-1">
+              {PHYSICS_PRESETS.map((p) => (
+                <Button
+                  key={p.id}
+                  variant={activePreset === p.id ? 'default' : 'outline'}
+                  size="sm"
+                  className="h-6 px-2 text-[11px]"
+                  onClick={() => onPhysicsChange({ ...p.physics })}
+                >
+                  {p.label}
+                </Button>
+              ))}
+            </div>
+
+            <PhysicsSlider
+              label="节点斥力"
+              hint="调大 → 节点之间更松散"
+              value={physics.repulsion}
+              min={0.4}
+              max={4}
+              step={0.1}
+              format={(v) => `×${v.toFixed(1)}`}
+              onChange={(v) => onPhysicsChange({ ...physics, repulsion: v })}
+            />
+            <PhysicsSlider
+              label="双链引力"
+              hint="调大 → 有双链的笔记拉得更近（越紧）"
+              value={physics.linkStrength}
+              min={0}
+              max={2}
+              step={0.05}
+              format={(v) => `×${v.toFixed(2)}`}
+              onChange={(v) => onPhysicsChange({ ...physics, linkStrength: v })}
+            />
+            <PhysicsSlider
+              label="连线长度"
+              hint="一对双链笔记的舒适距离"
+              value={physics.linkDistance}
+              min={80}
+              max={320}
+              step={10}
+              format={(v) => `${Math.round(v)} px`}
+              onChange={(v) => onPhysicsChange({ ...physics, linkDistance: v })}
+            />
+            <PhysicsSlider
+              label="中心聚集"
+              hint="调小 → 整体更铺开、更少往中心挤"
+              value={physics.gravity}
+              min={0}
+              max={2}
+              step={0.05}
+              format={(v) => `×${v.toFixed(2)}`}
+              onChange={(v) => onPhysicsChange({ ...physics, gravity: v })}
+            />
+
+            <Button
+              variant="ghost"
+              size="sm"
+              className="mt-1 h-7 w-full text-[11px]"
+              onClick={() => onPhysicsChange({ ...DEFAULT_PHYSICS })}
+            >
+              <RotateCcw className="mr-1 h-3 w-3" /> 恢复默认力参数
+            </Button>
+          </div>
+        )}
+      </div>
+
       <svg
         ref={svgRef}
         className="h-full w-full touch-none select-none"
@@ -434,4 +623,43 @@ function svgPt(svg: SVGSVGElement, x: number, y: number) {
   pt.x = x
   pt.y = y
   return pt.matrixTransform(svg.getScreenCTM()!.inverse())
+}
+
+/** 力参数面板里的一行滑杆 */
+function PhysicsSlider({
+  label,
+  hint,
+  value,
+  min,
+  max,
+  step,
+  format,
+  onChange,
+}: {
+  label: string
+  hint: string
+  value: number
+  min: number
+  max: number
+  step: number
+  format: (v: number) => string
+  onChange: (v: number) => void
+}) {
+  return (
+    <div className="mb-2.5">
+      <div className="mb-1 flex items-baseline justify-between">
+        <span className="font-medium">{label}</span>
+        <span className="tabular-nums text-muted-foreground">{format(value)}</span>
+      </div>
+      <Slider
+        value={[value]}
+        min={min}
+        max={max}
+        step={step}
+        onValueChange={(v) => onChange(v[0])}
+        aria-label={label}
+      />
+      <div className="mt-0.5 text-[11px] text-muted-foreground">{hint}</div>
+    </div>
+  )
 }

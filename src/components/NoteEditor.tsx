@@ -24,12 +24,13 @@ import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Trash2, Download, Check, Upload, Palette, MoreVertical } from 'lucide-react'
 import { toast } from 'sonner'
+import { readSetting, writeSetting } from '@/lib/env'
 
-const THEME_KEY = 'note-graph-preview-theme-v1'
-const CUSTOM_THEME_KEY = 'note-graph-custom-preview-theme-v1'
+const THEME_KEY = 'preview-theme-v1'
+const CUSTOM_THEME_KEY = 'custom-preview-theme-v1'
 
 function savedTheme(): PreviewTheme {
-  const value = localStorage.getItem(THEME_KEY)
+  const value = readSetting(THEME_KEY)
   return value === 'paper' || value === 'night' || value === 'vue-light' || value === 'vue-night' || value === 'custom'
     ? value
     : 'default'
@@ -52,7 +53,7 @@ export function NoteEditor({ note, allNotes, onChange, onDelete, onOpenNote, onC
   const [theme, setTheme] = useState<PreviewTheme>(savedTheme)
   const [customTheme, setCustomTheme] = useState(() => {
     try {
-      return JSON.parse(localStorage.getItem(CUSTOM_THEME_KEY) ?? 'null') as { name: string; css: string } | null
+  return JSON.parse(readSetting(CUSTOM_THEME_KEY) ?? 'null') as { name: string; css: string } | null
     } catch {
       return null
     }
@@ -63,7 +64,7 @@ export function NoteEditor({ note, allNotes, onChange, onDelete, onOpenNote, onC
 
   const selectTheme = (value: PreviewTheme) => {
     setTheme(value)
-    localStorage.setItem(THEME_KEY, value)
+    writeSetting(THEME_KEY, value)
   }
 
   const importTheme = async (file: File) => {
@@ -73,7 +74,7 @@ export function NoteEditor({ note, allNotes, onChange, onDelete, onOpenNote, onC
     }
     const custom = { name: file.name.replace(/\.css$/i, ''), css: await file.text() }
     try {
-      localStorage.setItem(CUSTOM_THEME_KEY, JSON.stringify(custom))
+    writeSetting(CUSTOM_THEME_KEY, JSON.stringify(custom))
       setCustomTheme(custom)
       selectTheme('custom')
       setTab('preview')

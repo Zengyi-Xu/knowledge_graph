@@ -4,6 +4,7 @@ import type { Note } from '@/types/note'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { ChevronDown, ChevronRight, Plus, Search } from 'lucide-react'
+import { readSetting, writeSetting } from '@/lib/env'
 
 interface Props {
   notes: Note[]
@@ -12,13 +13,13 @@ interface Props {
   onCreate: () => void
 }
 
-const COLLAPSE_KEY = 'note-graph-collapsed-types'
+const COLLAPSE_KEY = 'collapsed-types-v1'
 
 export function NoteList({ notes, activeId, onSelect, onCreate }: Props) {
   const [q, setQ] = useState('')
   const [collapsed, setCollapsed] = useState<Set<string>>(() => {
     try {
-      const raw = localStorage.getItem(COLLAPSE_KEY)
+      const raw = readSetting(COLLAPSE_KEY)
       if (raw) return new Set(JSON.parse(raw) as string[])
     } catch {
       /* ignore */
@@ -27,11 +28,7 @@ export function NoteList({ notes, activeId, onSelect, onCreate }: Props) {
   })
 
   useEffect(() => {
-    try {
-      localStorage.setItem(COLLAPSE_KEY, JSON.stringify([...collapsed]))
-    } catch {
-      /* ignore */
-    }
+    writeSetting(COLLAPSE_KEY, JSON.stringify([...collapsed]))
   }, [collapsed])
 
   const toggleGroup = (type: string) => {

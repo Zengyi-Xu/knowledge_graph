@@ -2,10 +2,24 @@ import path from "path"
 import react from "@vitejs/plugin-react"
 import { defineConfig } from "vite"
 import { inspectAttr } from 'kimi-plugin-inspect-react'
+import pkg from "./package.json" with { type: "json" }
 
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+  // 开发版与正式版的产物、存储键前缀都分开：
+  //   vite dev / --mode development → dist-dev/，__APP_ENV__ = development
+  //   vite build（默认）            → dist/，__APP_ENV__ = production
+  const appEnv = mode === "development" ? "development" : "production"
+
+  return {
   base: './',
+  define: {
+    __APP_ENV__: JSON.stringify(appEnv),
+    __APP_VERSION__: JSON.stringify(pkg.version),
+  },
+  build: {
+    outDir: appEnv === "development" ? "dist-dev" : "dist",
+  },
   plugins: [inspectAttr(), react()],
   server: {
     port: 3000,
@@ -21,6 +35,7 @@ export default defineConfig({
         '**/.git/**',
         '**/release/**',
         '**/dist/**',
+        '**/dist-dev/**',
         '**/.backups/**',
       ],
     },
@@ -30,4 +45,5 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
-});
+  }
+})

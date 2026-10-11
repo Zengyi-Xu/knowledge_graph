@@ -16,9 +16,9 @@ export interface Note {
 
 export const NOTE_TYPE_META: Record<NoteType, { label: string; color: string; bg: string }> = {
   person: { label: '人物', color: '#e8734a', bg: 'rgba(232,115,74,0.14)' },
-  task: { label: '任务/项目', color: '#4a90e8', bg: 'rgba(74,144,232,0.14)' },
+  task: { label: '项目', color: '#4a90e8', bg: 'rgba(74,144,232,0.14)' },
   skill: { label: '技能', color: '#3fae7a', bg: 'rgba(63,174,122,0.14)' },
-  question: { label: '求问/学习', color: '#b06ee0', bg: 'rgba(176,110,224,0.14)' },
+  question: { label: '学习', color: '#b06ee0', bg: 'rgba(176,110,224,0.14)' },
   other: { label: '其他', color: '#8a93a6', bg: 'rgba(138,147,166,0.14)' },
 }
 

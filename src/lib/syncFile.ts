@@ -1,10 +1,11 @@
 import type { Note } from '@/types/note'
 import { uid } from '@/types/note'
 
-export const SYNC_PATH_KEY = 'kaust-knowledge-graph-sync-path'
-export const AUTO_SYNC_KEY = 'kaust-knowledge-graph-auto-sync'
+/** 设置键基名；实际键由 src/lib/env.ts 加 `kg-` / `kg-dev-` 前缀 */
+export const SYNC_PATH_KEY = 'sync-path-v1'
+export const AUTO_SYNC_KEY = 'auto-sync-v1'
 /** 上次「两边一致」时的快照（稳定序列化后的字符串），用于判断谁改了 */
-export const SYNC_BASELINE_KEY = 'kaust-knowledge-graph-sync-baseline'
+export const SYNC_BASELINE_KEY = 'sync-baseline-v1'
 
 export function isDesktop(): boolean {
   return Boolean(window.knowledgeGraphDesktop?.isElectron)

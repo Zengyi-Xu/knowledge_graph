@@ -5,6 +5,7 @@ import { NoteEditor } from '@/components/NoteEditor'
 import { GraphView } from '@/components/GraphView'
 import type { Filters } from '@/components/GraphView'
 import { ConflictDialog } from '@/components/ConflictDialog'
+import { FolderMoveDialog } from '@/components/FolderMoveDialog'
 import { NOTE_TYPE_META, GRADE_META } from '@/types/note'
 import type { NoteType, Grade, Note } from '@/types/note'
 import { Button } from '@/components/ui/button'
@@ -16,6 +17,8 @@ import {
   Upload,
   FileUp,
   FolderSync,
+  FolderOpen,
+  HardDrive,
   Settings2,
   Save,
   PanelLeft,
@@ -34,25 +37,32 @@ import {
   saveNotesToSyncFile,
   serializeNotes,
 } from '@/lib/syncFile'
+import { chooseVaultDir, listVault, openVaultDir, vaultSupported } from '@/lib/vaultFs'
 import { Switch } from '@/components/ui/switch'
+import { APP_NAME, ENV_LABEL, isDevApp, readSetting, storageKey, writeSetting } from '@/lib/env'
+import type { GraphPhysics } from '@/components/GraphView'
+import { loadPhysics, savePhysics } from '@/components/GraphView'
 
 type View = 'notes' | 'graph' | 'both'
 
 export default function App() {
   const api = useNotes()
-  const { notes, hydrated, replaceAll } = api
+  const { notes, hydrated, replaceAll, vault } = api
   const [view, setView] = useState<View>('notes')
   const [activeId, setActiveId] = useState<string | null>(null)
   const [focusId, setFocusId] = useState<string | null>(null)
-  const [listOpen, setListOpen] = useState(() => localStorage.getItem('note-graph-list-open') !== '0')
+  const [listOpen, setListOpen] = useState(() => readSetting('list-open-v1') !== '0')
   const [filters, setFilters] = useState<Filters>({ types: new Set(), grades: new Set(), tags: new Set(), search: '' })
   const fileRef = useRef<HTMLInputElement>(null)
   const mdRef = useRef<HTMLInputElement>(null)
-  const [syncPath, setSyncPath] = useState(() => localStorage.getItem(SYNC_PATH_KEY) ?? '')
-  const [autoSync, setAutoSync] = useState(() => localStorage.getItem(AUTO_SYNC_KEY) === '1')
+  const [syncPath, setSyncPath] = useState(() => readSetting(SYNC_PATH_KEY) ?? '')
+  const [autoSync, setAutoSync] = useState(() => readSetting(AUTO_SYNC_KEY) === '1')
+  const [physics, setPhysics] = useState<GraphPhysics>(() => loadPhysics())
   const [syncing, setSyncing] = useState(false)
   const [lastSyncAt, setLastSyncAt] = useState<number | null>(null)
   const [conflict, setConflict] = useState<{ local: Note[]; remote: Note[] } | null>(null)
+  /** 改类型（= 换文件夹）时的待确认迁移 */
+  const [typeMove, setTypeMove] = useState<{ note: Note; to: NoteType; patch: Partial<Note> } | null>(null)
 
   const active = notes.find((n) => n.id === activeId) ?? notes[0] ?? null
 
@@ -64,14 +74,10 @@ export default function App() {
   const baselineRef = useRef<string>('')
   const setBaseline = useCallback((v: string) => {
     baselineRef.current = v
-    try {
-      localStorage.setItem(SYNC_BASELINE_KEY, v)
-    } catch {
-      /* ignore */
-    }
+    writeSetting(SYNC_BASELINE_KEY, v)
   }, [])
   useEffect(() => {
-    baselineRef.current = localStorage.getItem(SYNC_BASELINE_KEY) ?? ''
+    baselineRef.current = readSetting(SYNC_BASELINE_KEY) ?? ''
   }, [])
   const busyRef = useRef(false)
   const conflictRef = useRef(false)
@@ -127,7 +133,7 @@ export default function App() {
   }
 
   const exportJson = () => {
-    downloadNotes(notes, `kaust-notes-${new Date().toISOString().slice(0, 10)}.json`)
+    downloadNotes(notes, `knowledge-graph-notes-${new Date().toISOString().slice(0, 10)}.json`)
     toast.success('已导出全部笔记为 JSON 备份')
   }
 
@@ -181,6 +187,44 @@ export default function App() {
     toast.success(`已导入「${title}」`)
   }
 
+  /** 选择/切换本地笔记目录（vault：每篇一个 .md + 一个 meta.json 索引） */
+  const pickVault = async () => {
+    if (!vaultSupported()) {
+      toast.info('浏览器版没有目录写入权限：请用桌面版，或继续使用浏览器本地存储')
+      return
+    }
+    const dir = await chooseVaultDir()
+    if (!dir) return
+    if (dir === vault.dir) {
+      toast.info('这已经是当前的笔记目录')
+      return
+    }
+    const listing = await listVault(dir)
+    if (!listing?.exists) {
+      toast.error('读不到该目录，请换一个位置')
+      return
+    }
+    if (listing.meta) {
+      if (
+        !window.confirm(
+          `该目录已是一个笔记目录（${listing.md.length} 个 md 文件）。\n将用目录里的内容替换当前显示的 ${notes.length} 篇笔记，尚未落盘的改动会丢失。继续？`,
+        )
+      )
+        return
+    } else if (listing.md.length > 0) {
+      if (
+        !window.confirm(
+          `该目录里有 ${listing.md.length} 个 md 文件，但没有 meta.json。\n当前 ${notes.length} 篇笔记会写入该目录（重名会加 -2 后缀），已有文件不会被读取或改动。继续？`,
+        )
+      )
+        return
+    } else if (notes.length > 0) {
+      if (!window.confirm(`将把当前 ${notes.length} 篇笔记写入该目录：每篇一个 .md，并生成 meta.json。继续？`)) return
+    }
+    api.setVaultDir(dir)
+    toast.success('已切换笔记目录，正在读取…')
+  }
+
   const chooseSyncFile = useCallback(async () => {
     const desk = window.knowledgeGraphDesktop
     if (!desk) {
@@ -189,7 +233,7 @@ export default function App() {
     }
     const selected = await desk.chooseSyncFile()
     if (!selected) return null
-    localStorage.setItem(SYNC_PATH_KEY, selected)
+    writeSetting(SYNC_PATH_KEY, selected)
     setSyncPath(selected)
     toast.success('已设置同步文件位置')
     return selected
@@ -263,6 +307,16 @@ export default function App() {
     checkRef.current = checkSync
   }, [checkSync])
 
+  // vault 模式：同步文件默认放在 <vault>\sync\notes.json（只用于同步/备份）
+  useEffect(() => {
+    if (!api.vault.active || !api.vault.dir || syncPath) return
+    const dir = api.vault.dir
+    const sep = dir.includes('\\') ? '\\' : '/'
+    const def = `${dir}${dir.endsWith(sep) ? '' : sep}sync${sep}notes.json`
+    writeSetting(SYNC_PATH_KEY, def)
+    setSyncPath(def)
+  }, [api.vault.active, api.vault.dir, syncPath])
+
   // 轮询同步文件
   useEffect(() => {
     if (!autoSync || !syncPath || !hydrated) return
@@ -313,12 +367,17 @@ export default function App() {
   }
 
   useEffect(() => {
-    localStorage.setItem(AUTO_SYNC_KEY, autoSync ? '1' : '0')
+    writeSetting(AUTO_SYNC_KEY, autoSync ? '1' : '0')
   }, [autoSync])
 
   useEffect(() => {
-    localStorage.setItem('note-graph-list-open', listOpen ? '1' : '0')
+    writeSetting('list-open-v1', listOpen ? '1' : '0')
   }, [listOpen])
+
+  // 图谱物理参数：改动即生效，并写入 localStorage（开发版/正式版各自独立）
+  useEffect(() => {
+    savePhysics(physics)
+  }, [physics])
 
   const filterPanel = (
     <div className="shrink-0 space-y-4 overflow-y-auto rounded-lg border bg-card p-3 text-sm xl:w-52">
@@ -394,7 +453,14 @@ export default function App() {
       note={n}
       allNotes={notes}
       splitView={split}
-      onChange={(p) => api.updateNote(n.id, p)}
+      onChange={(p) => {
+        // 改类型 = 换文件夹：先弹窗确认，确认后再连同文件一起迁移
+        if (p.type && p.type !== n.type && api.vault.active) {
+          setTypeMove({ note: n, to: p.type, patch: p })
+          return
+        }
+        api.updateNote(n.id, p)
+      }}
       onDelete={() => {
         api.deleteNote(n.id)
         setActiveId(null)
@@ -409,8 +475,22 @@ export default function App() {
       {/* 顶栏 */}
       <header className="flex h-14 items-center gap-3 border-b px-4">
         <Network className="h-5 w-5 text-primary" />
-        <h1 className="text-base font-bold">本地笔记图谱</h1>
-        <span className="text-xs text-muted-foreground">{notes.length} 篇笔记</span>
+        <h1 className="text-base font-bold">{APP_NAME}</h1>
+        <span className="text-xs text-muted-foreground">本地笔记 · {notes.length} 篇笔记</span>
+        <span
+          className={
+            isDevApp()
+              ? 'rounded bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-medium text-amber-700'
+              : 'rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground'
+          }
+          title={
+            isDevApp()
+              ? `开发版：数据与正式版隔离（独立存储与用户目录）。${storageKey('notes-v1')}`
+              : `正式版 v${ENV_LABEL}`
+          }
+        >
+          {ENV_LABEL}
+        </span>
         <div className="ml-auto flex items-center gap-2">
           <input ref={fileRef} type="file" accept=".json" className="hidden" onChange={(e) => e.target.files?.[0] && importJson(e.target.files[0])} />
           <input ref={mdRef} type="file" accept=".md,.markdown" className="hidden" onChange={(e) => e.target.files?.[0] && importMd(e.target.files[0])} />
@@ -432,6 +512,62 @@ export default function App() {
           <Button variant="outline" size="sm" onClick={exportJson}>导出备份</Button>
         </div>
       </header>
+
+      {/* 本地存储状态栏：vault（md + meta.json） */}
+      <div className="flex items-center gap-3 border-b bg-muted/20 px-4 py-1.5 text-xs text-muted-foreground">
+        <HardDrive className="h-3.5 w-3.5" />
+        <span className="truncate" title={vault.dir || '尚未选择笔记目录'}>
+          {vault.active
+            ? `笔记目录：${vault.dir}（每篇一个 .md + meta.json 索引）`
+            : vault.dir
+              ? `笔记目录不可用：${vault.dir} · 暂时用浏览器本地存储`
+              : vaultSupported()
+                ? isDevApp()
+                  ? '开发版：尚未选择笔记目录（与正式版隔离）· 当前用浏览器本地存储（localStorage）'
+                  : '尚未选择笔记目录 · 当前用浏览器本地存储（localStorage）'
+                : '浏览器版 · 笔记存在浏览器本地存储（localStorage）'}
+        </span>
+        {vault.active && vault.saving && <span className="shrink-0">写入中…</span>}
+        {vault.active && !vault.saving && vault.savedAt && (
+          <span className="shrink-0">已写入 {new Date(vault.savedAt).toLocaleTimeString()}</span>
+        )}
+        {vault.externalAt && <span className="shrink-0">已跟随目录改动 {new Date(vault.externalAt).toLocaleTimeString()}</span>}
+        {vault.unmanaged > 0 && (
+          <span className="shrink-0" title="这些 md 不在 meta.json 索引里，本应用不会读取、修改或删除它们">
+            目录中另有 {vault.unmanaged} 个未纳管 md
+          </span>
+        )}
+        {vault.error && <span className="shrink-0 text-destructive">{vault.error}</span>}
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          <label
+            className="flex items-center gap-2"
+            title="开启后每 3 秒检查一次目录：在 Obsidian/编辑器里的改动会自动进到应用"
+          >
+            <span>跟随目录改动</span>
+            <Switch
+              checked={api.watchVault}
+              onCheckedChange={api.setWatchVault}
+              disabled={!vault.active}
+              aria-label="跟随目录改动"
+            />
+          </label>
+          <Button variant="outline" size="sm" disabled={!vault.active} onClick={() => void api.flushVault()}>
+            写入目录
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => void pickVault()}>
+            选择目录
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            title="在文件管理器里打开笔记目录"
+            disabled={!vault.active}
+            onClick={() => void openVaultDir(vault.dir).then((err) => err && toast.error(err))}
+          >
+            <FolderOpen className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
 
       {/* 同步状态栏 */}
       <div className="flex items-center gap-3 border-b bg-muted/20 px-4 py-1.5 text-xs text-muted-foreground">
@@ -508,13 +644,29 @@ export default function App() {
             <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 xl:flex-row">
               {filterPanel}
               <div className="min-w-0 flex-1">
-                <GraphView notes={notes} onOpenNote={openNote} filters={filters} focusId={focusId} onFocusChange={setFocusId} />
+                <GraphView
+                  notes={notes}
+                  onOpenNote={openNote}
+                  filters={filters}
+                  focusId={focusId}
+                  onFocusChange={setFocusId}
+                  physics={physics}
+                  onPhysicsChange={setPhysics}
+                />
               </div>
             </div>
           ) : (
             <div className="flex min-h-0 flex-1 gap-3 p-3">
               <div className="min-w-0 flex-1">
-                <GraphView notes={notes} onOpenNote={openNote} filters={filters} focusId={focusId} onFocusChange={setFocusId} />
+                <GraphView
+                  notes={notes}
+                  onOpenNote={openNote}
+                  filters={filters}
+                  focusId={focusId}
+                  onFocusChange={setFocusId}
+                  physics={physics}
+                  onPhysicsChange={setPhysics}
+                />
               </div>
               <div className="min-w-0 flex-1 overflow-hidden rounded-lg border bg-card">
                 {active ? (
@@ -539,6 +691,19 @@ export default function App() {
             setConflict(null)
           }}
           onApply={applyConflict}
+        />
+      )}
+
+      {typeMove && (
+        <FolderMoveDialog
+          note={typeMove.note}
+          to={typeMove.to}
+          onCancel={() => setTypeMove(null)}
+          onConfirm={() => {
+            api.updateNote(typeMove.note.id, typeMove.patch)
+            toast.success(`已迁移到「${NOTE_TYPE_META[typeMove.to].label}」文件夹`)
+            setTypeMove(null)
+          }}
         />
       )}
 
