@@ -96,6 +96,16 @@ export function formatCitation(csl: CslItem, styleId: CitationStyleId): string {
   return formatBibliography([csl], styleId)
 }
 
+/** 文中引用标记（如 GB 的「[1]」、APA 的「(Zhang, 2024)」）；供 RTF 域代码与剪贴板使用 */
+export function formatCitationMarker(items: CslItem[], styleId: CitationStyleId): string {
+  if (!items.length) return ''
+  ensureStyles()
+  const cite = new Cite(items) as unknown as {
+    format: (fmt: string, opts: Record<string, unknown>) => string
+  }
+  return cite.format('citation', { format: 'text', template: styleId, lang: langOf(styleId) })
+}
+
 /** 自拼 BibTeX（比 citation-js 输出键名可控） */
 export function buildBibtex(meta: {
   title: string

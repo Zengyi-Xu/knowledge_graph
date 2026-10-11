@@ -267,6 +267,69 @@ async function main() {
     assert.equal(keys[2], 'wang2022a') // 标题首词是 "A"
   })
 
+  console.log('\nH. RTF 域代码（Word 真域，兼容 Zotero）')
+  const { buildCitationFieldRtf, buildBibliographyRtf, buildClipboardParts, rtfEscape } = await import('@/lib/rtfField')
+  const rtfItem = litToCSL(litNote())
+  const rtfItem2 = litToCSL({ ...litNote(), id: 'n2', title: 'Another paper', literature: { ...litNote().literature!, citekey: 'li2023another', year: 2023 } })
+  await check('rtfEscape：反斜杠/花括号/非 ASCII 按 RTF 规则转义', () => {
+    assert.equal(rtfEscape('a\\b{c}'), 'a\\\\b\\{c\\}')
+    assert.equal(rtfEscape('中'), '\\u20013?')
+    assert.equal(rtfEscape('😀'), '\\u-10179?\\u-8704?') // U+1F600 → 代理对（D83D/DE00）
+  })
+  /** 从 RTF 域指令里取出 JSON payload（RTF 转义还原后 JSON.parse；测试辅助） */
+  const extractPayload = (rtf: string) => {
+    // 起点取「 ADDIN ZOTERO_ITEM 」之后（含被转义的 \{ 与 \}），整体反转义
+    const marker = ' ADDIN ZOTERO_ITEM '
+    const start = rtf.indexOf(marker) + marker.length
+    const end = rtf.indexOf('\\} }{\\fldrslt', start) + 2 // 含 JSON 末尾被转义的 \}
+    const body = rtf.slice(start, end).replace(/\\(.)/gs, '$1') // \{ → {、\} → }、\\ → \
+    return JSON.parse(body)
+  }
+  await check('域指令含合法 JSON（citationItems/properties/schema）', () => {
+    const rtf = buildCitationFieldRtf([rtfItem], 'apa')
+    assert.ok(rtf.startsWith('{\\field{\\*\\fldinst{ ADDIN ZOTERO_ITEM '), rtf.slice(0, 60))
+    const payload = extractPayload(rtf)
+    assert.equal(payload.citationItems.length, 1)
+    assert.equal(payload.citationItems[0].id, 'zhang2024silicon')
+    assert.equal(payload.citationItems[0].itemData.title, 'Silicon photonics for quantum computing')
+    assert.equal(payload.properties.formattedCitation, '(Zhang & Li, 2024)')
+    assert.ok(payload.schema.startsWith('https://github.com/zotero/zotero/schema/citation.json'))
+    assert.ok(rtf.includes('{\\fldrslt (Zhang & Li, 2024)}}}'))
+  })
+  await check('GB 数字标记在 fldrslt 里用上标', () => {
+    const rtf = buildCitationFieldRtf([rtfItem], 'gb')
+    assert.ok(rtf.includes('{\\super [1]}}'), rtf)
+  })
+  await check('多条拼接：citationItems 按序排列', () => {
+    const rtf = buildCitationFieldRtf([rtfItem, rtfItem2], 'gb')
+    const payload = extractPayload(rtf)
+    assert.deepEqual(payload.citationItems.map((c: { id: string }) => c.id), ['zhang2024silicon', 'li2023another'])
+  })
+  await check('特殊字符快照：中文标题与非 ASCII 作者正确转义', () => {
+    const zhNote = {
+      ...litNote(),
+      title: '硅光集成 综述',
+      literature: { ...litNote().literature!, authors: ['张三', 'Li, Si'] },
+    }
+    const rtf = buildCitationFieldRtf([litToCSL(zhNote)], 'gb')
+    assert.ok(rtf.includes('\\u30789?\\u20809?')) // 硅光
+    assert.ok(rtf.includes('\\u24352?')) // 张
+  })
+  await check('参考文献表 RTF：每条一段，GB 自带 [1] [2] 编号', () => {
+    const rtf = buildBibliographyRtf([rtfItem, rtfItem2], 'gb')
+    assert.ok(rtf.includes('\\par'))
+    assert.ok(rtf.includes('[1]'))
+    assert.ok(rtf.includes('[2]'))
+  })
+  await check('buildClipboardParts：citation 给域代码+标记，bibliography 给文献表', () => {
+    const c = buildClipboardParts([rtfItem], 'apa', 'citation')
+    assert.ok(c.rtf.includes('ADDIN ZOTERO_ITEM'))
+    assert.equal(c.plain, '(Zhang & Li, 2024)')
+    const b = buildClipboardParts([rtfItem], 'apa', 'bibliography')
+    assert.ok(!b.rtf.includes('ZOTERO_ITEM'))
+    assert.ok(b.plain.includes('Zhang'))
+  })
+
   console.log(`\n结果：${passed} 通过，${failures.length} 失败`)
   if (failures.length) {
     for (const f of failures) console.log(`  - ${f}`)

@@ -27,6 +27,8 @@ import { Trash2, Download, Check, Upload, Palette, MoreVertical, RefreshCw, Penc
 import { toast } from 'sonner'
 import { readSetting, writeSetting } from '@/lib/env'
 import { copyCitationFor } from '@/lib/copyCitation'
+import { litToCSL } from '@/lib/literature'
+import { writeCitationClipboard } from '@/lib/rtfField'
 import { LiteratureAttachments } from '@/components/LiteratureAttachments'
 
 const THEME_KEY = 'preview-theme-v1'
@@ -460,6 +462,10 @@ function LiteratureFields({
               <DropdownMenuItem onSelect={() => void copyCitationFor(note, 'gb')}>GB/T 7714</DropdownMenuItem>
               <DropdownMenuItem onSelect={() => void copyCitationFor(note, 'apa')}>APA</DropdownMenuItem>
               <DropdownMenuItem onSelect={() => void copyCitationFor(note, 'bibtex')}>BibTeX</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => void writeCitationClipboard([litToCSL(note)], 'gb')}>
+                插入 Word 引用（域代码）
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>

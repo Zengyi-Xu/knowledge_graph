@@ -32,7 +32,17 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import type { ImportedLit } from '@/lib/literature'
+import { CITATION_STYLES, litToCSL } from '@/lib/literature'
+import type { CitationStyleId } from '@/lib/literature'
 import { copyCitationFor } from '@/lib/copyCitation'
+import { writeBibliographyClipboard, writeCitationClipboard } from '@/lib/rtfField'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 
 interface Props {
   notes: Note[]
@@ -56,6 +66,7 @@ export function LiteratureView({ notes, onOpenNote, onImport }: Props) {
   const [sortAsc, setSortAsc] = useState(false)
   const [doiOpen, setDoiOpen] = useState(false)
   const [bibOpen, setBibOpen] = useState(false)
+  const [styleId, setStyleId] = useState<CitationStyleId>('gb')
 
   const literature = useMemo(() => notes.filter((n) => n.type === 'literature'), [notes])
 
@@ -114,6 +125,24 @@ export function LiteratureView({ notes, onOpenNote, onImport }: Props) {
         </div>
         <span className="text-xs text-muted-foreground">{rows.length} / {literature.length} 篇文献</span>
         <div className="ml-auto flex items-center gap-2">
+          <Select value={styleId} onValueChange={(v) => setStyleId(v as CitationStyleId)}>
+            <SelectTrigger className="h-8 w-[130px] text-xs" aria-label="引用样式">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {Object.values(CITATION_STYLES).map((s) => (
+                <SelectItem key={s.id} value={s.id}>{s.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            variant="outline"
+            size="sm"
+            title="把当前筛出的文献按所选样式排成文献表，复制为 RTF 富文本 + 纯文本"
+            onClick={() => void writeBibliographyClipboard(rows.map(litToCSL), styleId)}
+          >
+            <ClipboardCopy className="mr-1 h-3.5 w-3.5" /> 复制参考文献表
+          </Button>
           <Button variant="outline" size="sm" onClick={() => setDoiOpen(true)}>
             <Import className="mr-1 h-3.5 w-3.5" /> 按 DOI / arXiv 导入
           </Button>
@@ -155,18 +184,29 @@ export function LiteratureView({ notes, onOpenNote, onImport }: Props) {
                   </div>
                 </TableCell>
                 <TableCell onClick={(e) => e.stopPropagation()}>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-8 w-8" title="复制引用">
-                        <ClipboardCopy className="h-3.5 w-3.5" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onSelect={() => void copyCitationFor(n, 'gb')}>GB/T 7714</DropdownMenuItem>
-                      <DropdownMenuItem onSelect={() => void copyCitationFor(n, 'apa')}>APA</DropdownMenuItem>
-                      <DropdownMenuItem onSelect={() => void copyCitationFor(n, 'bibtex')}>BibTeX</DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                  <div className="flex items-center">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" title="复制引用">
+                          <ClipboardCopy className="h-3.5 w-3.5" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onSelect={() => void copyCitationFor(n, 'gb')}>GB/T 7714</DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => void copyCitationFor(n, 'apa')}>APA</DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => void copyCitationFor(n, 'bibtex')}>BibTeX</DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 text-xs"
+                      title="复制 RTF 域代码：粘进 Word 得到可更新的真实域"
+                      onClick={() => void writeCitationClipboard([litToCSL(n)], styleId)}
+                    >
+                      Word 引用
+                    </Button>
+                  </div>
                 </TableCell>
               </TableRow>
             ))}
