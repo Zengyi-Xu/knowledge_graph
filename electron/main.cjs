@@ -87,7 +87,7 @@ function createWindow() {
       devTools: IS_DEV,
       preload: path.join(__dirname, 'preload.cjs'),
       // 默认 Zotero 库位置（若存在）：由 preload 注入渲染端的 defaultZoteroDb
-      additionalArguments: defaultZoteroDbArg(),
+      additionalArguments: [...defaultZoteroDbArg(), ...defaultVaultArg()],
     },
   })
 
@@ -229,6 +229,32 @@ function defaultZoteroDb() {
 function defaultZoteroDbArg() {
   const found = defaultZoteroDb()
   return found ? [`--kg-default-zotero-db=${found}`] : []
+}
+
+/**
+ * 笔记目录（vault）的默认位置。与 Zotero 同样先探测候选：
+ * 环境变量 KG_VAULT_DIR → 本研究环境的同步盘路径 → 用户「文档/知识图谱」。
+ * 只有真实存在的目录才会交给渲染端，用户仍可在界面里改成别的目录。
+ */
+function defaultVaultDir() {
+  const candidates = [
+    process.env.KG_VAULT_DIR,
+    'D:\\BaiduSyncdisk\\Bibliotx\\Vault',
+    path.join(require('node:os').homedir(), 'Documents', '知识图谱'),
+  ].filter((p) => typeof p === 'string' && p)
+  for (const candidate of candidates) {
+    try {
+      if (require('node:fs').statSync(candidate).isDirectory()) return candidate
+    } catch {
+      /* 下一个候选 */
+    }
+  }
+  return ''
+}
+
+function defaultVaultArg() {
+  const found = defaultVaultDir()
+  return found ? [`--kg-default-vault=${found}`] : []
 }
 
 /**

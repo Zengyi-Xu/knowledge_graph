@@ -1,11 +1,13 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
-/** 主进程通过 additionalArguments 注入本机默认 Zotero 库位置 */
+/** 主进程通过 additionalArguments 注入本机默认位置（笔记目录 / Zotero 库） */
 const zoteroArg = process.argv.find((a) => a.startsWith('--kg-default-zotero-db='))
+const vaultArg = process.argv.find((a) => a.startsWith('--kg-default-vault='))
 
 contextBridge.exposeInMainWorld('knowledgeGraphDesktop', {
   isElectron: true,
   defaultZoteroDb: zoteroArg ? zoteroArg.slice('--kg-default-zotero-db='.length) : '',
+  defaultVaultDir: vaultArg ? vaultArg.slice('--kg-default-vault='.length) : '',
   chooseSyncFile: () => ipcRenderer.invoke('sync:choose-file'),
   writeSyncFile: (filePath, contents) =>
     ipcRenderer.invoke('sync:write-file', { filePath, contents }),

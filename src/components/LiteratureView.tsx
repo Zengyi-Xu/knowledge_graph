@@ -74,12 +74,6 @@ function collectionLabel(note: Note): string {
   return paths.length ? paths.join('；') : '未分类'
 }
 
-/** 第一作者显示：单个全名；多个加 et al. */
-function firstAuthorLabel(note: Note): string {
-  const authors = note.literature?.authors ?? []
-  if (!authors.length) return ''
-  return authors.length > 1 ? `${authors[0]} et al.` : authors[0]
-}
 
 export function LiteratureView({ notes, onOpenNote, onImport, onApplySync }: Props) {
   const [search, setSearch] = useState('')
@@ -259,12 +253,10 @@ export function LiteratureView({ notes, onOpenNote, onImport, onApplySync }: Pro
             <TableRow>
               <TableHead className="cursor-pointer" onClick={() => toggleSort('title')}>标题{sortMark('title')}</TableHead>
               <TableHead>分类（Zotero）</TableHead>
-              <TableHead className="cursor-pointer" onClick={() => toggleSort('author')}>第一作者{sortMark('author')}</TableHead>
               <TableHead className="cursor-pointer" onClick={() => toggleSort('year')}>年份{sortMark('year')}</TableHead>
               <TableHead className="cursor-pointer" onClick={() => toggleSort('venue')}>期刊/会议{sortMark('venue')}</TableHead>
-              <TableHead className="cursor-pointer" onClick={() => toggleSort('citekey')}>citekey{sortMark('citekey')}</TableHead>
-              <TableHead className="w-20">PDF</TableHead>
-              <TableHead>标签</TableHead>
+              <TableHead className="w-16">PDF</TableHead>
+              <TableHead className="min-w-72">标签</TableHead>
               <TableHead className="w-24">引用</TableHead>
             </TableRow>
           </TableHeader>
@@ -279,18 +271,17 @@ export function LiteratureView({ notes, onOpenNote, onImport, onApplySync }: Pro
               >
                 <TableCell className="max-w-64 truncate font-medium">{n.title}</TableCell>
                 <TableCell className="max-w-56 truncate text-xs" title={collectionLabel(n)}>{collectionLabel(n)}</TableCell>
-                <TableCell className="max-w-40 truncate">{firstAuthorLabel(n)}</TableCell>
                 <TableCell className="w-16">{n.literature?.year ?? ''}</TableCell>
                 <TableCell className="max-w-48 truncate">{n.literature?.venue ?? ''}</TableCell>
-                <TableCell>
-                  <code className="text-xs text-muted-foreground">{n.literature?.citekey ?? ''}</code>
-                </TableCell>
                 <TableCell>{pdfCell(n)}</TableCell>
-                <TableCell className="max-w-40">
-                  <div className="flex flex-wrap gap-1">
-                    {n.tags.slice(0, 3).map((t) => (
-                      <Badge key={t} variant="secondary" className="text-[10px]">#{t}</Badge>
+                <TableCell>
+                  <div className="flex flex-nowrap items-center gap-1">
+                    {n.tags.slice(0, 4).map((t) => (
+                      <Badge key={t} variant="secondary" className="shrink-0 text-[10px]">#{t}</Badge>
                     ))}
+                    {n.tags.length > 4 && (
+                      <span className="shrink-0 text-[10px] text-muted-foreground">+{n.tags.length - 4}</span>
+                    )}
                   </div>
                 </TableCell>
                 <TableCell onClick={(e) => e.stopPropagation()}>
