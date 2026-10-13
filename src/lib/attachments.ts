@@ -3,8 +3,7 @@
  * 浏览器版没有桌面文件 API：这里统一抛「附件仅桌面版可用」，由 UI 降级提示。
  */
 import { uid } from '@/types/note'
-import { readSetting } from '@/lib/env'
-import { VAULT_DIR_KEY } from '@/lib/vaultFs'
+import { resolvedVaultDir } from '@/lib/vaultFs'
 
 /** 标注 JSON 结构（见 docs/VAULT_FORMAT.md） */
 export interface PdfAnnotation {
@@ -31,7 +30,7 @@ export function attachmentsSupported(): boolean {
 }
 
 function vaultDir(): string {
-  return readSetting(VAULT_DIR_KEY) ?? ''
+  return resolvedVaultDir()
 }
 
 function api() {

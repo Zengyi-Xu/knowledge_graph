@@ -5,9 +5,21 @@
 import type { VaultDirListing } from '@/types/desktop'
 import type { VaultWritePlan } from '@/lib/vaultFormat'
 import { isDesktop } from '@/lib/syncFile'
+import { readSetting } from '@/lib/env'
 
 /** 设置键基名；实际键由 src/lib/env.ts 加 `kg-` / `kg-dev-` 前缀 */
 export const VAULT_DIR_KEY = 'vault-dir-v1'
+
+/**
+ * 当前生效的笔记目录：优先用户在界面里选择的，其次运行时注入的默认目录
+ * （桌面端由 Electron 探测、本地网页端由启动参数注入）。
+ * 附件、写盘等能力判断都必须用这个，否则桌面端会用「没选过目录」的假象。
+ */
+export function resolvedVaultDir(): string {
+  return readSetting(VAULT_DIR_KEY) || window.knowledgeGraphDesktop?.defaultVaultDir || ''
+}
+
+/** 设置键基名；实际键由 src/lib/env.ts 加 `kg-` / `kg-dev-` 前缀 */
 export const VAULT_WATCH_KEY = 'vault-watch-v1'
 
 export function vaultSupported(): boolean {

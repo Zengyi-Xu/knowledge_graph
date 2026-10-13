@@ -13,6 +13,7 @@ import {
 } from '@/lib/vaultFormat'
 import {
   VAULT_DIR_KEY,
+  resolvedVaultDir,
   VAULT_WATCH_KEY,
   isDesktop,
   listVault,
@@ -187,12 +188,12 @@ export interface VaultStatus {
 
 export function useNotes() {
   // vault 已配置时不先反序列化一份可能含数千文献的旧 localStorage 缓存。
-  const [notes, setNotes] = useState<Note[]>(() => isDesktop() && (readSetting(VAULT_DIR_KEY) || window.knowledgeGraphDesktop?.defaultVaultDir) ? [] : load())
+  const [notes, setNotes] = useState<Note[]>(() => isDesktop() && resolvedVaultDir() ? [] : load())
   const [hydrated, setHydrated] = useState(false)
 
   const [vaultDir, setVaultDirState] = useState<string>(() => {
     try {
-      return readSetting(VAULT_DIR_KEY) || window.knowledgeGraphDesktop?.defaultVaultDir || ''
+      return resolvedVaultDir() || ''
     } catch {
       return ''
     }
