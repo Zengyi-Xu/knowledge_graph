@@ -28,7 +28,9 @@
 
 - 真实 vault：`D:\BaiduSyncdisk\Bibliotx\Vault`（668 篇文献、meta 710 条）；Zotero 库：`D:\BaiduSyncdisk\Bibliotx\Zotero\zotero.sqlite`（1367 条书目，只读同步盘）。
 - 改真实库之前：先复制 vault 副本跑 dry-run，核对「新建/更新/删除」数字；应用真实库写入前必须由用户明确同意。
-- 2026-10-13 复核（在副本上）：同步 = 匹配 1367 全按 key、新建 0、更新 668（一次性规范化）、删除 0；再同步 = 0/0/0；去重 = 0 组；真正未分类 64 篇。
+- 2026-10-13 已更新真实库（`zotero:sync --apply`，备份 `.backups/zotero-import-20261013-230700/`）：匹配 1367 全按 key、新建 0、更新 668、删除 0；
+  复跑 = 0/0/0；`dedupe:vault` = 0 组；正文被改动 0；真正未分类 64 篇；529 篇带多个 `zoteroKeys`。
+- 旧版 dry-run 留下的 6 个 `.backups/zotero-preview-*` 目录仍在（仅报告，可删）。
 
 ## 代理工作纪律（省上下文与额度）
 
