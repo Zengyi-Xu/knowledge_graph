@@ -23,14 +23,12 @@ interface LitTree {
   name: string
   children: Map<string, LitTree>
   notes: Note[]
+  /** 子树内唯一笔记数（同一篇出现在多个子分类时只算一次） */
   count: number
 }
 
 function buildLitTree(items: Note[]): LitTree {
   const root: LitTree = { name: '', children: new Map(), notes: [], count: 0 }
-  const touch = (node: LitTree, by: number) => {
-    node.count += by
-  }
   const insert = (paths: string[], note: Note) => {
     const seen = new Set<string>()
     for (const raw of paths) {
@@ -39,14 +37,12 @@ function buildLitTree(items: Note[]): LitTree {
       if (seen.has(key)) continue
       seen.add(key)
       let node = root
-      touch(node, 1)
       for (const seg of segs.length ? segs : [UNCATEGORIZED]) {
         let child = node.children.get(seg)
         if (!child) {
           child = { name: seg, children: new Map(), notes: [], count: 0 }
           node.children.set(seg, child)
         }
-        touch(child, 1)
         node = child
       }
       node.notes.push(note)
@@ -56,6 +52,14 @@ function buildLitTree(items: Note[]): LitTree {
     const paths = n.literature?.collections ?? []
     insert(paths.length ? paths : [UNCATEGORIZED], n)
   }
+  // 计数 = 子树内唯一笔记数（Set 去重后再写回，避免多分类重复计数）
+  const recount = (node: LitTree): Set<string> => {
+    const ids = new Set(node.notes.map((n) => n.id))
+    node.children.forEach((child) => recount(child).forEach((id) => ids.add(id)))
+    node.count = ids.size
+    return ids
+  }
+  recount(root)
   // 组内按更新时间倒序
   const sortDeep = (node: LitTree) => {
     node.notes.sort((a, b) => b.updatedAt - a.updatedAt)
@@ -165,6 +169,16 @@ export function NoteList({ notes, activeId, onSelect, onCreate }: Props) {
     </button>
   )
 
+  /** 渲染分类树（跳过树根：树根没有名字，只渲染它的子分类与直属条目） */
+  const renderLitTree = (root: LitTree): React.ReactNode => (
+    <div key="literature/tree">
+      {[...root.children.values()]
+        .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
+        .map((child) => renderLitNode(child, [child.name], 0))}
+      {root.notes.map(renderNoteItem)}
+    </div>
+  )
+
   /** 递归渲染文献分类树；搜索时无视折叠全部展开 */
   const renderLitNode = (node: LitTree, path: string[], depth: number): React.ReactNode => {
     const key = `literature/${path.join('/')}`
@@ -238,7 +252,7 @@ export function NoteList({ notes, activeId, onSelect, onCreate }: Props) {
               </button>
               {!isCollapsed &&
                 (type === 'literature' && litTrees.has(type)
-                  ? renderLitNode(litTrees.get(type)!, [], 0)
+                  ? renderLitTree(litTrees.get(type)!)
                   : items.map(renderNoteItem))}
             </div>
           )
