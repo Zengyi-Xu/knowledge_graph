@@ -280,6 +280,14 @@ function registerZoteroHandlers() {
     if (error) throw new Error(`无法打开 PDF：${error}`)
     return { path: pdfPath }
   })
+
+  // 在 Zotero 里定位到该条目（zotero:// 协议；Zotero 会选中并展示它，可顺手下载附件）
+  ipcMain.handle('zotero:select-item', async (_event, payload) => {
+    const key = payload && typeof payload.zoteroKey === 'string' ? payload.zoteroKey : ''
+    if (!/^[A-Z0-9]{8}$/i.test(key)) throw new Error('Invalid zotero item key')
+    await shell.openExternal(`zotero://select/library/items/${key.toUpperCase()}`)
+    return { error: null }
+  })
 }
 
 /**
@@ -373,6 +381,21 @@ function registerAttachmentHandlers() {
       return { error: '文件不存在' }
     }
     const error = await shell.openPath(abs)
+    return { error: error || null }
+  })
+
+  // 用系统默认程序打开任意 PDF（pdf:link 脚本写进笔记的 localPdf 路径）；只接受 .pdf 且必须存在
+  ipcMain.handle('file:open-external', async (_event, payload) => {
+    const target = payload && typeof payload.path === 'string' ? payload.path : ''
+    if (!target || !path.isAbsolute(target) || path.extname(target).toLowerCase() !== '.pdf') {
+      return { error: '只允许打开本地 PDF 文件' }
+    }
+    try {
+      await fs.access(target)
+    } catch {
+      return { error: '文件不存在（可能已移动或改名）' }
+    }
+    const error = await shell.openPath(target)
     return { error: error || null }
   })
 

@@ -67,6 +67,10 @@
     readZotero: (dbPath) => call('zotero:read', { dbPath: dbPath || config.zoteroDb || '' }),
     // 网页端不能指定数据库/文件路径：服务端只用启动时 --zotero-db 授权的库解析 PDF
     openZoteroPdf: (_dbPath, zoteroKey, zoteroKeys) => call('zotero:open-pdf', { zoteroKey, zoteroKeys }),
+    // 笔记 localPdf 字段记录的 PDF：服务端只允许白名单目录内的 .pdf
+    openExternalFile: (filePath) => call('file:open-external', { path: filePath }),
+    // 在 Zotero 里定位条目（zotero:// 协议）
+    selectZoteroItem: (zoteroKey) => call('zotero:select-item', { zoteroKey }),
     aiStatus: (configPath) => call('ai:status', { configPath }),
     aiComplete: (payload) => call('ai:complete', payload),
     // 浏览器写不了 text/rtf；由本机服务代写剪贴板，Word 才能拿到真域

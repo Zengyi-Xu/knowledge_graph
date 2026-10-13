@@ -82,6 +82,10 @@ declare global {
         }[]
       }>
       openZoteroPdf: (dbPath: string, zoteroKey: string, zoteroKeys?: string[]) => Promise<{ path: string }>
+      /** 打开笔记 localPdf 字段记录的本地 PDF（只接受存在的 .pdf 绝对路径） */
+      openExternalFile: (filePath: string) => Promise<{ error: string | null }>
+      /** 在 Zotero 里定位到该条目（zotero://select） */
+      selectZoteroItem: (zoteroKey: string) => Promise<{ error: string | null }>
 
       // AI 网关：状态里的 keyPreview 已脱敏，绝不包含完整 key
       aiStatus: (configPath?: string) => Promise<

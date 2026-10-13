@@ -205,6 +205,7 @@ export function toMarkdown(note: Note): string {
     fm.push(`collections: ${JSON.stringify(lit.collections ?? [])}`)
     if (lit.zoteroKey) fm.push(`zoteroKey: ${JSON.stringify(lit.zoteroKey)}`)
     if (lit.zoteroKeys?.length) fm.push(`zoteroKeys: ${JSON.stringify(lit.zoteroKeys)}`)
+    if (lit.localPdf) fm.push(`localPdf: ${JSON.stringify(lit.localPdf)}`)
     if (typeof lit.zoteroPdfCount === 'number') fm.push(`zoteroPdfCount: ${lit.zoteroPdfCount}`)
     if (typeof lit.zoteroAvailablePdfCount === 'number') fm.push(`zoteroAvailablePdfCount: ${lit.zoteroAvailablePdfCount}`)
   }
@@ -344,6 +345,7 @@ export function parseNoteMarkdown(text: string, fallbackBase: string): ParsedNot
     const rawAvailablePdfCount = str('zoteroavailablepdfcount')
     const zoteroKey = str('zoterokey') || undefined
     const zoteroKeys = parseTagValue(typeof fm.zoterokeys === 'string' ? fm.zoterokeys : '')
+    const localPdf = str('localpdf') || undefined
     const zoteroPdfCount = /^\d+$/.test(rawPdfCount) ? Number(rawPdfCount) : undefined
     const zoteroAvailablePdfCount = /^\d+$/.test(rawAvailablePdfCount) ? Number(rawAvailablePdfCount) : undefined
     literature = {
@@ -357,6 +359,7 @@ export function parseNoteMarkdown(text: string, fallbackBase: string): ParsedNot
       // 没写这几个字段的老笔记不凭空补 undefined，往返保持原样
       ...(zoteroKey ? { zoteroKey } : {}),
       ...(zoteroKeys.length ? { zoteroKeys } : {}),
+      ...(localPdf ? { localPdf } : {}),
       ...(zoteroPdfCount !== undefined ? { zoteroPdfCount } : {}),
       ...(zoteroAvailablePdfCount !== undefined ? { zoteroAvailablePdfCount } : {}),
     }

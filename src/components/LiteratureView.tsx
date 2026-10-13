@@ -159,7 +159,7 @@ export function LiteratureView({ notes, onOpenNote, onImport, onApplySync }: Pro
     const yearFrom = fYearFrom.trim() === '' ? null : Number(fYearFrom)
     const yearTo = fYearTo.trim() === '' ? null : Number(fYearTo)
     const filtered = literature.filter((n) => {
-      if (onlyWithPdf && !((n.literature?.zoteroAvailablePdfCount ?? 0) > 0)) return false
+      if (onlyWithPdf && !((n.literature?.zoteroAvailablePdfCount ?? 0) > 0 || n.literature?.localPdf)) return false
       if (fCollection === '__none__') {
         if (realCollections(n).length) return false
       } else if (fCollection !== 'all') {
@@ -224,12 +224,27 @@ export function LiteratureView({ notes, onOpenNote, onImport, onApplySync }: Pro
   /** 从本机 Zotero 库解析这篇文献的 PDF，交给系统默认阅读器（去重合并后的文献可带多个 key） */
   const openLocalPdf = async (note: Note) => {
     const lit = note.literature
-    const key = lit?.zoteroKey
-    if (!key) {
-      toast.info('这篇文献还没有对应 Zotero 条目：先「同步 Zotero 分类」或用批量脚本导入')
+    const desktop = window.knowledgeGraphDesktop
+    // 一、笔记里记着的本地 PDF（pdf:link 脚本匹配到的，绝对路径）
+    if (lit?.localPdf) {
+      if (!desktop?.openExternalFile) {
+        toast.error('当前环境不支持打开本地 PDF（请在本地网页端或桌面版中使用）')
+        return
+      }
+      try {
+        const result = await desktop.openExternalFile(lit.localPdf)
+        if (result?.error) toast.error(result.error)
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : '打开 PDF 失败')
+      }
       return
     }
-    const desktop = window.knowledgeGraphDesktop
+    // 二、Zotero 库里的 PDF（按 key 解析，多 key 回退）
+    const key = lit?.zoteroKey
+    if (!key) {
+      toast.info('这篇文献还没有对应 Zotero 条目：先「同步 Zotero 分类」或跑 pdf:link 脚本匹配本地 PDF')
+      return
+    }
     if (!desktop?.openZoteroPdf) {
       toast.error('当前环境不支持打开本地 PDF（请在本地网页端或桌面版中使用）')
       return
@@ -241,9 +256,44 @@ export function LiteratureView({ notes, onOpenNote, onImport, onApplySync }: Pro
     }
   }
 
+  /** 在 Zotero 里定位到这篇文献（key 属于 Zotero 当前库时才会命中） */
+  const openInZotero = async (note: Note) => {
+    const key = note.literature?.zoteroKey
+    const desktop = window.knowledgeGraphDesktop
+    if (!key) {
+      toast.info('这篇文献没有 Zotero key：先「同步 Zotero 分类」或用批量脚本导入')
+      return
+    }
+    if (!desktop?.selectZoteroItem) {
+      toast.error('当前环境不支持跳转 Zotero（请在本地网页端或桌面版中使用）')
+      return
+    }
+    try {
+      await desktop.selectZoteroItem(key)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '跳转 Zotero 失败')
+    }
+  }
+
   /** PDF 状态列：区分「有本地 PDF」「有记录但文件不在本机」「未同步」；有 PDF 时徽标本身就是打开按钮 */
   const pdfCell = (note: Note) => {
     const lit = note.literature
+    if (lit?.localPdf) {
+      return (
+        <Button
+          variant="secondary"
+          size="sm"
+          className="h-6 gap-1 px-2 text-[10px]"
+          title={`打开本地 PDF：${lit.localPdf}`}
+          onClick={(e) => {
+            e.stopPropagation()
+            void openLocalPdf(note)
+          }}
+        >
+          <FileText className="h-3 w-3" /> PDF
+        </Button>
+      )
+    }
     if (!lit?.zoteroKey) return <span className="text-xs text-muted-foreground">—</span>
     const available = lit.zoteroAvailablePdfCount
     if (available === undefined) return <span className="text-xs text-muted-foreground">未同步</span>
@@ -260,6 +310,22 @@ export function LiteratureView({ notes, onOpenNote, onImport, onApplySync }: Pro
           }}
         >
           <FileText className="h-3 w-3" /> PDF
+        </Button>
+      )
+    }
+    if (available === 0 && lit.zoteroPdfCount) {
+      return (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 px-1 text-[10px] text-muted-foreground"
+          title="本机没有这份 PDF：在 Zotero 里打开该条目即可下载/打开它"
+          onClick={(e) => {
+            e.stopPropagation()
+            void openInZotero(note)
+          }}
+        >
+          文件不在本机 · 在 Zotero 打开
         </Button>
       )
     }
@@ -429,12 +495,14 @@ export function LiteratureView({ notes, onOpenNote, onImport, onApplySync }: Pro
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      {(n.literature?.zoteroAvailablePdfCount ?? 0) > 0 && (
+                      {((n.literature?.zoteroAvailablePdfCount ?? 0) > 0 || n.literature?.localPdf) && (
                         <>
                           <DropdownMenuItem onSelect={() => void openLocalPdf(n)}>打开本地 PDF</DropdownMenuItem>
                           <DropdownMenuSeparator />
                         </>
                       )}
+                      <DropdownMenuItem onSelect={() => void openInZotero(n)}>在 Zotero 中打开</DropdownMenuItem>
+                      <DropdownMenuSeparator />
                       <DropdownMenuItem onSelect={() => void writeCitationClipboard([litToCSL(n)], styleId)}>
                         Word 引用（{CITATION_STYLES[styleId].label}）
                       </DropdownMenuItem>

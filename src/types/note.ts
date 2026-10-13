@@ -36,6 +36,8 @@ export interface LiteratureMeta {
   zoteroKey?: string
   /** 同一规范化文献对应的全部 Zotero key；去重后再次同步仍可稳定匹配 */
   zoteroKeys?: string[]
+  /** 本机已有的 PDF 绝对路径（来自 pdf:link 脚本；只记路径，不复制文件） */
+  localPdf?: string
   /** Zotero 中登记的 PDF 数量 */
   zoteroPdfCount?: number
   /** 当前同步时实际存在于本机的 PDF 数量 */

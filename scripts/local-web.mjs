@@ -1,5 +1,6 @@
 import http from 'node:http'
 import fs from 'node:fs/promises'
+import fsSync from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
@@ -27,6 +28,15 @@ export function openerCommand(filePath) {
 function systemOpener(filePath) {
   const [command, args] = openerCommand(filePath)
   spawn(command, args, { windowsHide: true, detached: true, stdio: 'ignore' }).unref()
+}
+
+/** 打开自定义协议 URL（zotero://…）：Windows 走 rundll32 的协议处理器，不经 shell */
+function systemUrlOpener(url) {
+  if (process.platform === 'win32') {
+    spawn('rundll32.exe', ['url.dll,FileProtocolHandler', url], { windowsHide: true, detached: true, stdio: 'ignore' }).unref()
+    return
+  }
+  systemOpener(url)
 }
 
 /**
@@ -65,14 +75,17 @@ async function writeClipboardRtf(rtf, text) {
   return { error: null }
 }
 
-export async function createLocalServer({ port = 4173, vault = '', zoteroDb = '', dist = path.join(root, 'dist'), opener } = {}) {
+export async function createLocalServer({ port = 4173, vault = '', zoteroDb = '', pdfRoots = [], dist = path.join(root, 'dist'), opener, urlOpener } = {}) {
   const token = randomBytes(32).toString('hex')
   const vaults = new Set(vault ? [canonical(vault)] : [])
   const syncFiles = new Set()
+  // PDF 白名单根：笔记里 localPdf 记录的路径必须落在这些目录（或笔记库）里才允许打开
+  const allowedPdfRoots = pdfRoots.filter((dir) => typeof dir === 'string' && path.isAbsolute(dir)).map((dir) => canonical(dir))
   // Zotero 数据库白名单：只认启动参数授权的那个库，前端不能请求任意 sqlite
   const zoteroDbPath = zoteroDb && path.isAbsolute(zoteroDb) ? path.resolve(zoteroDb) : ''
   const zoteroDbs = new Set(zoteroDbPath ? [canonical(zoteroDbPath)] : [])
   const openFile = opener ?? systemOpener
+  const openUrl = urlOpener ?? systemUrlOpener
   const locks = new Map()
   let origin
   const assertVault = (dir) => {
@@ -133,6 +146,26 @@ export async function createLocalServer({ port = 4173, vault = '', zoteroDb = ''
           finally { await fs.rm(temporary, { force: true }).catch(() => {}) }
           return { filePath: file }
         })
+      }
+      case 'file:open-external': {
+        // 只允许打开笔记库内或白名单根下的 .pdf（localPdf 字段）；路径一律先解析再比对
+        const target = typeof p.path === 'string' ? path.resolve(p.path) : ''
+        if (!target || path.extname(target).toLowerCase() !== '.pdf') throw new Error('只允许打开本地 PDF 文件')
+        const key = canonical(target)
+        const inVault = [...vaults].some((dir) => key.startsWith(dir + path.sep))
+        const inRoot = allowedPdfRoots.some((dir) => key.startsWith(dir + path.sep))
+        if (!inVault && !inRoot) throw new Error('该 PDF 不在允许的目录里：请用 --pdf-root 指定它的上级目录后重启本地网页端')
+        if (!fsSync.existsSync(target)) throw new Error('文件不存在（可能已移动或改名）')
+        openFile(target)
+        return { path: target, error: null }
+      }
+      case 'zotero:select-item': {
+        // 在 Zotero 里定位条目；只接受 8 位条目 key，URL 由服务端拼
+        const key = typeof p.zoteroKey === 'string' ? p.zoteroKey : ''
+        if (!/^[A-Z0-9]{8}$/i.test(key)) throw new Error('无效的 Zotero 条目 key')
+        const url = `zotero://select/library/items/${key.toUpperCase()}`
+        openUrl(url)
+        return { url }
       }
       case 'attachments:list': return attachmentFs.list(assertVault(p.dir))
       case 'attachments:read': {
@@ -199,13 +232,17 @@ export async function createLocalServer({ port = 4173, vault = '', zoteroDb = ''
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const option = (name, fallback) => { const index = process.argv.indexOf(name); return index >= 0 ? process.argv[index + 1] : fallback }
+  const optionAll = (name) => process.argv.flatMap((value, index) => (value === name && process.argv[index + 1] ? [process.argv[index + 1]] : []))
   try {
     const configured = option('--vault', '')
     const configuredZotero = option('--zotero-db', '')
-    const local = await createLocalServer({ port: Number(option('--port', '4173')), vault: configured, zoteroDb: configuredZotero, dist: path.resolve(option('--dist', path.join(root, 'dist'))) })
+    // 允许打开笔记 localPdf 字段记录的 PDF：除笔记库外，还可显式授权若干 PDF 根目录
+    const pdfRoots = optionAll('--pdf-root')
+    const local = await createLocalServer({ port: Number(option('--port', '4173')), vault: configured, zoteroDb: configuredZotero, pdfRoots, dist: path.resolve(option('--dist', path.join(root, 'dist'))) })
     console.log(`知识图谱本地网页端：${local.origin}`)
     console.log(configured ? `笔记库：${configured}` : '在网页内选择已有笔记目录；目录与类型分区会保留。')
     console.log(configuredZotero ? `Zotero 数据库（只读）：${configuredZotero}` : '未配置 Zotero 数据库：点文献表的 PDF 徽标打开本地 PDF 需用 --zotero-db 指定 zotero.sqlite。')
+    if (pdfRoots.length) console.log(`已授权的 PDF 目录：${pdfRoots.join('；')}`)
     if (!process.argv.includes('--no-open') && process.platform === 'win32') {
       spawn('rundll32.exe', ['url.dll,FileProtocolHandler', local.origin], { detached: true, windowsHide: true, stdio: 'ignore' }).unref()
     }

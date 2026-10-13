@@ -170,4 +170,34 @@ function resolveZoteroPdf(dbPath, zoteroKey, extraKeys) {
   }
 }
 
-module.exports = { readZotero, resolveZoteroPdf, resolveAttachmentPath }
+/**
+ * 批量取一批条目的 PDF 附件文件名（不检查文件是否存在）。
+ * 用途：把磁盘上「换了附件 key 但文件还在」的 PDF 认回来。
+ */
+function pdfFileNamesForItems(dbPath, itemKeys) {
+  const db = openReadonly(dbPath)
+  try {
+    const stmt = db.prepare(
+      `SELECT ai.key AS attachmentKey, ia.path
+       FROM itemAttachments ia
+       JOIN items ai ON ai.itemID = ia.itemID
+       JOIN items i ON i.itemID = ia.parentItemID
+       WHERE i.key = ? AND lower(ia.contentType) = 'application/pdf'
+         AND ai.itemID NOT IN (SELECT itemID FROM deletedItems)`,
+    )
+    const out = {}
+    for (const key of itemKeys) {
+      const files = []
+      for (const row of stmt.all(key)) {
+        const stored = String(row.path || '')
+        if (stored.startsWith('storage:')) files.push({ attachmentKey: row.attachmentKey, name: stored.slice(8) })
+      }
+      if (files.length) out[key] = files
+    }
+    return out
+  } finally {
+    db.close()
+  }
+}
+
+module.exports = { readZotero, resolveZoteroPdf, resolveAttachmentPath, pdfFileNamesForItems }

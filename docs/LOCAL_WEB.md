@@ -26,9 +26,19 @@ npm run web:local -- --vault "D:\BaiduSyncdisk\Bibliotx\Vault"
 
 ## 文献表
 
-- **打开 PDF**：点「PDF」徽标（本身就是一个按钮）用系统默认阅读器打开本机 Zotero 里对应的 PDF；单击标题/行打开笔记。
+- **打开 PDF**：点「PDF」徽标（本身就是一个按钮）用系统默认阅读器打开本机 PDF：优先笔记里记的 `localPdf`（pdf:link 脚本匹配到的绝对路径），否则按 Zotero key 解析（多 key 回退）。
   打开动作不经过 `cmd start`，Windows 上直接 `explorer.exe <文件>`，文件名含 `&`、括号也不会被解释。
-  去重合并后的文献带多个 Zotero key，主 key 没有 PDF 时会按 `zoteroKeys` 顺序找下一份可访问的 PDF。
+  本机没有这份 PDF 时，PDF 列显示「文件不在本机 · 在 Zotero 打开」，点它会用 `zotero://select/library/items/<key>` 跳到 Zotero 并选中该条目（Zotero 会按需下载附件）。
+- **本地 PDF 匹配**：笔记标题/Zotero 附件名 → 在指定目录里搜 PDF，命中后把路径写进 `literature.localPdf`（只记路径，不复制不移动文件）：
+  ```powershell
+  npm run pdf:link -- --vault "<vault>"                    # dry-run：逐条预览
+  npm run pdf:link -- --vault "<vault>" --report <file>    # JSON 报告
+  npm run pdf:link -- --vault "<vault>" --search "D:\某目录"   # 追加搜索目录（可多次）
+  npm run pdf:link -- --vault "<vault>" --apply            # 写盘（先备份改动文件）
+  ```
+  匹配优先级：Zotero 附件文件名（换了附件 key 也能认回）> 标题完全相同 > 前缀包含 > 词集相似（默认阈值 0.92，--loose 降到 0.70）；同一份 PDF 只归一篇。
+  实测（2026-10-13，真实 vault）：668 篇里 280 篇本来就能开，脚本又认回 **61** 篇（标题精确 36 / 前缀包含 23 / Zotero 附件名 2）→ 界面「有本地 PDF」筛出 **341/668**；其余 327 篇的 PDF 本机确实没有（Zotero 侧只有全文缓存 `.zotero-ft-cache`）。
+- **网页端打开 localPdf**：需要把它的上级目录用 `--pdf-root` 授权（`启动网页端.cmd` 已带上 Literature / Archive / Inform / Zotero storage 与 C 盘 Zotero storage）；未授权的路径会被服务端拒绝。
 - **筛选**：分类（含「未分类」）、期刊/会议、年份范围、「有本地 PDF」开关；分类计数按真实分类统计。
 - **未分类是动态状态**：只有「没有任何真实分类」才显示未分类，`collections` 里不写「未分类」，标签里不写「方向:未分类」。
   历史数据在同步/去重时自动清理（vault 复核：668 篇里真正未分类 64 篇）。

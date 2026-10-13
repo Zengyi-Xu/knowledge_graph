@@ -137,6 +137,37 @@ try {
     check('缺 key → 400 而不是崩溃', (await call2('zotero:open-pdf', {})).status === 400)
   } finally { await local2.close() }
 
+  // ---- 打开笔记里记录的本地 PDF（localPdf）：白名单 + 只认 .pdf ----
+  {
+    await fs.mkdir(path.join(vault, 'pdfs'), { recursive: true })
+    await fs.writeFile(path.join(vault, 'pdfs', '本地.pdf'), '%PDF-1.4 local')
+    const outsideDir = path.join(dir, 'outside-pdfs')
+    await fs.mkdir(outsideDir, { recursive: true })
+    await fs.writeFile(path.join(outsideDir, '外面.pdf'), '%PDF-1.4 outside')
+    const opened2 = []
+    const urlOpened = []
+    const local3 = await createLocalServer({ port: 0, dist, vault, opener: (file) => { opened2.push(file) }, urlOpener: (url) => { urlOpened.push(url) } })
+    async function call3(method, payload) {
+      const response = await fetch(local3.origin + '/api/local', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-KG-Token': local3.token }, body: JSON.stringify({ method, payload }) })
+      return { status: response.status, body: await response.json() }
+    }
+    try {
+      const okOpen = await call3('file:open-external', { path: path.join(vault, 'pdfs', '本地.pdf') })
+      check('打开笔记库内的本地 PDF', okOpen.status === 200 && opened2.length === 1 && okOpen.body.result.path.endsWith('本地.pdf'))
+      check('笔记库外的 PDF 默认拒绝', (await call3('file:open-external', { path: path.join(outsideDir, '外面.pdf') })).status === 400 && opened2.length === 1)
+      check('非 PDF 一律拒绝', (await call3('file:open-external', { path: path.join(vault, '学习', '测试.md') })).status === 400)
+      check('缺路径/相对路径拒绝', (await call3('file:open-external', {})).status === 400 && (await call3('file:open-external', { path: 'pdfs/本地.pdf' })).status === 400)
+      check('在 Zotero 里定位条目的 URL 由服务端拼', (await call3('zotero:select-item', { zoteroKey: 'abcd1234' })).status === 200 && urlOpened.length === 1 && urlOpened[0] === 'zotero://select/library/items/ABCD1234')
+      check('非法条目 key 拒绝且不调用协议', (await call3('zotero:select-item', { zoteroKey: '..\\..\\etc' })).status === 400 && urlOpened.length === 1)
+    } finally { await local3.close() }
+    const local4 = await createLocalServer({ port: 0, dist, vault, pdfRoots: [outsideDir], opener: (file) => { opened2.push(file) } })
+    try {
+      const response = await fetch(local4.origin + '/api/local', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-KG-Token': local4.token }, body: JSON.stringify({ method: 'file:open-external', payload: { path: path.join(outsideDir, '外面.pdf') } }) })
+      const body = await response.json()
+      check('--pdf-root 授权的目录可以打开', response.status === 200 && opened2.length === 2 && body.result.path.endsWith('外面.pdf'))
+    } finally { await local4.close() }
+  }
+
   // ---- 系统打开器：不经过 cmd/sh，文件名里的 shell 字符不会被解释 ----
   {
     const [, argv] = openerCommand('D:/tmp/名字 & (1) - 副本.pdf')

@@ -620,6 +620,22 @@ async function main() {
     assert.equal(cleanLiteratureTitle('  多余   空白  '), '多余 空白')
   })
 
+  await check('标题匹配：完全相同 / 前缀包含 / 通用短语不误配', async () => {
+    const { matchScore, stripZoteroPrefix, normalizeForMatch } = await import('@/lib/pdfMatch')
+    assert.equal(matchScore('Silicon Photonics Technology and Platform Development', 'Silicon Photonics Technology and Platform Development.pdf').score, 1)
+    // Zotero 文件名前缀（作者 等 - 年份 - ）要被剥掉；剥掉后与标题完全相同 → 1.0
+    assert.equal(stripZoteroPrefix('Siew 等 - 2021 - Review of Silicon Photonics.pdf'), 'Review of Silicon Photonics.pdf')
+    assert.equal(matchScore('Review of Silicon Photonics', 'Siew 等 - 2021 - Review of Silicon Photonics.pdf').score, 1)
+    // 前缀包含（较短的是较长者开头）→ 0.95
+    assert.equal(matchScore('Review of Silicon Photonics', 'Review of Silicon Photonics Technology and Platform Development.pdf').score, 0.95)
+    // 下划线/空格/大小写差异
+    assert.equal(normalizeForMatch('6G_Wireless Communication Systems'), '6gwirelesscommunicationsystems')
+    assert.equal(matchScore('12.14Gb/s Si-substrated GaN/InGaN-based Micro-Photodetector Array', '12.14Gb_s_Si-substrated_GaN_InGaN-based_Micro-Photodetector_Array_With_V-pit_Structure.pdf').score, 0.95)
+    // 通用短语（Kaushal 综述）不能靠“包含”蹭上具体论文：低于默认接受阈值 0.92
+    assert.ok(matchScore('34.5 m underwater optical wireless communication with 2.70 Gbps data rate', 'Kaushal和Kaddoum - 2016 - Underwater Optical Wireless Communication.pdf').score < 0.92)
+    assert.ok(matchScore('An Empirical Comparison of Modulation Schemes', 'Kaushal和Kaddoum - 2016 - Underwater Optical Wireless Communication.pdf').score < 0.92)
+  })
+
   await check('真实分类过滤：只有「未分类」占位的笔记在界面上算作未分类', async () => {
     const { realCollectionsOf } = await import('@/lib/zoteroMeta')
     assert.deepEqual(realCollectionsOf(['未分类']), [])

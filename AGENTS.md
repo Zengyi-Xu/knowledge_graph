@@ -5,6 +5,7 @@
 - 构建 / 回归：`npm run build`（tsc -b + vite build）、`npm run test:vault | test:lit | test:web | test:zotero | test:zotero-import | test:zotero-e2e`
 - 批量 Zotero 同步：`npm run zotero:sync -- --vault "<v>" --db "<zotero.sqlite>"`（dry-run，不在 vault 建任何目录/文件）；
   `--apply` 才写盘（先整库备份 `.backups/zotero-import-<时间戳>/`）；`--report <file>` 指定报告；`--limit <n>` 小批量试跑；`--allow-missing` 放行索引里读不到的文件。
+- 本地 PDF 认回：`npm run pdf:link -- --vault "<v>"`（dry-run）/ `--apply`（先备份）——按「Zotero 附件文件名 → 标题（清洗后）」在 Literature/Archive/Inform/Zotero storage 等目录搜 PDF，命中的绝对路径写进笔记的 `literature.localPdf`（只记路径，不复制不移动文件；同一份 PDF 只归一篇）。搜索目录用 `--search` 追加，`--loose` 放宽到 0.70。
 - 去重：`npm run dedupe:vault -- --vault "<v>"`（预览，逐组列出保留/被合并/可疑）；
   `--apply` 写盘；`--merge-suspect` 合并标题仅近似相等的可疑组；`--fix-placeholders` 清理全库历史占位「未分类」。
 
@@ -23,6 +24,9 @@
    `resolveZoteroPdf(dbPath, key, extraKeys)` 支持多 key 回退（去重后的文献可选到任一 key 下的 PDF）。
 6. 文献表 UI：单击标题/行打开笔记，PDF 徽标本身是按钮（单击打开、无 220ms 延迟）；「标签」列默认隐藏；行内「⋮」菜单承接引用操作；
    一次渲染 150 行 +「显示更多」；标题显示走 `cleanLiteratureTitle`（解 HTML 实体、去内联标签/站点尾缀/`$…$` 定界符，只影响显示，不改数据）。
+7. PDF 打开链（优先级）：`literature.localPdf`（pdf:link 写入的绝对路径，只记路径不复制文件）→ Zotero `zoteroKeys`（多 key 回退）→ 都没有时「在 Zotero 打开」用 `zotero://select/library/items/<key>` 定位条目。
+   网页端打开 localPdf 必须落在 `--pdf-root` 授权目录（`启动网页端.cmd` 已带常用目录）；桌面版走 `file:open-external`（只接受存在的 `.pdf` 绝对路径）。
+   **任何写盘路径都必须认识 front matter 字段**：老构建/老页面回写会静默丢掉它不认识的字段（2026-10-13 实际发生过一次，`zoteroKeys` 被抹掉）；改字段后要同步 `vaultFormat` 读写 + 让用户强刷网页端。
 
 ## 真实数据环境（动手前先看）
 
@@ -30,6 +34,7 @@
 - 改真实库之前：先复制 vault 副本跑 dry-run，核对「新建/更新/删除」数字；应用真实库写入前必须由用户明确同意。
 - 2026-10-13 已更新真实库（`zotero:sync --apply`，备份 `.backups/zotero-import-20261013-230700/`）：匹配 1367 全按 key、新建 0、更新 668、删除 0；
   复跑 = 0/0/0；`dedupe:vault` = 0 组；正文被改动 0；真正未分类 64 篇；529 篇带多个 `zoteroKeys`。
+- 同日 `pdf:link --apply` 给 61 篇补上 `localPdf`（备份 `.backups/pdf-link-20261013203154/`）：界面「有本地 PDF」341/668（280 原有 + 61 认回）；其余 327 篇 PDF 本机没有（Zotero 侧只有 `.zotero-ft-cache`，坚果云 WebDAV zip 属于另一个库，对这批无增益）。
 - 旧版 dry-run 留下的 6 个 `.backups/zotero-preview-*` 目录仍在（仅报告，可删）。
 
 ## 代理工作纪律（省上下文与额度）
