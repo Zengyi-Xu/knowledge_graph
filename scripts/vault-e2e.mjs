@@ -147,7 +147,7 @@ class CDP {
 }
 
 function noteCount(bodyText) {
-  const m = bodyText.match(/·\s*(\d+)\s*篇笔记/)
+  const m = bodyText.match(/·\s*(\d+)\s*(?:篇笔记|个条目)/)
   return m ? Number(m[1]) : null
 }
 
@@ -186,7 +186,14 @@ async function main() {
     await cdp.send('Page.enable')
 
     // 直接写 localStorage，跳过需要人工操作的原生目录选择框
-    await cdp.eval(`localStorage.setItem('kaust-knowledge-graph-vault-dir', ${JSON.stringify(vaultDir)})`)
+    // （开发版用 kg-dev- 前缀：见 src/lib/env.ts；经典模式让后面的 textarea 驱动有效）
+    await cdp.eval(`(() => {
+      localStorage.setItem('kaust-knowledge-graph-vault-dir', ${JSON.stringify(vaultDir)})
+      localStorage.setItem('kg-dev-vault-dir-v1', ${JSON.stringify(vaultDir)})
+      localStorage.setItem('kg-vault-dir-v1', ${JSON.stringify(vaultDir)})
+      localStorage.setItem('kg-dev-editor-mode-v1', 'classic')
+      localStorage.setItem('kg-editor-mode-v1', 'classic')
+    })()`)
     await cdp.send('Page.reload')
     await cdp.evalRetry('document.readyState === "complete" ? "ready" : null')
 

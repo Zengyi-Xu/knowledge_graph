@@ -3,14 +3,18 @@
  * 只做「计划」：比对 Zotero 读出的条目与本地文献笔记，产出待应用的更新，
  * 由调用方（UI）确认后逐个 updateNote 应用。绝不直接改笔记。
  *
- * 匹配优先级：DOI（小写一致）> 标题归一化一致。
+ * 匹配优先级：Zotero key（最稳）> DOI（小写一致）> 标题归一化一致。
  * 标签规则：`方向:<分类首段>`、`期刊:<venue>`、`年份:<year>`，已存在的标签不重复加。
- * collections 与已有值取并集，不覆盖。
+ * collections 与已有值取并集；Zotero 里没有分类的条目落到「未分类」（有真实分类时不再保留）。
  */
 import type { Note } from '@/types/note'
+import { mergeCollections, normalizeTitle, tagsForZoteroItem } from '@/lib/zoteroMeta'
+
+/** 标题归一化 / 标签规则 / 分类合并都在 zoteroMeta，这里转出以保持既有引用可用 */
+export { normalizeTitle, tagsForZoteroItem, mergeCollections, UNCLASSIFIED } from '@/lib/zoteroMeta'
 
 export interface ZoteroItem {
-  zoteroKey: number
+  zoteroKey: string
   itemType: string
   title: string
   doi: string
@@ -18,14 +22,22 @@ export interface ZoteroItem {
   venue: string
   authors: string[]
   collectionPaths: string[]
+  pdfCount: number
+  availablePdfCount: number
 }
 
 export interface ZoteroSyncUpdate {
   noteId: string
-  /** 合并后的完整 collections（并集，已排序去重） */
+  /** 合并后的完整 collections（并集，已排序去重；空则记「未分类」） */
   collections: string[]
   /** 需要新增的标签（已排除笔记现有标签） */
   tagsToAdd: string[]
+  /** Zotero 条目的稳定 key，写回 literature.zoteroKey */
+  zoteroKey: string
+  /** Zotero 中登记的 PDF 数量 */
+  zoteroPdfCount: number
+  /** 当前实际存在于本机的 PDF 数量 */
+  zoteroAvailablePdfCount: number
 }
 
 export interface ZoteroSyncPlan {
@@ -35,42 +47,26 @@ export interface ZoteroSyncPlan {
   matchedCount: number
 }
 
-/** 标题归一化：小写 + 去掉所有非字母数字字符（容忍大小写/标点/空格差异） */
-export function normalizeTitle(title: string): string {
-  return title
-    .toLowerCase()
-    .replace(/[^a-z0-9一-鿿]/g, '')
-}
-
-/** 为一条 Zotero 条目生成应补的标签（不含笔记已有标签的过滤） */
-export function tagsForZoteroItem(item: ZoteroItem): string[] {
-  const tags = new Set<string>()
-  for (const path of item.collectionPaths) {
-    const first = path.split('/')[0].trim()
-    if (first) tags.add(`方向:${first}`)
-  }
-  if (item.venue.trim()) tags.add(`期刊:${item.venue.trim()}`)
-  if (item.year != null) tags.add(`年份:${item.year}`)
-  return [...tags]
-}
-
 export function planZoteroSync(zoteroItems: ZoteroItem[], notes: Note[]): ZoteroSyncPlan {
+  const keyMap = new Map<string, ZoteroItem>()
   const doiMap = new Map<string, ZoteroItem>()
   const titleMap = new Map<string, ZoteroItem>()
   for (const item of zoteroItems) {
+    if (item.zoteroKey && !keyMap.has(item.zoteroKey)) keyMap.set(item.zoteroKey, item)
     if (item.doi && !doiMap.has(item.doi)) doiMap.set(item.doi, item)
     const key = normalizeTitle(item.title)
     if (key && !titleMap.has(key)) titleMap.set(key, item)
   }
 
   const updates: ZoteroSyncUpdate[] = []
-  const matchedKeys = new Set<number>()
+  const matchedKeys = new Set<string>()
   let matchedCount = 0
 
   for (const note of notes) {
     if (note.type !== 'literature' || !note.literature) continue
     const lit = note.literature
     const item =
+      (lit.zoteroKey && keyMap.get(lit.zoteroKey)) ||
       (lit.doi && doiMap.get(lit.doi.trim().toLowerCase())) ||
       titleMap.get(normalizeTitle(note.title))
     if (!item) continue
@@ -78,15 +74,29 @@ export function planZoteroSync(zoteroItems: ZoteroItem[], notes: Note[]): Zotero
     matchedCount++
     matchedKeys.add(item.zoteroKey)
 
-    const collections = [...new Set([...(lit.collections ?? []), ...item.collectionPaths])].sort()
+    const before = lit.collections ?? []
+    const collections = mergeCollections(before, item.collectionPaths)
     const existingTags = new Set(note.tags)
     const tagsToAdd = tagsForZoteroItem(item).filter((t) => !existingTags.has(t))
+    const pdfCount = item.pdfCount ?? 0
+    const availablePdfCount = item.availablePdfCount ?? 0
+    const changed =
+      collections.length !== before.length ||
+      collections.some((c, i) => c !== before[i]) ||
+      tagsToAdd.length > 0 ||
+      lit.zoteroKey !== item.zoteroKey ||
+      lit.zoteroPdfCount !== pdfCount ||
+      lit.zoteroAvailablePdfCount !== availablePdfCount
 
-    if (
-      collections.length !== (lit.collections?.length ?? 0) ||
-      tagsToAdd.length > 0
-    ) {
-      updates.push({ noteId: note.id, collections, tagsToAdd })
+    if (changed) {
+      updates.push({
+        noteId: note.id,
+        collections,
+        tagsToAdd,
+        zoteroKey: item.zoteroKey,
+        zoteroPdfCount: pdfCount,
+        zoteroAvailablePdfCount: availablePdfCount,
+      })
     }
   }
 

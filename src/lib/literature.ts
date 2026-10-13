@@ -3,7 +3,8 @@
  * 网络请求只出现在本模块（CrossRef / arXiv / DataCite 三个域名），其余离线可用。
  */
 import Cite from 'citation-js'
-import type { LiteratureMeta, Note } from '@/types/note'
+import type { Note } from '@/types/note'
+export { toLiteratureMeta } from './literatureMeta'
 import { APA_CSL_XML, GB_CSL_XML, ZH_CN_LOCALE_XML } from './csl/styles'
 
 export type CslItem = Record<string, unknown>
@@ -269,20 +270,4 @@ export function importFromRis(text: string): ImportedLit {
   const all = parseCitationText(text)
   if (!all.length) throw new Error('没有从 RIS 中解析到文献条目')
   return all[0]
-}
-
-/** ImportedLit → 新建文献笔记用的元数据（citekey 由调用方生成） */
-export function toLiteratureMeta(
-  imported: ImportedLit,
-  citekey: string,
-): LiteratureMeta {
-  return {
-    authors: imported.authors,
-    venue: imported.venue,
-    year: imported.year,
-    doi: imported.doi,
-    citekey,
-    attachments: [],
-    collections: [],
-  }
 }

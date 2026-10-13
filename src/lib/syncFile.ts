@@ -8,7 +8,7 @@ export const AUTO_SYNC_KEY = 'auto-sync-v1'
 export const SYNC_BASELINE_KEY = 'sync-baseline-v1'
 
 export function isDesktop(): boolean {
-  return Boolean(window.knowledgeGraphDesktop?.isElectron)
+  return Boolean(window.knowledgeGraphDesktop?.isElectron || window.knowledgeGraphDesktop?.isLocalWeb)
 }
 
 /** 解析同步 JSON 里的 literature 字段：字段类型逐个校验，坏字段回空值 */

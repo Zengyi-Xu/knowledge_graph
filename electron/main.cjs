@@ -3,7 +3,7 @@ const fs = require('node:fs/promises')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 const { listVault, readVaultFiles, writeVault } = require('./vaultFs.cjs')
-const { readZotero } = require('./zoteroFs.cjs')
+const { readZotero, resolveZoteroPdf } = require('./zoteroFs.cjs')
 const { aiStatus, aiComplete } = require('./aiGateway.cjs')
 const attachmentFs = require('./attachmentFs.cjs')
 
@@ -86,6 +86,8 @@ function createWindow() {
       sandbox: true,
       devTools: IS_DEV,
       preload: path.join(__dirname, 'preload.cjs'),
+      // 默认 Zotero 库位置（若存在）：由 preload 注入渲染端的 defaultZoteroDb
+      additionalArguments: defaultZoteroDbArg(),
     },
   })
 
@@ -204,8 +206,35 @@ function registerVaultHandlers() {
 }
 
 /**
+ * Zotero 库的默认位置。Zotero 数据目录可能被放到同步盘（本研究环境是
+ * D:\BaiduSyncdisk\Bibliotx\Zotero），因此先探测候选路径，只把真实存在的那个交给渲染端。
+ */
+function defaultZoteroDb() {
+  const candidates = [
+    process.env.KG_ZOTERO_DB,
+    path.join(process.env.APPDATA ?? '', 'Zotero', 'Zotero', 'zotero.sqlite'),
+    'D:\\BaiduSyncdisk\\Bibliotx\\Zotero\\zotero.sqlite',
+    path.join(require('node:os').homedir(), 'Zotero', 'zotero.sqlite'),
+  ].filter((p) => typeof p === 'string' && p)
+  for (const candidate of candidates) {
+    try {
+      if (require('node:fs').existsSync(candidate)) return candidate
+    } catch {
+      /* 下一个候选 */
+    }
+  }
+  return ''
+}
+
+function defaultZoteroDbArg() {
+  const found = defaultZoteroDb()
+  return found ? [`--kg-default-zotero-db=${found}`] : []
+}
+
+/**
  * Zotero 只读同步通道：仅接受用户显式给出的 zotero.sqlite 路径，
  * 以 readonly 打开（Zotero 运行时锁库会返回友好错误），绝不写入。
+ * open-pdf 只接收书目 key，PDF 路径由本机 Zotero 库解析，不让渲染端指定任意文件。
  */
 function registerZoteroHandlers() {
   ipcMain.handle('zotero:read', async (_event, payload) => {
@@ -213,6 +242,16 @@ function registerZoteroHandlers() {
       throw new Error('Invalid zotero db path')
     }
     return readZotero(payload.dbPath)
+  })
+
+  ipcMain.handle('zotero:open-pdf', async (_event, payload) => {
+    if (!payload || typeof payload.dbPath !== 'string' || !payload.dbPath || typeof payload.zoteroKey !== 'string') {
+      throw new Error('Invalid zotero pdf request')
+    }
+    const pdfPath = resolveZoteroPdf(payload.dbPath, payload.zoteroKey)
+    const error = await shell.openPath(pdfPath)
+    if (error) throw new Error(`无法打开 PDF：${error}`)
+    return { path: pdfPath }
   })
 }
 
@@ -277,6 +316,25 @@ function registerAttachmentHandlers() {
       throw new Error('Invalid attachments remove payload')
     }
     return attachmentFs.remove(payload.dir, payload.rel)
+  })
+
+  // 用系统默认程序打开附件（如 PDF 阅读器）；返回 { error } 供渲染进程提示
+  ipcMain.handle('attachments:open-external', async (_event, payload) => {
+    if (!payload || typeof payload.dir !== 'string' || typeof payload.rel !== 'string') {
+      throw new Error('Invalid attachments open-external payload')
+    }
+    const abs = path.resolve(payload.dir, payload.rel)
+    const root = path.resolve(payload.dir)
+    if (abs !== root && !abs.startsWith(root + path.sep)) {
+      return { error: '路径越界' }
+    }
+    try {
+      await fs.access(abs)
+    } catch {
+      return { error: '文件不存在' }
+    }
+    const error = await shell.openPath(abs)
+    return { error: error || null }
   })
 
   ipcMain.handle('attachments:choose-open', async () => {

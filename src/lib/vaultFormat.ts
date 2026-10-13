@@ -126,6 +126,16 @@ function sameFolder(a: string, b: string): boolean {
   return LEGACY_FOLDERS[a] === b || LEGACY_FOLDERS[b] === a
 }
 
+/**
+ * 文件名比较用的键。
+ * Windows 与 macOS 的文件系统不区分大小写：'A.md' 与 'a.md' 是同一个文件，
+ * 因此冲突检测、释放判断、删除保护全部按小写比较，否则两条只有大小写差异的标题
+ * 会被分配成同一个物理文件，后写的静默覆盖先写的。
+ */
+function pathKey(relPath: string): string {
+  return (relPath ?? '').replace(/\\/g, '/').toLowerCase()
+}
+
 /** 文件夹名的最大长度（中文 3 字节/字，留足余量） */
 const MAX_FOLDER_LEN = 40
 
@@ -193,6 +203,9 @@ export function toMarkdown(note: Note): string {
     fm.push(`citekey: ${JSON.stringify(lit.citekey ?? '')}`)
     fm.push(`attachments: ${JSON.stringify(lit.attachments ?? [])}`)
     fm.push(`collections: ${JSON.stringify(lit.collections ?? [])}`)
+    if (lit.zoteroKey) fm.push(`zoteroKey: ${JSON.stringify(lit.zoteroKey)}`)
+    if (typeof lit.zoteroPdfCount === 'number') fm.push(`zoteroPdfCount: ${lit.zoteroPdfCount}`)
+    if (typeof lit.zoteroAvailablePdfCount === 'number') fm.push(`zoteroAvailablePdfCount: ${lit.zoteroAvailablePdfCount}`)
   }
   fm.push(`tags: ${JSON.stringify(note.tags ?? [])}`)
   fm.push(`created: ${new Date(note.createdAt).toISOString()}`)
@@ -326,6 +339,11 @@ export function parseNoteMarkdown(text: string, fallbackBase: string): ParsedNot
   if (type === 'literature') {
     const rawYear = str('year')
     const yearNum = /^\d+$/.test(rawYear) ? Number(rawYear) : NaN
+    const rawPdfCount = str('zoteropdfcount')
+    const rawAvailablePdfCount = str('zoteroavailablepdfcount')
+    const zoteroKey = str('zoterokey') || undefined
+    const zoteroPdfCount = /^\d+$/.test(rawPdfCount) ? Number(rawPdfCount) : undefined
+    const zoteroAvailablePdfCount = /^\d+$/.test(rawAvailablePdfCount) ? Number(rawAvailablePdfCount) : undefined
     literature = {
       authors: parseTagValue(typeof fm.authors === 'string' ? fm.authors : ''),
       venue: str('venue'),
@@ -334,6 +352,10 @@ export function parseNoteMarkdown(text: string, fallbackBase: string): ParsedNot
       citekey: str('citekey'),
       attachments: parseTagValue(typeof fm.attachments === 'string' ? fm.attachments : ''),
       collections: parseTagValue(typeof fm.collections === 'string' ? fm.collections : ''),
+      // 没写这几个字段的老笔记不凭空补 undefined，往返保持原样
+      ...(zoteroKey ? { zoteroKey } : {}),
+      ...(zoteroPdfCount !== undefined ? { zoteroPdfCount } : {}),
+      ...(zoteroAvailablePdfCount !== undefined ? { zoteroAvailablePdfCount } : {}),
     }
   }
 
@@ -431,11 +453,11 @@ export function assignFileNames(
   }
 
   // 索引里登记、但主人已改名/已删除的文件名 → 可以给别人用
-  const wantedFiles = new Set(wanted.values())
+  const wantedFiles = new Set([...wanted.values()].map(pathKey))
   const freed = new Set<string>()
-  for (const e of index ?? []) if (!wantedFiles.has(e.file)) freed.add(e.file)
+  for (const e of index ?? []) if (!wantedFiles.has(pathKey(e.file))) freed.add(pathKey(e.file))
 
-  const disk = new Set(diskMdNames)
+  const disk = new Set(diskMdNames.map(pathKey))
   const claimed = new Set<string>()
   const out = new Map<string, string>()
 
@@ -446,14 +468,15 @@ export function assignFileNames(
     const base = baseNameOf(desired)
     let candidate = desired
     for (let i = 2; i <= 500; i++) {
-      const takenByOther = claimed.has(candidate)
+      const key = pathKey(candidate)
+      const takenByOther = claimed.has(key)
       // 磁盘上已有该名字，但它既不是本篇的现名、也没被释放 → 属于未纳管文件，必须避让
-      const wouldClobber = disk.has(candidate) && !freed.has(candidate) && candidate !== cur?.file
+      const wouldClobber = disk.has(key) && !freed.has(key) && key !== pathKey(cur?.file ?? '')
       if (!takenByOther && !wouldClobber) break
       const name = withSuffix(base, i) + MD_EXT
       candidate = folder ? `${folder}/${name}` : name
     }
-    claimed.add(candidate)
+    claimed.add(pathKey(candidate))
     out.set(n.id, candidate)
   }
   return out
@@ -483,14 +506,19 @@ export function planVaultWrite(
   }
 
   const liveIds = new Set(notes.map((n) => n.id))
-  const writtenFiles = new Set(writes.map((w) => w.file))
+  const writtenFiles = new Set(writes.map((w) => pathKey(w.file)))
+  // 仍然被某篇存活笔记占用的路径（不区分大小写）绝不能删：Windows 上 'A.md' 与 'a.md' 是同一个文件
+  const keptFiles = new Set([...names.values()].map(pathKey))
   const deletes = new Set<string>()
   for (const e of index ?? []) {
     if (!liveIds.has(e.id)) deletes.add(e.file)
     else if (names.get(e.id) !== e.file) deletes.add(e.file)
   }
-  // 改名互换等场景：新名字已经写过了，就不能再删
-  for (const f of [...deletes]) if (writtenFiles.has(f)) deletes.delete(f)
+  // 改名互换等场景：新名字已经写过了，或者该路径还被别的笔记用着，就不能再删
+  for (const f of [...deletes]) {
+    const key = pathKey(f)
+    if (writtenFiles.has(key) || keptFiles.has(key)) deletes.delete(f)
+  }
 
   const meta = buildMeta(notes, names)
   const index2: VaultIndexEntry[] = notes.map((n) => ({

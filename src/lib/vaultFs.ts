@@ -46,7 +46,8 @@ export async function listVault(dir: string): Promise<VaultDirListing | null> {
 export async function readVaultTexts(dir: string, names: string[]): Promise<Map<string, string>> {
   const out = new Map<string, string>()
   const api = window.knowledgeGraphDesktop
-  if (!api?.readVaultFiles || !dir || names.length === 0) return out
+  if (names.length === 0) return out
+  if (!api?.readVaultFiles || !dir) throw new Error('vault 读取不可用，不能将未读取的文件视作已删除')
   const files = await api.readVaultFiles(dir, names)
   for (const f of files ?? []) {
     if (f && typeof f.name === 'string' && typeof f.text === 'string') out.set(f.name, f.text)

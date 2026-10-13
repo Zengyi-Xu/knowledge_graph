@@ -14,6 +14,20 @@ const META_NAME = 'meta.json'
 /** 递归扫描时跳过的目录（工具目录 / 依赖 / 版本库） */
 const SKIP_DIRS = new Set(['node_modules', '.git', '.obsidian', '.trash'])
 
+/** 有界并发，限制同步盘/杀软同时打开的文件数，且保持输入顺序。 */
+async function mapConcurrent(items, fn, concurrency = 32) {
+  const out = new Array(items.length)
+  let cursor = 0
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    for (;;) {
+      const i = cursor++
+      if (i >= items.length) return
+      out[i] = await fn(items[i], i)
+    }
+  }))
+  return out
+}
+
 /** Windows 上杀软/编辑器可能短暂占用文件，重试几次 */
 async function withRetry(fn, attempts = 4) {
   let lastError
@@ -97,17 +111,15 @@ async function listVault(dir) {
     throw error
   }
 
-  let meta = null
-  const md = []
+  const meta = await fs.readFile(path.join(abs, META_NAME), 'utf8').catch((error) => {
+    if (error && error.code === 'ENOENT') return null
+    throw error
+  })
+  const names = []
 
   const walk = async (relDir) => {
     const currentAbs = relDir ? path.join(abs, relDir) : abs
-    let entries
-    try {
-      entries = await fs.readdir(currentAbs, { withFileTypes: true })
-    } catch {
-      return
-    }
+    const entries = relDir ? await fs.readdir(currentAbs, { withFileTypes: true }) : rootEntries
     for (const entry of entries) {
       const name = entry.name
       if (name.startsWith('.')) continue
@@ -118,18 +130,20 @@ async function listVault(dir) {
         continue
       }
       if (!entry.isFile()) continue
-      if (!relDir && name.toLowerCase() === META_NAME) {
-        meta = await fs.readFile(path.join(abs, name), 'utf8').catch(() => null)
-        continue
-      }
       if (!MD_RE.test(name)) continue
-      const stat = await fs.stat(path.join(abs, rel)).catch(() => null)
-      if (!stat) continue
-      md.push({ name: rel, mtimeMs: stat.mtimeMs, size: stat.size })
+      names.push(rel)
     }
   }
 
   await walk('')
+  const stats = await mapConcurrent(names, async (name) => {
+    const stat = await fs.stat(path.join(abs, name)).catch((error) => {
+      if (error && error.code === 'ENOENT') return null
+      throw error
+    })
+    return stat ? { name, mtimeMs: stat.mtimeMs, size: stat.size } : null
+  })
+  const md = stats.filter(Boolean)
   md.sort((a, b) => a.name.localeCompare(b.name))
   return { exists: true, meta, md }
 }
@@ -137,16 +151,15 @@ async function listVault(dir) {
 /** 读取指定 md 的正文（相对路径）；文件不存在返回 text: null */
 async function readVaultFiles(dir, names) {
   const abs = path.resolve(dir)
-  const out = []
-  for (const name of names || []) {
-    const rel = normalizeRel(name)
+  // 先验证所有路径，再开始 I/O，拒绝批次里夹带的越界路径。
+  const rels = (names || []).map(normalizeRel)
+  return mapConcurrent(rels, async (rel) => {
     const text = await fs.readFile(resolveInside(abs, rel), 'utf8').catch((error) => {
       if (error && error.code === 'ENOENT') return null
       throw error
     })
-    out.push({ name: rel, text })
-  }
-  return out
+    return { name: rel, text }
+  })
 }
 
 /**
@@ -181,4 +194,4 @@ async function writeVault(dir, payload) {
   return { written, deleted, filePath: abs }
 }
 
-module.exports = { listVault, readVaultFiles, writeVault, META_NAME, normalizeRel, resolveInside, withRetry }
+module.exports = { listVault, readVaultFiles, writeVault, META_NAME, normalizeRel, resolveInside, withRetry, mapConcurrent }

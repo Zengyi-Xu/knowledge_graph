@@ -1,0 +1,95 @@
+/* Vditor 与应用的融合：Word 式左对齐排版、去边框、单一滚动容器 */
+.kg-vditor {
+  overflow: hidden;
+}
+
+.kg-vditor .vditor {
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+}
+
+.kg-vditor .vditor-toolbar {
+  border-bottom: 1px solid hsl(var(--border));
+  background: var(--toolbar-background-color);
+}
+
+.kg-vditor .vditor-toolbar__item button {
+  color: var(--toolbar-icon-color);
+}
+
+.kg-vditor .vditor-content {
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 唯一的纵向滚动条挂在编辑区面板右缘：pre 随内容伸长，滚动由外层容器承担；
+   背景色跟随 Vditor 主题变量（夜读/暗黑模式下整片编辑区为深色） */
+.kg-vditor .vditor-wysiwyg {
+  overflow-y: auto;
+  min-height: 0;
+  background: var(--panel-background-color);
+}
+
+.kg-vditor .vditor-wysiwyg pre.vditor-reset {
+  overflow: visible;
+  height: auto;
+  min-height: 100%;
+}
+
+.kg-vditor .vditor-wysiwyg .vditor-reset {
+  max-width: 56em;
+  margin: 0;
+  padding: 20px 16px 40vh 5px;
+  font-size: 15px;
+  line-height: 1.75;
+}
+
+.kg-vditor .vditor-reset {
+  font-size: 15px;
+  line-height: 1.75;
+}
+
+.kg-vditor .vditor-reset:focus {
+  outline: none;
+}
+
+.kg-vditor .vditor-reset pre.vditor-reset {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+}
+
+.kg-vditor .vditor-reset code,
+.kg-vditor .vditor-reset pre {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.kg-vditor .vditor-reset a {
+  color: var(--md-link, #4f8cff);
+}
+
+/* 双链：与经典预览一致的视觉（主题色 + 点下划线），点击跳转在组件里处理 */
+.kg-vditor .vditor-reset .kg-wiki {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.kg-vditor .vditor:not(.vditor--dark) .vditor-reset .kg-wiki { color: #087e84; }
+.kg-vditor .vditor--dark .vditor-reset .kg-wiki { color: #9bd5cb; }
+
+/* 悬停块时出现的块操作条（折叠/删除/设锚点 ID）会遮挡正文、删除易误触，隐藏 */
+.kg-vditor .vditor-wysiwyg .vditor-panel {
+  display: none !important;
+}
+
+/* 标题左侧的 H1-H6 标记默认隐藏，悬停该标题时才显示（Word 式干净排版） */
+.kg-vditor .vditor-wysiwyg > .vditor-reset > :is(h1, h2, h3, h4, h5, h6):before {
+  content: none;
+}
+.kg-vditor .vditor-wysiwyg > .vditor-reset > h1:hover:before { content: 'H1'; }
+.kg-vditor .vditor-wysiwyg > .vditor-reset > h2:hover:before { content: 'H2'; }
+.kg-vditor .vditor-wysiwyg > .vditor-reset > h3:hover:before { content: 'H3'; }
+.kg-vditor .vditor-wysiwyg > .vditor-reset > h4:hover:before { content: 'H4'; }
+.kg-vditor .vditor-wysiwyg > .vditor-reset > h5:hover:before { content: 'H5'; }
+.kg-vditor .vditor-wysiwyg > .vditor-reset > h6:hover:before { content: 'H6'; }

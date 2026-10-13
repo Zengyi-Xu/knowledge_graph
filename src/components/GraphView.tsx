@@ -1,9 +1,17 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { NOTE_TYPE_META, GRADE_META, GRADE_COLORS } from '@/types/note'
 import type { Note } from '@/types/note'
-import { extractLinks } from '@/types/note'
 import { readSetting, writeSetting } from '@/lib/env'
-import { buildTopicEdges, type TopicEdge } from '@/lib/topicLinks'
+import { buildTopicEdges } from '@/lib/topicLinks'
+import {
+  buildTitleIndex,
+  buildWikilinkEdges,
+  computeDegreeById,
+  computeNoteDegrees,
+  literatureLinkedVisible,
+  selectTopicLiterature,
+  type GraphTier,
+} from '@/lib/graphModel'
 import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
 import { RotateCcw, SlidersHorizontal, X } from 'lucide-react'
@@ -15,35 +23,10 @@ import { RotateCcw, SlidersHorizontal, X } from 'lucide-react'
  * - linkDistance 双链的目标长度（世界坐标 px）
  * - gravity      向心力：越大整体越往场地中心收
  */
-export interface GraphPhysics {
-  repulsion: number
-  linkStrength: number
-  linkDistance: number
-  gravity: number
-}
-
-/** 1.0 倍对应的基础常数（旧版是 repulsion 2600 / gravity 0.003，整体偏紧） */
+import { DEFAULT_PHYSICS, PHYSICS_PRESETS, type GraphPhysics } from '@/lib/graphPhysics'
+export { DEFAULT_PHYSICS, PHYSICS_PRESETS, loadPhysics, savePhysics } from '@/lib/graphPhysics'
+export type { GraphPhysics } from '@/lib/graphPhysics'
 const PHYSICS_BASE = { repulsion: 2600, linkStrength: 0.02, gravity: 0.003 }
-
-/** 默认值：比旧版明显松一些，解决「节点挤成一团」的问题 */
-export const DEFAULT_PHYSICS: GraphPhysics = {
-  repulsion: 1.9,
-  linkStrength: 0.55,
-  linkDistance: 170,
-  gravity: 0.45,
-}
-
-export const PHYSICS_PRESETS: { id: string; label: string; physics: GraphPhysics }[] = [
-  { id: 'tight', label: '紧凑', physics: { repulsion: 1.0, linkStrength: 1.4, linkDistance: 120, gravity: 1.0 } },
-  { id: 'standard', label: '标准', physics: DEFAULT_PHYSICS },
-  { id: 'loose', label: '宽松', physics: { repulsion: 2.7, linkStrength: 0.45, linkDistance: 190, gravity: 0.4 } },
-  { id: 'sparse', label: '极散', physics: { repulsion: 3.8, linkStrength: 0.28, linkDistance: 230, gravity: 0.25 } },
-]
-
-const PHYSICS_KEY = 'graph-physics-v1'
-
-// ---------------------------------------------------------------- 文献显示档位
-export type GraphTier = 'no-literature' | 'linked' | 'all' | 'literature-only'
 
 const TIER_KEY = 'graph-tier-v1'
 const LINK_THRESHOLD_KEY = 'graph-link-threshold-v1'
@@ -62,7 +45,7 @@ function loadTopicLinks(): boolean {
 
 export const TIER_OPTIONS: { id: GraphTier; label: string; hint: string }[] = [
   { id: 'no-literature', label: '无文献', hint: '只显示普通笔记（旧行为）' },
-  { id: 'linked', label: '仅有关联', hint: '只显示至少有一条连线的文献节点（默认）' },
+  { id: 'linked', label: '仅有关联', hint: '只显示与普通笔记有 [[双链]] 的文献（默认）' },
   { id: 'all', label: '全部', hint: '笔记 + 全部文献节点' },
   { id: 'literature-only', label: '仅文献', hint: '只看文献之间的连边' },
 ]
@@ -106,29 +89,6 @@ function loadLinkThreshold(): number {
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
 
 /** 从 localStorage 读物理参数；缺字段/非法值一律回落到默认值 */
-export function loadPhysics(): GraphPhysics {
-  try {
-    const raw = readSetting(PHYSICS_KEY)
-    if (!raw) return DEFAULT_PHYSICS
-    const parsed = JSON.parse(raw) as Partial<GraphPhysics>
-    const num = (v: unknown, fallback: number, lo: number, hi: number) =>
-      typeof v === 'number' && Number.isFinite(v) ? clamp(v, lo, hi) : fallback
-    return {
-      repulsion: num(parsed.repulsion, DEFAULT_PHYSICS.repulsion, 0.4, 4),
-      linkStrength: num(parsed.linkStrength, DEFAULT_PHYSICS.linkStrength, 0, 2),
-      linkDistance: num(parsed.linkDistance, DEFAULT_PHYSICS.linkDistance, 80, 320),
-      gravity: num(parsed.gravity, DEFAULT_PHYSICS.gravity, 0, 2),
-    }
-  } catch {
-    return DEFAULT_PHYSICS
-  }
-}
-
-export function savePhysics(p: GraphPhysics): void {
-  writeSetting(PHYSICS_KEY, JSON.stringify(p))
-}
-
-// 多维分类：标签前缀 -> 维度颜色
 const DIM_META: Record<string, { label: string; color: string }> = {
   功能: { label: '功能', color: '#3b82f6' },
   材料: { label: '材料', color: '#22c55e' },
@@ -240,7 +200,7 @@ export function GraphView({
   const [panelOpen, setPanelOpen] = useState(false)
   /** 文献显示档位（本地记忆） */
   const [tier, setTier] = useState<GraphTier>(loadTier)
-  /** 「仅有关联」档的度数阈值：度数 ≥ N 的文献才显示 */
+  /** 「仅有关联」档的关联阈值：与普通笔记的双链数 ≥ N 的文献才显示 */
   const [linkThreshold, setLinkThreshold] = useState<number>(loadLinkThreshold)
   /** 话题相关边（分类共现 + 标题相似）：让文献按相关性自组织成簇 */
   const [topicOn, setTopicOn] = useState<boolean>(loadTopicLinks)
@@ -280,42 +240,35 @@ export function GraphView({
     writeSetting(TOPIC_KEY, next ? '1' : '0')
   }, [])
 
-  /** 文献内容签名：变了才重算话题边（O(n²)，结果必须缓存） */
-  const topicSignature = notes
-    .filter((n) => n.type === 'literature')
-    .map((n) => `${n.id}|${n.updatedAt}|${(n.literature?.collections ?? []).join(',')}|${n.title}`)
-    .join(';')
+  // 标题 -> 笔记 索引：解析 [[双链]]（纯函数 buildTitleIndex，见 graphModel）
+  const titleIndex = useMemo(() => buildTitleIndex(notes), [notes])
 
-  /**
-   * 话题相关边。按 (id|updatedAt|collections) 签名缓存：
-   * 签名不变直接复用上次结果，避免每次渲染都跑 O(n²)。
-   */
-  const topicEdges: TopicEdge[] = useMemo(() => {
-    if (!topicOn) return []
-    const literature = notes.filter((n) => n.type === 'literature')
-    return buildTopicEdges(literature)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [topicOn, topicSignature])
+  // 文献与普通笔记的双链度数：linked 档唯一准入依据（只看双链，先于话题边计算）
+  const noteDegreeById = useMemo(() => computeNoteDegrees(notes, titleIndex), [notes, titleIndex])
 
-  // 全量边 + 每个节点的度数（在文献档位过滤之前算，避免「只显示有连线的」变成自指）
-  // 话题相关边也计入度数：「仅有关联」档因此包含「按分类/标题相关」的文献
-  const { degreeById } = useMemo(() => {
-    const degree = new Map<string, number>()
-    const bump = (id: string) => degree.set(id, (degree.get(id) ?? 0) + 1)
-    for (const n of notes) {
-      for (const t of extractLinks(n.content)) {
-        const o = notes.find((x) => x.title.toLowerCase() === t.toLowerCase())
-        if (!o || o.id === n.id) continue
-        bump(n.id)
-        bump(o.id)
-      }
-    }
-    for (const e of topicEdges) {
-      bump(e.a)
-      bump(e.b)
-    }
-    return { degreeById: degree }
-  }, [notes, topicEdges])
+  // 话题边只为「该档位下会显示的文献」构建：linked 档只对少量与笔记有关联的文献做 O(n²)，
+  // 不再对约 2000 篇隐藏文献两两比对（那些边在过滤时必然被丢弃，纯浪费启动时间）。
+  const topicLiterature = useMemo(
+    () =>
+      selectTopicLiterature(
+        notes.filter((n) => n.type === 'literature'),
+        noteDegreeById,
+        tier,
+        linkThreshold,
+      ),
+    [notes, noteDegreeById, tier, linkThreshold],
+  )
+
+  const topicEdges = useMemo(
+    () => (topicOn ? buildTopicEdges(topicLiterature) : []),
+    [topicOn, topicLiterature],
+  )
+
+  // 全量度数（双链 + 话题边）：只用于视觉（节点半径 / 枢纽判定 / 螺旋落位），不用于准入。
+  const degreeById = useMemo(
+    () => computeDegreeById(notes, titleIndex, topicEdges),
+    [notes, titleIndex, topicEdges],
+  )
 
   // 可见节点：先按筛选条件过滤，再按文献档位过滤
   const visible = useMemo(
@@ -325,13 +278,13 @@ export function GraphView({
         if (n.type === 'literature') {
           if (tier === 'no-literature') return false
           if (tier === 'literature-only') return true
-          // linked：只保留度数达标的文献
-          return (degreeById.get(n.id) ?? 0) >= linkThreshold
+          // linked：只保留「与普通笔记双链」达标的文献；文献间话题边不算关联，不再放行
+          return literatureLinkedVisible(noteDegreeById.get(n.id), linkThreshold)
         }
         // 非文献节点在「仅文献」档隐藏
         return tier !== 'literature-only'
       }),
-    [notes, filters, tier, linkThreshold, degreeById],
+    [notes, filters, tier, linkThreshold, noteDegreeById],
   )
 
   // 边 + 聚焦跳数。聚焦时不再隐藏节点，而是按到焦点的跳数逐层虚化
@@ -340,15 +293,10 @@ export function GraphView({
     const ids = new Set(visible.map((n) => n.id))
     const edgeSet = new Set<string>()
     const edges: { source: string; target: string; topicWeight?: number }[] = []
-    for (const n of notes) {
-      for (const t of extractLinks(n.content)) {
-        const o = notes.find((x) => x.title.toLowerCase() === t.toLowerCase())
-        if (!o || o.id === n.id) continue
-        const key = n.id < o.id ? `${n.id}|${o.id}` : `${o.id}|${n.id}`
-        if (edgeSet.has(key)) continue
-        edgeSet.add(key)
-        edges.push({ source: n.id, target: o.id })
-      }
+    for (const w of buildWikilinkEdges(notes, titleIndex)) {
+      const key = w.source < w.target ? `${w.source}|${w.target}` : `${w.target}|${w.source}`
+      edgeSet.add(key)
+      edges.push(w)
     }
     for (const e of topicEdges) {
       if (edgeSet.has(`${e.a}|${e.b}`) || edgeSet.has(`${e.b}|${e.a}`)) continue
@@ -378,7 +326,7 @@ export function GraphView({
       }
     }
     return { shownIds: ids, shownEdges: kept, hopById: hop }
-  }, [notes, visible, focusId, topicEdges])
+  }, [notes, visible, focusId, topicEdges, titleIndex])
 
   const shownNotes = useMemo(() => visible.filter((n) => shownIds.has(n.id)), [visible, shownIds])
   const focusActive = Boolean(focusId)
@@ -827,12 +775,12 @@ export function GraphView({
             <select
               value={linkThreshold}
               onChange={(e) => changeLinkThreshold(Number(e.target.value))}
-              title="只显示连线数 ≥ N 的文献"
+              title="只显示与普通笔记关联数 ≥ N 的文献（文献间话题边不计）"
               className="ml-1 h-6 rounded border bg-background px-1 text-[11px]"
             >
-              <option value={1}>度数≥1</option>
-              <option value={2}>度数≥2</option>
-              <option value={3}>度数≥3</option>
+              <option value={1}>关联≥1</option>
+              <option value={2}>关联≥2</option>
+              <option value={3}>关联≥3</option>
             </select>
           )}
         </div>

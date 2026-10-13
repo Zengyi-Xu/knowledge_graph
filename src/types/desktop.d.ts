@@ -16,7 +16,10 @@ export interface VaultWritePayload {
 declare global {
   interface Window {
     knowledgeGraphDesktop?: {
-      isElectron: true
+      isElectron: boolean
+      isLocalWeb?: boolean
+      defaultVaultDir?: string
+      defaultZoteroDb?: string
       chooseSyncFile: () => Promise<string | null>
       writeSyncFile: (
         filePath: string,
@@ -47,6 +50,8 @@ declare global {
         data: Uint8Array,
       ) => Promise<{ name: string }>
       removeAttachment: (dir: string, rel: string) => Promise<{ name: string }>
+      /** 用系统默认程序打开附件（如 PDF 阅读器）；成功返回 { error: null } */
+      openAttachmentExternal: (dir: string, rel: string) => Promise<{ error: string | null }>
       /** 原生打开对话框选 PDF；返回文件名与二进制；取消返回 null */
       chooseOpenAttachment: () => Promise<{
         filePath: string
@@ -62,7 +67,7 @@ declare global {
       ) => Promise<{
         collections: string[]
         items: {
-          zoteroKey: number
+          zoteroKey: string
           itemType: string
           title: string
           doi: string
@@ -70,8 +75,11 @@ declare global {
           venue: string
           authors: string[]
           collectionPaths: string[]
+          pdfCount: number
+          availablePdfCount: number
         }[]
       }>
+      openZoteroPdf: (dbPath: string, zoteroKey: string) => Promise<{ path: string }>
 
       // AI 网关：状态里的 keyPreview 已脱敏，绝不包含完整 key
       aiStatus: (configPath?: string) => Promise<

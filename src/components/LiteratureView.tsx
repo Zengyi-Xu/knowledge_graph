@@ -1,15 +1,17 @@
 /**
  * 文献库视图：全部 literature 笔记的表格（排序 / 搜索）、DOI/arXiv 与 BibTeX/RIS 导入、复制引用。
+ * 单击行打开笔记；双击行用系统默认阅读器打开本机 Zotero 里对应的 PDF。
  * 纯网络 + 剪贴板能力，浏览器版与桌面版均可用。
  */
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { BookOpen, ClipboardCopy, Import, Search } from 'lucide-react'
+import { BookOpen, ClipboardCopy, FileText, Import, Search } from 'lucide-react'
 import type { Note } from '@/types/note'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/textarea'
+import { readSetting, writeSetting } from '@/lib/env'
 import {
   Dialog,
   DialogContent,
@@ -56,6 +58,22 @@ interface Props {
 
 type SortKey = 'title' | 'author' | 'year' | 'venue' | 'citekey'
 
+/** 本机 Zotero 数据库位置；本地网页端由启动参数 --zotero-db 固定 */
+export const ZOTERO_DB_KEY = 'zotero-db-v1'
+const DEFAULT_ZOTERO_DB = 'D:\\BaiduSyncdisk\\Bibliotx\\Zotero\\zotero.sqlite'
+
+/** 首选项：上次选过的库 > 运行环境给的默认值（Electron preload / 本地网页服务端） */
+function initialZoteroDb(): string {
+  const desktop = typeof window !== 'undefined' ? window.knowledgeGraphDesktop : undefined
+  return readSetting(ZOTERO_DB_KEY) || desktop?.defaultZoteroDb || DEFAULT_ZOTERO_DB
+}
+
+/** 分类显示：没有分类的文献明确标成「未分类」，避免看起来像没同步 */
+function collectionLabel(note: Note): string {
+  const paths = note.literature?.collections ?? []
+  return paths.length ? paths.join('；') : '未分类'
+}
+
 /** 第一作者显示：单个全名；多个加 et al. */
 function firstAuthorLabel(note: Note): string {
   const authors = note.literature?.authors ?? []
@@ -70,7 +88,12 @@ export function LiteratureView({ notes, onOpenNote, onImport, onApplySync }: Pro
   const [doiOpen, setDoiOpen] = useState(false)
   const [bibOpen, setBibOpen] = useState(false)
   const [zoteroOpen, setZoteroOpen] = useState(false)
+  const [zoteroDb, setZoteroDb] = useState(initialZoteroDb)
   const [styleId, setStyleId] = useState<CitationStyleId>('gb')
+
+  useEffect(() => {
+    writeSetting(ZOTERO_DB_KEY, zoteroDb)
+  }, [zoteroDb])
 
   const literature = useMemo(() => notes.filter((n) => n.type === 'literature'), [notes])
 
@@ -78,7 +101,15 @@ export function LiteratureView({ notes, onOpenNote, onImport, onApplySync }: Pro
     const q = search.trim().toLowerCase()
     const filtered = q
       ? literature.filter((n) => {
-          const hay = [n.title, n.literature?.venue ?? '', ...(n.literature?.authors ?? [])].join('\n').toLowerCase()
+          const hay = [
+            n.title,
+            n.literature?.venue ?? '',
+            n.literature?.doi ?? '',
+            n.literature?.citekey ?? '',
+            ...(n.literature?.authors ?? []),
+            ...(n.literature?.collections ?? []),
+            ...n.tags,
+          ].join('\n').toLowerCase()
           return hay.includes(q)
         })
       : literature
@@ -114,6 +145,67 @@ export function LiteratureView({ notes, onOpenNote, onImport, onApplySync }: Pro
 
   const sortMark = (key: SortKey) => (sortKey === key ? (sortAsc ? ' ↑' : ' ↓') : '')
 
+  /**
+   * 单击 / 双击分工：单击延迟一小会儿再打开笔记——否则第一次点击就切走视图、
+   * 表格被卸载，浏览器永远不会派发 dblclick。
+   */
+  const clickTimer = useRef<number | null>(null)
+  const cancelPendingOpen = () => {
+    if (clickTimer.current !== null) {
+      window.clearTimeout(clickTimer.current)
+      clickTimer.current = null
+    }
+  }
+  useEffect(() => cancelPendingOpen, [])
+
+  const scheduleOpenNote = (id: string) => {
+    cancelPendingOpen()
+    clickTimer.current = window.setTimeout(() => {
+      clickTimer.current = null
+      onOpenNote(id)
+    }, 220)
+  }
+
+  /** 双击：从本机 Zotero 库解析这篇文献的 PDF，交给系统默认阅读器 */
+  const openLocalPdf = async (note: Note) => {
+    cancelPendingOpen()
+    const desktop = window.knowledgeGraphDesktop
+    const key = note.literature?.zoteroKey
+    if (!key) {
+      toast.info('这篇文献还没有对应 Zotero 条目：先「同步 Zotero 分类」或用批量脚本导入')
+      return
+    }
+    if (!desktop?.openZoteroPdf) {
+      toast.error('当前环境不支持打开本地 PDF（请在本地网页端或桌面版中使用）')
+      return
+    }
+    if (note.literature?.zoteroAvailablePdfCount === 0) {
+      toast.error('这篇文献在本机 Zotero 里没有可访问的 PDF')
+      return
+    }
+    try {
+      await desktop.openZoteroPdf(desktop.isLocalWeb ? '' : zoteroDb, key)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '打开 PDF 失败')
+    }
+  }
+
+  /** PDF 状态列：区分「有本地 PDF」「有记录但文件不在本机」「未同步」 */
+  const pdfCell = (note: Note) => {
+    const lit = note.literature
+    if (!lit?.zoteroKey) return <span className="text-xs text-muted-foreground">—</span>
+    const available = lit.zoteroAvailablePdfCount
+    if (available === undefined) return <span className="text-xs text-muted-foreground">未同步</span>
+    if (available > 0) {
+      return (
+        <Badge variant="secondary" className="gap-1 text-[10px]" title="双击本行用系统默认阅读器打开">
+          <FileText className="h-3 w-3" /> PDF
+        </Badge>
+      )
+    }
+    return <span className="text-xs text-muted-foreground">{lit.zoteroPdfCount ? '文件不在本机' : '无本地 PDF'}</span>
+  }
+
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 p-3">
       {/* 工具栏 */}
@@ -123,11 +215,12 @@ export function LiteratureView({ notes, onOpenNote, onImport, onApplySync }: Pro
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="搜索标题 / 作者 / 期刊"
+            placeholder="搜索标题 / 作者 / 期刊 / 分类 / 标签"
             className="pl-7"
           />
         </div>
         <span className="text-xs text-muted-foreground">{rows.length} / {literature.length} 篇文献</span>
+        <span className="hidden text-xs text-muted-foreground md:inline">单击打开笔记，双击打开本地 PDF</span>
         <div className="ml-auto flex items-center gap-2">
           <Select value={styleId} onValueChange={(v) => setStyleId(v as CitationStyleId)}>
             <SelectTrigger className="h-8 w-[130px] text-xs" aria-label="引用样式">
@@ -165,24 +258,34 @@ export function LiteratureView({ notes, onOpenNote, onImport, onApplySync }: Pro
           <TableHeader>
             <TableRow>
               <TableHead className="cursor-pointer" onClick={() => toggleSort('title')}>标题{sortMark('title')}</TableHead>
+              <TableHead>分类（Zotero）</TableHead>
               <TableHead className="cursor-pointer" onClick={() => toggleSort('author')}>第一作者{sortMark('author')}</TableHead>
               <TableHead className="cursor-pointer" onClick={() => toggleSort('year')}>年份{sortMark('year')}</TableHead>
               <TableHead className="cursor-pointer" onClick={() => toggleSort('venue')}>期刊/会议{sortMark('venue')}</TableHead>
               <TableHead className="cursor-pointer" onClick={() => toggleSort('citekey')}>citekey{sortMark('citekey')}</TableHead>
+              <TableHead className="w-20">PDF</TableHead>
               <TableHead>标签</TableHead>
               <TableHead className="w-24">引用</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.map((n) => (
-              <TableRow key={n.id} className="cursor-pointer" onClick={() => onOpenNote(n.id)}>
+              <TableRow
+                key={n.id}
+                className="cursor-pointer"
+                title="单击打开笔记，双击打开本地 PDF"
+                onClick={() => scheduleOpenNote(n.id)}
+                onDoubleClick={() => void openLocalPdf(n)}
+              >
                 <TableCell className="max-w-64 truncate font-medium">{n.title}</TableCell>
+                <TableCell className="max-w-56 truncate text-xs" title={collectionLabel(n)}>{collectionLabel(n)}</TableCell>
                 <TableCell className="max-w-40 truncate">{firstAuthorLabel(n)}</TableCell>
                 <TableCell className="w-16">{n.literature?.year ?? ''}</TableCell>
                 <TableCell className="max-w-48 truncate">{n.literature?.venue ?? ''}</TableCell>
                 <TableCell>
                   <code className="text-xs text-muted-foreground">{n.literature?.citekey ?? ''}</code>
                 </TableCell>
+                <TableCell>{pdfCell(n)}</TableCell>
                 <TableCell className="max-w-40">
                   <div className="flex flex-wrap gap-1">
                     {n.tags.slice(0, 3).map((t) => (
@@ -219,7 +322,7 @@ export function LiteratureView({ notes, onOpenNote, onImport, onApplySync }: Pro
             ))}
             {rows.length === 0 && (
               <TableRow>
-                <TableCell colSpan={7} className="py-12 text-center text-muted-foreground">
+                <TableCell colSpan={9} className="py-12 text-center text-muted-foreground">
                   <BookOpen className="mx-auto mb-2 h-6 w-6" />
                   {literature.length === 0 ? '还没有文献笔记：用右上方按钮按 DOI / BibTeX 导入' : '没有匹配的文献'}
                 </TableCell>
@@ -234,6 +337,8 @@ export function LiteratureView({ notes, onOpenNote, onImport, onApplySync }: Pro
       <ZoteroSyncDialog
         open={zoteroOpen}
         notes={notes}
+        dbPath={zoteroDb}
+        onDbPathChange={setZoteroDb}
         onClose={() => setZoteroOpen(false)}
         onApply={(updates) => {
           onApplySync(updates)
@@ -352,26 +457,28 @@ function BibImportDialog({
   )
 }
 
-/** 默认的 Zotero 数据库位置（Windows 安装版）；用户可在弹窗里改 */
-const DEFAULT_ZOTERO_DB = 'C:\\Users\\Administrator\\Zotero\\zotero.sqlite'
-
 /** Zotero 分类同步弹窗：选库 → 读取 → 预览计划 → 确认应用 */
 function ZoteroSyncDialog({
   open,
   notes,
+  dbPath,
+  onDbPathChange,
   onClose,
   onApply,
 }: {
   open: boolean
   notes: Note[]
+  dbPath: string
+  onDbPathChange: (value: string) => void
   onClose: () => void
   onApply: (updates: ZoteroSyncUpdate[]) => void
 }) {
-  const [dbPath, setDbPath] = useState(DEFAULT_ZOTERO_DB)
   const [busy, setBusy] = useState(false)
   const [plan, setPlan] = useState<ZoteroSyncPlan | null>(null)
 
   const desktop = typeof window !== 'undefined' ? window.knowledgeGraphDesktop : undefined
+  /** 本地网页端：库路径由服务端启动参数固定，页面改不了 */
+  const fixedByServer = Boolean(desktop?.isLocalWeb)
 
   const run = async () => {
     if (!desktop || busy) return
@@ -402,13 +509,17 @@ function ZoteroSyncDialog({
           <p className="text-sm text-muted-foreground">仅桌面版可用：请在 Electron 应用内使用。</p>
         ) : !plan ? (
           <div className="space-y-2 text-sm text-muted-foreground">
-            <p>只读打开本机 Zotero 数据库，按 DOI / 标题匹配文献笔记，同步 Zotero 分类（与已有分类取并集）并自动补充「方向:」「期刊:」「年份:」标签。<strong className="text-foreground">请先把 Zotero 完全退出</strong>，否则会因数据库锁定而失败。</p>
-            <Input
-              value={dbPath}
-              onChange={(e) => setDbPath(e.target.value)}
-              placeholder="zotero.sqlite 的完整路径"
-              className="font-mono text-xs"
-            />
+            <p>只读打开本机 Zotero 数据库，按 Zotero key / DOI / 标题匹配文献笔记，同步 Zotero 分类（与已有分类取并集）并自动补充「方向:」「期刊:」「年份:」标签，同时刷新 Zotero key 与 PDF 状态。<strong className="text-foreground">请先把 Zotero 完全退出</strong>，否则会因数据库锁定而失败。</p>
+            {fixedByServer ? (
+              <p className="rounded border bg-muted/40 p-2 font-mono text-xs break-all">{dbPath || '（未配置）'}</p>
+            ) : (
+              <Input
+                value={dbPath}
+                onChange={(e) => onDbPathChange(e.target.value)}
+                placeholder="zotero.sqlite 的完整路径"
+                className="font-mono text-xs"
+              />
+            )}
           </div>
         ) : (
           <div className="space-y-2 text-sm text-muted-foreground">

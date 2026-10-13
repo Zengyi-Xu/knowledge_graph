@@ -8,6 +8,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import type { Note } from '@/types/note'
+import { emptyLiterature } from '@/types/note'
 import {
   META_FILE,
   assignFileNames,
@@ -16,6 +17,7 @@ import {
   parseMeta,
   parseNoteMarkdown,
   planVaultWrite,
+  relPathFor,
   sanitizeBaseName,
   toMarkdown,
   type VaultIndexEntry,
@@ -24,6 +26,8 @@ import {
 // 真实的主进程实现（.cjs，esbuild 会一并打进产物）
 import * as vaultFs from '../electron/vaultFs.cjs'
 import * as attachmentFs from '../electron/attachmentFs.cjs'
+import { readVaultBatch, splitVaultEntries, VaultLoadGate } from '@/lib/vaultLoad'
+import { readSetting, writeSetting } from '@/lib/env'
 
 let passed = 0
 const failures: string[] = []
@@ -314,6 +318,37 @@ async function main() {
     assert.ok(text.includes('year: ""'))
     assert.deepEqual(parseNoteMarkdown(text, 'x').note, empty)
   })
+  await check('Zotero 三字段（key / PDF 数 / 本机可用数）md 往返还原', () => {
+    const zot: Note = {
+      ...litNote,
+      id: 'lit-zot',
+      literature: { ...litNote.literature!, zoteroKey: 'Q4DVYK39', zoteroPdfCount: 2, zoteroAvailablePdfCount: 1 },
+    }
+    const text = toMarkdown(zot)
+    assert.ok(text.includes('zoteroKey: "Q4DVYK39"'))
+    assert.ok(text.includes('zoteroPdfCount: 2'))
+    assert.ok(text.includes('zoteroAvailablePdfCount: 1'))
+    const back = parseNoteMarkdown(text, 'x')
+    assert.equal(back.needsRewrite, false)
+    assert.deepEqual(back.note.literature, zot.literature)
+  })
+  await check('旧文献 frontmatter 没有 Zotero 字段时保持兼容（不误写成 0）', () => {
+    const old = toMarkdown(litNote) // 不含 zoteroKey / PDF 计数字段
+    assert.ok(!old.includes('zotero'))
+    const back = parseNoteMarkdown(old, 'x')
+    assert.equal(back.note.literature!.zoteroKey, undefined)
+    assert.equal(back.note.literature!.zoteroPdfCount, undefined)
+    assert.equal(back.note.literature!.zoteroAvailablePdfCount, undefined)
+    assert.equal(back.needsRewrite, false)
+  })
+  await check('手工小写 key 的 frontmatter 也能解析（parseFrontmatter 统一小写）', () => {
+    const text = toMarkdown(litNote)
+      .replace('attachments:', 'zoterokey: "ABCD1234"\nzoteropdfcount: 3\nattachments:')
+    const back = parseNoteMarkdown(text, 'x')
+    assert.equal(back.note.literature!.zoteroKey, 'ABCD1234')
+    assert.equal(back.note.literature!.zoteroPdfCount, 3)
+    assert.equal(back.note.literature!.zoteroAvailablePdfCount, undefined)
+  })
   await check('旧格式 md（无文献字段）解析后 literature 为 undefined', () => {
     const old = mk('老笔记', { id: 'old-1', type: 'other', grade: '' })
     const back = parseNoteMarkdown(toMarkdown(old), 'x')
@@ -328,6 +363,33 @@ async function main() {
   await check('literature 笔记落「文献/」文件夹', () => {
     const names = assignFileNames([litNote], null, [])
     assert.equal(names.get('lit-1'), '文献/Silicon photonics.md')
+  })
+  await check('只有大小写差异的标题拿到不同的文件名（Windows 不区分大小写）', () => {
+    const upper = mk('Signal Detection', { id: 'case-a', type: 'literature', grade: '', literature: emptyLiterature() })
+    const lower = mk('signal detection', { id: 'case-b', type: 'literature', grade: '', literature: emptyLiterature() })
+    const names = assignFileNames([upper, lower], null, [])
+    const files = [names.get('case-a')!, names.get('case-b')!].map((f) => f.toLowerCase())
+    assert.notEqual(files[0], files[1])
+  })
+  await check('磁盘上已有仅大小写不同的未纳管文件时避让，不覆盖', () => {
+    const note = mk('Signal Detection', { id: 'case-c', type: 'literature', grade: '', literature: emptyLiterature() })
+    const names = assignFileNames([note], null, ['文献/signal detection.md'])
+    assert.notEqual(names.get('case-c')!.toLowerCase(), '文献/signal detection.md')
+  })
+  await check('大小写改名不会删除仍被别的笔记占用的文件', () => {
+    const a = mk('Signal Detection', { id: 'case-d', type: 'literature', grade: '', literature: emptyLiterature() })
+    const b = mk('signal detection', { id: 'case-e', type: 'literature', grade: '', literature: emptyLiterature() })
+    const index = [
+      { id: 'case-d', file: '文献/Signal Detection.md', title: 'Signal Detection' },
+      { id: 'case-e', file: '文献/signal detection.md', title: 'signal detection' },
+    ]
+    const write = planVaultWrite([a, b], index, ['文献/Signal Detection.md'], new Map(), '')
+    for (const f of write.deletes) {
+      assert.ok(!write.names || ![...write.names.values()].map((x) => x.toLowerCase()).includes(f.toLowerCase()))
+    }
+    const finalKeys = [...write.names.values()].map((x) => x.toLowerCase())
+    assert.equal(new Set(finalKeys).size, 2)
+    assert.equal(write.deletes.filter((f) => f.toLowerCase() === '文献/signal detection.md').length, 0)
   })
   await check('summary 类型落「汇总/」文件夹且不挂文献字段', () => {
     const s = mk('每周文献汇总', { id: 'sum-1', type: 'summary', grade: '' })
@@ -528,7 +590,104 @@ async function main() {
   })
   await fs.rm(attDir, { recursive: true, force: true })
 
-  console.log('\nG. 标注锚定（pdfAnchor 纯函数）')
+  console.log('\nG. 分阶段加载与写盘安全')
+  await check('localStorage 已满时仍读回旧版笔记，写入失败可被调用方发现', () => {
+    const previous = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+    Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
+      getItem: (key: string) => key === 'kaust-knowledge-graph-notes-v1' ? '[{"id":"keep-original"}]' : null,
+      setItem: () => { throw new Error('QuotaExceededError') },
+    } })
+    try {
+      assert.equal(readSetting('notes-v1'), '[{"id":"keep-original"}]')
+      assert.equal(writeSetting('notes-v1', 'new data'), false)
+    } finally {
+      if (previous) Object.defineProperty(globalThis, 'localStorage', previous)
+      else Reflect.deleteProperty(globalThis, 'localStorage')
+    }
+  })
+  await check('文献路径分类兼容 Windows 分隔符，普通笔记首屏不读文献正文', async () => {
+    const normal = mk('普通笔记', { id: 'foreground' })
+    const lit = mk('论文', { id: 'background', type: 'literature' })
+    const entries = [
+      { id: normal.id, file: '人物/普通笔记.md', title: normal.title },
+      { id: lit.id, file: '文献\\论文.md', title: lit.title },
+    ]
+    const split = splitVaultEntries(entries)
+    assert.equal(split.foreground.length, 1)
+    assert.equal(split.literature.length, 1)
+    const requested: string[] = []
+    const foreground = await readVaultBatch(split.foreground, async (names) => {
+      requested.push(...names)
+      return new Map([[entries[0].file, toMarkdown(normal)]])
+    }, new Set())
+    assert.deepEqual(requested, ['人物/普通笔记.md'])
+    assert.equal(foreground.notes[0].id, normal.id)
+  })
+  await check('未加载文献时连手动 flush 也被拦截，读失败仍不得删除原文献', async () => {
+    const gate = new VaultLoadGate()
+    const normal = mk('已加载', { id: 'loaded' })
+    const lit = mk('未加载论文', { id: 'unread', type: 'literature' })
+    const index = [normal, lit].map((n) => ({ id: n.id, file: relPathFor(n), title: n.title }))
+    // 原计划器确实会把不在部分 notes 中的条目视作删除，所以 gate 必须在它之前。
+    assert.deepEqual(planFor([normal], index, index.map((entry) => entry.file)).deletes, [relPathFor(lit)])
+    let writes = 0
+    const flush = () => { if (gate.canFlush()) writes++ }
+    flush()
+    assert.equal(writes, 0)
+    await assert.rejects(() => readVaultBatch([index[1]], async () => { throw new Error('EACCES') }, new Set()), /EACCES/)
+    flush()
+    assert.equal(writes, 0)
+    assert.equal(gate.pending, true)
+    gate.complete = true
+    flush()
+    assert.equal(writes, 1)
+  })
+  await check('分批真实磁盘读取完成后的计划保留所有文献，且保存首屏期间的编辑', async () => {
+    const stagedDir = path.join(dir, 'staged')
+    const originals = [mk('首屏笔记', { id: 'stage-note' }), ...Array.from({ length: 130 }, (_, i) =>
+      mk(`文献 ${i}`, { id: `stage-lit-${i}`, type: 'literature', grade: '', literature: emptyLiterature() }))]
+    const originalPlan = planFor(originals, null, [])
+    await vaultFs.writeVault(stagedDir, originalPlan)
+    const split = splitVaultEntries(originalPlan.index)
+    const seen = new Set<string>()
+    const reader = async (names: string[]) => new Map<string, string>((await vaultFs.readVaultFiles(stagedDir, names))
+      .filter((file: { text: string | null }) => file.text !== null)
+      .map((file: { name: string; text: string }) => [file.name, file.text]))
+    const first = await readVaultBatch(split.foreground, reader, seen)
+    first.notes[0] = { ...first.notes[0], content: '加载文献期间编辑的正文' }
+    for (let offset = 0; offset < split.literature.length; offset += 64) {
+      const batch = await readVaultBatch(split.literature.slice(offset, offset + 64), reader, seen)
+      first.notes.push(...batch.notes)
+      first.index.push(...batch.index)
+      for (const [id, written] of batch.written) first.written.set(id, written)
+    }
+    const listing = await vaultFs.listVault(stagedDir)
+    const plan = planFor(first.notes, first.index, listing.md.map((file: { name: string }) => file.name), first.written, originalPlan.meta)
+    assert.equal(first.notes.length, 131)
+    assert.deepEqual(plan.deletes, [])
+    assert.equal(plan.writes.length, 1)
+    await vaultFs.writeVault(stagedDir, plan)
+    assert.equal((await vaultFs.listVault(stagedDir)).md.length, 131)
+    assert.equal(parseNoteMarkdown((await reader([relPathFor(originals[0])])).get(relPathFor(originals[0]))!, '首屏笔记').note.content, '加载文献期间编辑的正文')
+  })
+  await check('并发读取有上限并保持顺序，缺失文件返回 null', async () => {
+    let inFlight = 0
+    let maximum = 0
+    const output = await vaultFs.mapConcurrent(Array.from({ length: 70 }, (_, i) => i), async (i: number) => {
+      maximum = Math.max(maximum, ++inFlight)
+      await new Promise((resolve) => setTimeout(resolve, 1))
+      inFlight--
+      return i
+    })
+    assert.ok(maximum > 1 && maximum <= 32)
+    assert.deepEqual(output, Array.from({ length: 70 }, (_, i) => i))
+    const names = ['missing.md', '人物/甲 人物.md']
+    const files = await vaultFs.readVaultFiles(dir, names)
+    assert.deepEqual(files.map((file: { name: string }) => file.name), names)
+    assert.equal(files[0].text, null)
+  })
+
+  console.log('\nH. 标注锚定（pdfAnchor 纯函数）')
   const { buildAnchor, locateAnchor } = await import('@/lib/pdfAnchor')
   const pageText = '物理学是一门研究物质与能量的学科。量子计算利用叠加与纠缠特性。硅光集成是热点。'
   const start = pageText.indexOf('量子计算')

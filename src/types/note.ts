@@ -32,6 +32,12 @@ export interface LiteratureMeta {
   attachments: string[]
   /** Zotero 分类路径（层级用 / 压平），如 ["硅光/电光调制器"] */
   collections: string[]
+  /** Zotero 书目条目的稳定 8 位 key；用于从本机库定位 PDF */
+  zoteroKey?: string
+  /** Zotero 中登记的 PDF 数量 */
+  zoteroPdfCount?: number
+  /** 当前同步时实际存在于本机的 PDF 数量 */
+  zoteroAvailablePdfCount?: number
 }
 
 /** 全空文献元数据：所有「手动构造 literature 对象」的代码都应从这里起步，避免漏字段 */

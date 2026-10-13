@@ -20,6 +20,7 @@ import {
   writeVaultPlan,
 } from '@/lib/vaultFs'
 import { APP_NAME, readSetting, removeSetting, writeSetting } from '@/lib/env'
+import { LITERATURE_BATCH_SIZE, readVaultBatch, splitVaultEntries, VaultLoadGate } from '@/lib/vaultLoad'
 
 const STORAGE_KEY = 'notes-v1'
 /** 用户主动清空所有笔记时置位，避免下次启动又被种子/同步数据"复活" */
@@ -179,25 +180,32 @@ export interface VaultStatus {
   /** 目录里不属于本应用的 md 数量（本应用不会读写它们） */
   unmanaged: number
   error: string | null
+  /** 文献正文分批载入期间可操作普通笔记，写盘/全库同步等待加载完成。 */
+  loading: { loaded: number; total: number } | null
+  conflicts: number
 }
 
 export function useNotes() {
-  const [notes, setNotes] = useState<Note[]>(load)
+  // vault 已配置时不先反序列化一份可能含数千文献的旧 localStorage 缓存。
+  const [notes, setNotes] = useState<Note[]>(() => isDesktop() && (readSetting(VAULT_DIR_KEY) || window.knowledgeGraphDesktop?.defaultVaultDir) ? [] : load())
   const [hydrated, setHydrated] = useState(false)
 
   const [vaultDir, setVaultDirState] = useState<string>(() => {
     try {
-      return readSetting(VAULT_DIR_KEY) ?? ''
+      return readSetting(VAULT_DIR_KEY) || window.knowledgeGraphDesktop?.defaultVaultDir || ''
     } catch {
       return ''
     }
   })
   const [vaultActive, setVaultActive] = useState(false)
+  const [loadRevision, setLoadRevision] = useState(0)
   const [vaultSaving, setVaultSaving] = useState(false)
   const [vaultSavedAt, setVaultSavedAt] = useState<number | null>(null)
   const [vaultExternalAt, setVaultExternalAt] = useState<number | null>(null)
   const [vaultUnmanaged, setVaultUnmanaged] = useState(0)
   const [vaultError, setVaultError] = useState<string | null>(null)
+  const [vaultLoading, setVaultLoading] = useState<VaultStatus['loading']>(null)
+  const [vaultConflicts, setVaultConflicts] = useState(0)
   const [watchVault, setWatchVault] = useState<boolean>(() => {
     try {
       return readSetting(VAULT_WATCH_KEY) !== '0'
@@ -216,6 +224,12 @@ export function useNotes() {
   const activeRef = useRef(false)
   const busyRef = useRef(false)
   const pendingRef = useRef(false)
+  const loadGateRef = useRef(new VaultLoadGate())
+  const loadEpochRef = useRef(0)
+  const readyGateRef = useRef<VaultLoadGate | null>(null)
+  const loadConflictsRef = useRef<Map<string, { remote: Note | null; text: string | null; file: string }>>(new Map())
+  const conflictReadyRef = useRef(false)
+  const flushRef = useRef<() => Promise<void>>(async () => {})
 
   useEffect(() => {
     notesRef.current = notes
@@ -226,10 +240,26 @@ export function useNotes() {
   useEffect(() => {
     activeRef.current = vaultActive
   }, [vaultActive])
+  useEffect(() => {
+    // 最后一批 notes 提交后解锁，避免 flush 读到上一轮 React 状态。
+    const gate = readyGateRef.current
+    if (!vaultLoading && gate && gate === loadGateRef.current) {
+      gate.complete = true
+      readyGateRef.current = null
+      void flushRef.current()
+    }
+  }, [vaultLoading])
 
   const setVaultDir = useCallback((dir: string) => {
+    if (loadConflictsRef.current.size) throw new Error('请先选择保留本地或采用磁盘版本，未保存的冲突编辑不会被丢弃')
+    loadEpochRef.current++
+    activeRef.current = false
+    loadGateRef.current = new VaultLoadGate()
+    readyGateRef.current = null
     writeSetting(VAULT_DIR_KEY, dir)
+    dirRef.current = dir
     setVaultDirState(dir)
+    setLoadRevision((revision) => revision + 1)
   }, [])
 
   // -------------------------------------------------------------- 从目录加载
@@ -238,72 +268,149 @@ export function useNotes() {
    * 读取 vault 目录并替换内存状态。
    * 返回 true 表示成功接管该目录（调用方应停止使用 localStorage 作为存储）。
    */
-  const loadFromVault = useCallback(async (dir: string): Promise<boolean> => {
-    const listing = await listVault(dir)
-    if (!listing) {
-      setVaultError('读不到 vault 目录（vault 存储仅桌面版支持）')
-      return false
-    }
-    if (!listing.exists) {
-      setVaultError(`vault 目录不存在：${dir}`)
-      return false
-    }
-
-    filesRef.current = new Map(listing.md.map((f) => [f.name, { mtimeMs: f.mtimeMs, size: f.size }]))
-    const index = listing.meta ? parseMeta(listing.meta) : null
+  const loadFromVault = useCallback(async (dir: string, cancelled: () => boolean, gate: VaultLoadGate): Promise<boolean> => {
+    // 已纳管库的首屏只读 meta 和普通笔记，目录递归/stat 全部放到首屏之后。
+    const metaText = (await readVaultTexts(dir, ['meta.json'])).get('meta.json') ?? null
+    if (cancelled()) return false
+    const index = metaText ? parseMeta(metaText) : null
 
     if (!index) {
-      // 目录里没有（或无法识别）meta.json：把当前内存里的笔记整体写进去，建立 vault。
+      const listing = await listVault(dir)
+      if (cancelled()) return false
+      if (!listing?.exists) {
+        setVaultError(`读不到 vault 目录：${dir}`)
+        return false
+      }
+      if (metaText !== null || listing.meta !== null) throw new Error('meta.json 无法识别或加载期间已改变，已暂停写盘以保护原索引')
+      // 目录里没有 meta.json：把当前内存里的笔记整体写进去，建立 vault。
       // 目录里已有的其他 md 一律不读、不改，只是在分配文件名时避让。
       indexRef.current = null
       writtenRef.current = new Map()
       metaRef.current = ''
+      filesRef.current = new Map(listing.md.map((f) => [f.name, { mtimeMs: f.mtimeMs, size: f.size }]))
+      gate.complete = true
+      if (notesRef.current.length === 0) {
+        const cached = load()
+        notesRef.current = cached
+        setNotes(cached)
+      }
       setVaultUnmanaged(listing.md.length)
       setVaultError(null)
       return true
     }
 
-    const diskNames = new Set(listing.md.map((f) => f.name))
-    const wanted = index.notes.filter((e) => diskNames.has(e.file)).map((e) => e.file)
-    const texts = await readVaultTexts(dir, wanted)
-
-    const nextNotes: Note[] = []
-    const nextIndex: VaultIndexEntry[] = []
-    const written = new Map<string, WrittenNote>()
+    const { foreground, literature } = splitVaultEntries(index.notes)
     const seenIds = new Set<string>()
-
-    for (const entry of index.notes) {
-      const text = texts.get(entry.file)
-      // 索引里有、文件却不在 → 视为已被外部删除，不复活
-      if (text == null) continue
-      const parsed = parseNoteMarkdown(text, baseNameOf(entry.file))
-      const note = parsed.note
-      if (seenIds.has(note.id)) note.id = uid()
-      seenIds.add(note.id)
-      nextNotes.push(note)
-      nextIndex.push({ id: note.id, file: entry.file, title: note.title })
-      // frontmatter 缺字段的（例如别人手写的 md）不记账本，下一次写盘会补全
-      if (!parsed.needsRewrite) written.set(note.id, { file: entry.file, text })
-    }
-
-    indexRef.current = nextIndex
-    writtenRef.current = written
-    metaRef.current = listing.meta ?? ''
-    setVaultUnmanaged(listing.md.filter((f) => !index.notes.some((e) => e.file === f.name)).length)
-    setNotes(nextNotes)
+    const first = await readVaultBatch(foreground, (names) => readVaultTexts(dir, names), seenIds)
+    if (cancelled()) return false
+    const loadedIndex = [...first.index]
+    // 保留全索引直到所有正文成功加载；gate 禁止部分 notes 被用于 deletes。
+    indexRef.current = index.notes
+    writtenRef.current = first.written
+    metaRef.current = metaText ?? ''
+    notesRef.current = first.notes
+    setNotes(first.notes)
     setVaultError(null)
+    setVaultLoading({ loaded: 0, total: literature.length })
+    window.setTimeout(() => {
+      void (async () => {
+        try {
+          if (cancelled()) return
+          const listing = await listVault(dir)
+          if (cancelled()) return
+          if (!listing?.exists) throw new Error('加载期间 vault 目录不可读')
+          if ((listing.meta ?? '') !== metaText) throw new Error('加载期间 meta.json 被外部修改，请重新选择目录后加载')
+          filesRef.current = new Map(listing.md.map((f) => [f.name, { mtimeMs: f.mtimeMs, size: f.size }]))
+          const owned = new Set(index.notes.map((entry) => entry.file))
+          setVaultUnmanaged(listing.md.filter((f) => !owned.has(f.name)).length)
+          // 普通笔记在首读和扫描之间可能被外部改写。重新读正文，不能把新 mtime
+          // 误当成旧正文的快照；同时保留首屏期间已经发生的本地编辑。
+          const fresh = await readVaultTexts(dir, first.index.map((entry) => entry.file))
+          if (cancelled()) return
+          const replacement = new Map<string, Note | null>()
+          const initialById = new Map(first.notes.map((note) => [note.id, note]))
+          for (const entry of first.index) {
+            const text = fresh.get(entry.file) ?? null
+            if (text === first.source.get(entry.id)) continue
+            const local = notesRef.current.find((note) => note.id === entry.id)
+            const initial = initialById.get(entry.id)!
+            const remote = text === null ? null : { ...parseNoteMarkdown(text, baseNameOf(entry.file)).note, id: entry.id }
+            if (!local || toMarkdown(local) !== toMarkdown(initial)) {
+              loadConflictsRef.current.set(entry.id, { remote, text, file: entry.file })
+              continue
+            }
+            replacement.set(entry.id, remote)
+            if (remote && text !== null) writtenRef.current.set(entry.id, { file: entry.file, text })
+            else writtenRef.current.delete(entry.id)
+            const slot = loadedIndex.findIndex((item) => item.id === entry.id)
+            if (remote) loadedIndex[slot] = { ...entry, title: remote.title }
+            else loadedIndex.splice(slot, 1)
+          }
+          if (replacement.size) setNotes((prev) => prev.flatMap((note) => {
+            if (!replacement.has(note.id)) return [note]
+            const remote = replacement.get(note.id)
+            return remote ? [remote] : []
+          }))
+          for (let offset = 0; offset < literature.length; offset += LITERATURE_BATCH_SIZE) {
+            if (cancelled()) return
+            const batch = await readVaultBatch(literature.slice(offset, offset + LITERATURE_BATCH_SIZE), (names) => readVaultTexts(dir, names), seenIds)
+            if (cancelled()) return
+            loadedIndex.push(...batch.index)
+            for (const [id, written] of batch.written) writtenRef.current.set(id, written)
+            setNotes((prev) => [...prev, ...batch.notes])
+            setVaultLoading({ loaded: Math.min(offset + LITERATURE_BATCH_SIZE, literature.length), total: literature.length })
+            // 让 React 提交和用户输入在批次间得到机会，慢盘不会锁住界面。
+            await new Promise<void>((resolve) => window.setTimeout(resolve, 0))
+          }
+          if (cancelled()) return
+          // 慢盘加载可能持续很久，扫描后的外部索引修改也要在解锁写盘前发现。
+          const finalMeta = (await readVaultTexts(dir, ['meta.json'])).get('meta.json') ?? null
+          if (cancelled()) return
+          if (finalMeta !== metaText) throw new Error('文献加载期间 meta.json 被外部修改，请重新选择目录后加载')
+          indexRef.current = loadedIndex
+          if (loadConflictsRef.current.size) {
+            conflictReadyRef.current = true
+            setVaultConflicts(loadConflictsRef.current.size)
+            setVaultError(`${loadConflictsRef.current.size} 篇普通笔记在加载期间同时被本地和外部修改，已保留本地并暂停写盘，请选择冲突版本`)
+            return
+          }
+          readyGateRef.current = gate
+          setVaultLoading(null)
+        } catch (error) {
+          if (cancelled()) return
+          // 保持 gate 关闭：即使用户点保存/自动保存，也不会误删尚未读完的文献。
+          setVaultError(`文献加载失败，已暂停写盘保护原文件：${error instanceof Error ? error.message : String(error)}`)
+        }
+      })()
+    }, 0)
     return true
   }, [])
 
   // 启动 / 切换目录时的数据来源：vault 优先，其次 localStorage + 仓库 notes.json
   useEffect(() => {
     let cancelled = false
+    const epoch = ++loadEpochRef.current
+    const stale = () => cancelled || epoch !== loadEpochRef.current
+    const gate = new VaultLoadGate()
+    loadGateRef.current = gate
+    loadConflictsRef.current = new Map()
+    conflictReadyRef.current = false
+    setVaultConflicts(0)
+    activeRef.current = false
+    setVaultActive(false)
+    setVaultLoading(null)
     setHydrated(false)
     ;(async () => {
       if (isDesktop() && vaultDir) {
-        const ok = await loadFromVault(vaultDir)
-        if (cancelled) return
+        let ok = false
+        try {
+          ok = await loadFromVault(vaultDir, stale, gate)
+        } catch (error) {
+          if (!stale()) setVaultError(`读取 vault 失败，未写入原目录：${error instanceof Error ? error.message : String(error)}`)
+        }
+        if (stale()) return
         if (ok) {
+          activeRef.current = true
           setVaultActive(true)
           // 空目录首次建立 vault：用内置示例起步，和浏览器版行为一致
           if (indexRef.current === null && notesRef.current.length === 0 && !isExplicitlyEmpty()) {
@@ -313,42 +420,47 @@ export function useNotes() {
           return
         }
         setVaultActive(false)
+        if (notesRef.current.length === 0) {
+          const cached = load()
+          notesRef.current = cached
+          setNotes(cached)
+        }
       } else {
         setVaultActive(false)
       }
 
       if (isExplicitlyEmpty()) {
-        if (!cancelled) setHydrated(true)
+        if (!stale()) setHydrated(true)
         return
       }
       try {
         const r = await fetch(`${import.meta.env.BASE_URL}notes.json`, { cache: 'no-cache' })
         if (r.ok) {
           const arr = await r.json()
-          if (!cancelled && Array.isArray(arr) && arr.length > 0) {
+          if (!stale() && Array.isArray(arr) && arr.length > 0) {
             setNotes((prev) => (prev.length > 0 ? prev : (arr as Note[])))
-          } else if (!cancelled) {
+          } else if (!stale()) {
             setNotes((prev) => (prev.length > 0 ? prev : seedNotes()))
           }
         }
       } catch {
         /* 仓库里没有 notes.json */
       }
-      if (!cancelled) setNotes((prev) => (prev.length > 0 ? prev : seedNotes()))
-      if (!cancelled) setHydrated(true)
+      if (!stale()) setNotes((prev) => (prev.length > 0 ? prev : seedNotes()))
+      if (!stale()) setHydrated(true)
     })()
     return () => {
       cancelled = true
     }
-  }, [vaultDir, loadFromVault])
+  }, [vaultDir, loadRevision, loadFromVault])
 
   // ------------------------------------------------------------ 写入 vault
 
-  const flushRef = useRef<() => Promise<void>>(async () => {})
-
   const flushVault = useCallback(async () => {
     const dir = dirRef.current
+    const gate = loadGateRef.current
     if (!dir || !activeRef.current) return
+    if (!loadGateRef.current.canFlush()) return
     if (busyRef.current) {
       pendingRef.current = true
       return
@@ -368,6 +480,7 @@ export function useNotes() {
     setVaultSaving(true)
     try {
       await writeVaultPlan(dir, plan)
+      if (gate !== loadGateRef.current || dir !== dirRef.current) return
 
       const writtenInPlan = new Map(plan.writes.map((w) => [w.id, w]))
       const nextWritten = new Map<string, WrittenNote>()
@@ -389,13 +502,14 @@ export function useNotes() {
 
       // 刷新磁盘快照（mtime 已被我们改写），顺带更新「未纳管」数量
       const listing = await listVault(dir)
+      if (gate !== loadGateRef.current || dir !== dirRef.current) return
       if (listing?.exists) {
         filesRef.current = new Map(listing.md.map((f) => [f.name, { mtimeMs: f.mtimeMs, size: f.size }]))
         const owned = new Set(plan.index.map((e) => e.file))
         setVaultUnmanaged(listing.md.filter((f) => !owned.has(f.name)).length)
       }
     } catch (error) {
-      setVaultError(`写入 vault 失败：${error instanceof Error ? error.message : String(error)}`)
+      if (gate === loadGateRef.current) setVaultError(`写入 vault 失败：${error instanceof Error ? error.message : String(error)}`)
     } finally {
       busyRef.current = false
       setVaultSaving(false)
@@ -416,7 +530,9 @@ export function useNotes() {
     if (!vaultActive) {
       try {
         if (notes.length > 0) removeSetting(EMPTY_FLAG)
-        writeSetting(STORAGE_KEY, JSON.stringify(notes))
+        if (!writeSetting(STORAGE_KEY, JSON.stringify(notes))) {
+          setVaultError('浏览器本地存储写入失败（可能已满），当前编辑尚未持久化；请导出备份或连接笔记目录')
+        }
       } catch {
         /* ignore */
       }
@@ -430,8 +546,10 @@ export function useNotes() {
 
   const pollVault = useCallback(async () => {
     const dir = dirRef.current
-    if (!dir || !activeRef.current || busyRef.current) return
+    const gate = loadGateRef.current
+    if (!dir || !activeRef.current || busyRef.current || !loadGateRef.current.complete) return
     const listing = await listVault(dir)
+    if (gate !== loadGateRef.current || dir !== dirRef.current) return
     if (!listing || !listing.exists) return
 
     const prevFiles = filesRef.current
@@ -466,6 +584,7 @@ export function useNotes() {
     }
 
     const texts = await readVaultTexts(dir, changedOwned)
+    if (gate !== loadGateRef.current || dir !== dirRef.current) return
     const current = notesRef.current
     const next = [...current]
     let touched = false
@@ -529,15 +648,50 @@ export function useNotes() {
   useEffect(() => {
     writeSetting(VAULT_WATCH_KEY, watchVault ? '1' : '0')
     if (!watchVault || !vaultActive || !hydrated) return
-    const timer = window.setInterval(() => void pollVault(), POLL_INTERVAL)
+    const dir = vaultDir
+    const timer = window.setInterval(() => {
+      void pollVault().catch((error) => {
+        if (dir === dirRef.current) setVaultError(`检测目录改动失败：${error instanceof Error ? error.message : String(error)}`)
+      })
+    }, POLL_INTERVAL)
     return () => window.clearInterval(timer)
-  }, [watchVault, vaultActive, hydrated, pollVault])
+  }, [watchVault, vaultActive, hydrated, vaultDir, pollVault])
 
   // ------------------------------------------------------------- 笔记操作
 
-  const createNote = useCallback((partial: Partial<Note> = {}): Note => {
+  const resolveVaultConflicts = useCallback((version: 'local' | 'disk') => {
+    if (!conflictReadyRef.current || !loadConflictsRef.current.size) return
+    const conflicts = loadConflictsRef.current
+    for (const [id, conflict] of conflicts) {
+      if (conflict.text !== null) writtenRef.current.set(id, { file: conflict.file, text: conflict.text })
+      else writtenRef.current.delete(id)
+    }
+    if (version === 'disk') {
+      setNotes((prev) => {
+        const currentIds = new Set(prev.map((note) => note.id))
+        const next = prev.flatMap((note) => {
+          const conflict = conflicts.get(note.id)
+          return conflict ? conflict.remote ? [conflict.remote] : [] : [note]
+        })
+        for (const [id, conflict] of conflicts) if (!currentIds.has(id) && conflict.remote) next.push(conflict.remote)
+        return next
+      })
+      indexRef.current = (indexRef.current ?? []).flatMap((entry) => {
+        const conflict = conflicts.get(entry.id)
+        return conflict ? conflict.remote ? [{ ...entry, title: conflict.remote.title }] : [] : [entry]
+      })
+    }
+    loadConflictsRef.current = new Map()
+    conflictReadyRef.current = false
+    setVaultConflicts(0)
+    setVaultError(null)
+    readyGateRef.current = loadGateRef.current
+    setVaultLoading(null)
+  }, [])
+
+  const createNotes = useCallback((partials: Partial<Note>[]): Note[] => {
     const now = Date.now()
-    const note: Note = {
+    const incoming: Note[] = partials.map((partial) => ({
       id: uid(),
       title: partial.title ?? '未命名笔记',
       type: partial.type ?? 'other',
@@ -547,9 +701,20 @@ export function useNotes() {
       createdAt: now,
       updatedAt: now,
       ...(partial.literature ? { literature: partial.literature } : {}),
-    }
-    setNotes((prev) => [note, ...prev])
-    return note
+    }))
+    setNotes((prev) => [...incoming].reverse().concat(prev))
+    return incoming
+  }, [])
+
+  const createNote = useCallback((partial: Partial<Note> = {}): Note => createNotes([partial])[0], [createNotes])
+
+  const updateNotes = useCallback((patches: { id: string; patch: Partial<Note> }[]) => {
+    const byId = new Map(patches.map(({ id, patch }) => [id, patch]))
+    const now = Date.now()
+    setNotes((prev) => prev.map((n) => {
+      const patch = byId.get(n.id)
+      return patch ? { ...n, ...patch, updatedAt: now } : n
+    }))
   }, [])
 
   const updateNote = useCallback((id: string, patch: Partial<Note>) => {
@@ -562,7 +727,7 @@ export function useNotes() {
     setNotes((prev) => {
       const remaining = prev.filter((n) => n.id !== id)
       // 用户主动删光所有笔记时置位，避免下次启动被同步数据/种子"复活"
-      if (remaining.length === 0) {
+      if (remaining.length === 0 && (!activeRef.current || loadGateRef.current.complete)) {
         writeSetting(EMPTY_FLAG, '1')
       }
       return remaining
@@ -571,6 +736,7 @@ export function useNotes() {
 
   /** 用一批笔记整体替换本地数据（用于「从 notes.json 重新载入」/导入备份） */
   const replaceAll = useCallback((incoming: Note[]) => {
+    if (activeRef.current && !loadGateRef.current.complete) throw new Error('文献尚未完整加载，请等待后再替换全库')
     const now = Date.now()
     const next: Note[] = incoming
       .filter((n) => n && typeof n.title === 'string' && typeof n.content === 'string')
@@ -583,6 +749,7 @@ export function useNotes() {
         content: n.content,
         createdAt: n.createdAt ?? now,
         updatedAt: n.updatedAt ?? now,
+        ...(n.literature ? { literature: n.literature } : {}),
       }))
     setNotes(next)
     try {
@@ -596,6 +763,7 @@ export function useNotes() {
   /** 按标题合并一批笔记（同标题更新，新标题新增），避免出现重复节点 */
   const mergeByTitle = useCallback(
     (incoming: Note[]) => {
+      if (activeRef.current && !loadGateRef.current.complete) throw new Error('文献尚未完整加载，请等待后再合并全库')
       const now = Date.now()
       const pending = new Map<string, Note>()
       for (const raw of incoming) {
@@ -617,6 +785,7 @@ export function useNotes() {
           tags: Array.isArray(raw.tags) ? raw.tags : n.tags,
           content: raw.content,
           updatedAt: now,
+          ...(raw.literature ? { literature: raw.literature } : {}),
         }
       })
       let added = 0
@@ -630,6 +799,7 @@ export function useNotes() {
           content: raw.content,
           createdAt: raw.createdAt ?? now,
           updatedAt: raw.updatedAt ?? now,
+          ...(raw.literature ? { literature: raw.literature } : {}),
         })
         added++
       }
@@ -684,13 +854,18 @@ export function useNotes() {
     externalAt: vaultExternalAt,
     unmanaged: vaultUnmanaged,
     error: vaultError,
+    loading: vaultLoading,
+    conflicts: vaultConflicts,
   }
 
   return {
     notes,
     hydrated,
     createNote,
+    createNotes,
     updateNote,
+    updateNotes,
+    resolveVaultConflicts,
     deleteNote,
     replaceAll,
     mergeByTitle,

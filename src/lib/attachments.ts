@@ -99,3 +99,13 @@ export async function removeAttachment(id: string): Promise<void> {
   await desk.removeAttachment(dir, pdfRel(id))
   await desk.removeAttachment(dir, annRel(id))
 }
+
+/** 用系统默认程序打开本地 PDF（如外部 PDF 阅读器）；返回错误信息（成功为 null） */
+export async function openPdfExternal(id: string): Promise<string | null> {
+  const desk = window.knowledgeGraphDesktop
+  if (!desk?.openAttachmentExternal) throw new Error('打开本地 PDF 仅桌面版可用')
+  const dir = vaultDir()
+  if (!dir) throw new Error('请先选择笔记目录')
+  const result = await desk.openAttachmentExternal(dir, pdfRel(id))
+  return result?.error ?? null
+}

@@ -2,7 +2,7 @@
  * 文献笔记的附件工作区：附件列表（添加/打开/删除）+ 右侧可拖拽缩放的 PDF 阅读面板。
  * 浏览器版无桌面文件 API 时降级显示「仅桌面版可用」，核心笔记功能不受影响。
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { FileText, FolderOpen, Paperclip, Trash2, Upload } from 'lucide-react'
 import type { Note } from '@/types/note'
@@ -30,7 +30,9 @@ import {
   type PdfAnnotation,
   type PdfAnnotationsFile,
 } from '@/lib/attachments'
-import { PdfViewer, type NewAnnotation } from '@/components/PdfViewer'
+import type { NewAnnotation } from '@/components/PdfViewer'
+
+const PdfViewer = lazy(() => import('./PdfViewer').then((module) => ({ default: module.PdfViewer })))
 
 interface Props {
   note: Note
@@ -259,14 +261,14 @@ export function LiteratureAttachments({ note, onChange, children }: Props) {
                   </Button>
                 </div>
                 <div className="min-h-0 flex-1">
-                  <PdfViewer
+                  <Suspense fallback={<div className="p-4 text-sm text-muted-foreground" role="status">正在加载 PDF 阅读器…</div>}><PdfViewer
                     data={open.data}
                     annotations={open.annotations.items}
                     onAddAnnotation={handleAdd}
                     onUpdateAnnotation={handleUpdateComment}
                     onDeleteAnnotation={handleDelete}
                     onExportAnnotation={handleExport}
-                  />
+                  /></Suspense>
                 </div>
               </div>
             </Panel>

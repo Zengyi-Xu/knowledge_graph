@@ -77,7 +77,8 @@ export function readSetting(base: string): string | null {
     for (const legacy of LEGACY_KEYS[base] ?? []) {
       const old = localStorage.getItem(legacy)
       if (old !== null) {
-        localStorage.setItem(key, old)
+        // 配额已满时迁移副本会失败，但旧数据仍然可读，不得当作「无笔记」。
+        try { localStorage.setItem(key, old) } catch { /* 保留旧键作为可读来源 */ }
         return old
       }
     }
@@ -87,11 +88,12 @@ export function readSetting(base: string): string | null {
   return null
 }
 
-export function writeSetting(base: string, value: string): void {
+export function writeSetting(base: string, value: string): boolean {
   try {
     localStorage.setItem(storageKey(base), value)
+    return true
   } catch {
-    /* ignore */
+    return false
   }
 }
 

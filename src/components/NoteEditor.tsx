@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useMemo, useRef, useState } from 'react'
 import { NOTE_TYPE_META, GRADE_META } from '@/types/note'
 import type { Note, NoteType, Grade, LiteratureMeta } from '@/types/note'
 import { emptyLiterature } from '@/types/note'
@@ -24,16 +24,26 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Trash2, Download, Check, Upload, Palette, MoreVertical, RefreshCw, Pencil, ClipboardCopy, Sparkles } from 'lucide-react'
+import { Trash2, Download, Check, Upload, Palette, MoreVertical, RefreshCw, Pencil, ClipboardCopy, Sparkles, ExternalLink, FileText } from 'lucide-react'
 import { toast } from 'sonner'
 import { readSetting, writeSetting } from '@/lib/env'
-import { copyCitationFor } from '@/lib/copyCitation'
-import { litToCSL } from '@/lib/literature'
-import { writeCitationClipboard } from '@/lib/rtfField'
-import { LiteratureAttachments } from '@/components/LiteratureAttachments'
+import { attachmentsSupported, openPdfExternal } from '@/lib/attachments'
 
 const THEME_KEY = 'preview-theme-v1'
 const CUSTOM_THEME_KEY = 'custom-preview-theme-v1'
+const EDITOR_MODE_KEY = 'editor-mode-v1'
+const WysiwygEditor = lazy(() => import('./WysiwygEditor'))
+const LiteratureAttachments = lazy(() => import('./LiteratureAttachments').then((module) => ({ default: module.LiteratureAttachments })))
+
+async function copyCitation(note: Note, format: 'gb' | 'apa' | 'bibtex') {
+  const { copyCitationFor } = await import('@/lib/copyCitation')
+  await copyCitationFor(note, format)
+}
+
+async function copyWordCitation(note: Note) {
+  const [{ litToCSL }, { writeCitationClipboard }] = await Promise.all([import('@/lib/literature'), import('@/lib/rtfField')])
+  await writeCitationClipboard([litToCSL(note)], 'gb')
+}
 
 function savedTheme(): PreviewTheme {
   const value = readSetting(THEME_KEY)
@@ -59,6 +69,7 @@ export function NoteEditor({ note, allNotes, onChange, onDelete, onOpenNote, onC
   const [tagInput, setTagInput] = useState('')
   const [tab, setTab] = useState<'edit' | 'preview'>('preview')
   const [theme, setTheme] = useState<PreviewTheme>(savedTheme)
+  const [editorMode, setEditorMode] = useState<'classic' | 'wysiwyg'>(() => readSetting(EDITOR_MODE_KEY) === 'classic' ? 'classic' : 'wysiwyg')
   const [customTheme, setCustomTheme] = useState(() => {
     try {
   return JSON.parse(readSetting(CUSTOM_THEME_KEY) ?? 'null') as { name: string; css: string } | null
@@ -207,6 +218,18 @@ export function NoteEditor({ note, allNotes, onChange, onDelete, onOpenNote, onC
 
   const themeControls = (
     <div className="flex min-w-0 items-center gap-2">
+      <Select value={editorMode} onValueChange={(value) => {
+        const mode = value === 'wysiwyg' ? 'wysiwyg' : 'classic'
+        setEditorMode(mode)
+        writeSetting(EDITOR_MODE_KEY, mode)
+        setLinkSuggest(null)
+      }}>
+        <SelectTrigger className="h-11 w-[8rem] min-w-0 md:h-8" aria-label="编辑模式"><SelectValue /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value="wysiwyg">所见即所得</SelectItem>
+          <SelectItem value="classic">经典模式</SelectItem>
+        </SelectContent>
+      </Select>
       <Palette className="hidden h-4 w-4 text-muted-foreground md:block" aria-hidden="true" />
       <Select value={theme} onValueChange={(v) => selectTheme(v as PreviewTheme)}>
         <SelectTrigger className="h-11 w-[9rem] min-w-0 md:h-8 md:w-[140px]" aria-label="阅读主题">
@@ -246,7 +269,19 @@ export function NoteEditor({ note, allNotes, onChange, onDelete, onOpenNote, onC
   )
 
   // 编辑区：分栏（源码 | 渲染）或 预览/编辑切换
-  const editorArea = splitView ? (
+  const editorArea = editorMode === 'wysiwyg' ? (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2 md:px-4">
+        <span className="text-xs text-muted-foreground">正文即打即排版，与 Word 一致；Markdown 自动保存</span>
+        {themeControls}
+      </div>
+      <Suspense fallback={<div className="p-4 text-sm text-muted-foreground" role="status">正在加载编辑器…</div>}>
+        <WysiwygEditor key={note.id} value={note.content} noteId={note.id} notes={allNotes}
+          onChange={(content) => { onChange({ content }); markSaved() }}
+          onOpenNote={onOpenNote} onCreateNote={onCreateNote} theme={theme} customCss={customTheme?.css ?? ''} />
+      </Suspense>
+    </div>
+  ) : splitView ? (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2 md:px-4">
         <span className="text-xs text-muted-foreground">左：Markdown 源码 · 右：渲染结果</span>
@@ -419,9 +454,11 @@ export function NoteEditor({ note, allNotes, onChange, onDelete, onOpenNote, onC
 
       {/* 编辑区；文献笔记外包一层附件工作区（附件工具条 + 可拖拽 PDF 面板） */}
       {note.type === 'literature' ? (
-        <LiteratureAttachments note={note} onChange={onChange}>
-          {editorArea}
-        </LiteratureAttachments>
+        <Suspense fallback={editorArea}>
+          <LiteratureAttachments note={note} onChange={onChange}>
+            {editorArea}
+          </LiteratureAttachments>
+        </Suspense>
       ) : (
         editorArea
       )}
@@ -443,7 +480,6 @@ function LiteratureFields({
   const [editingKey, setEditingKey] = useState(false)
 
   const patch = (p: Partial<LiteratureMeta>) => onChange({ literature: { ...lit, ...p } })
-
   const existingKeys = useMemo(
     () =>
       new Set(
@@ -458,11 +494,41 @@ function LiteratureFields({
     setEditingKey(false)
   }
 
+  // DOI / 文献链接：裸 DOI 补 https://doi.org/ 前缀；已是 URL 则原样打开
+  const doi = lit.doi.trim()
+  const doiUrl = doi ? (/^https?:\/\//i.test(doi) ? doi : `https://doi.org/${encodeURIComponent(doi)}`) : null
+  const pdfIds = lit.attachments ?? []
+  const openLocalPdf = async () => {
+    if (!pdfIds.length) return
+    try {
+      const error = await openPdfExternal(pdfIds[0])
+      if (error) toast.error(`打开 PDF 失败：${error}`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '打开 PDF 失败')
+    }
+  }
+
   return (
     <div className="space-y-2 border-b p-3 md:p-4">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs font-medium text-muted-foreground">文献信息</span>
         <span className="text-xs text-muted-foreground">作者一行一个，如 Zhang, San</span>
+        {doiUrl && (
+          <Button variant="outline" size="sm" className="h-7 text-xs" title={doiUrl} onClick={() => window.open(doiUrl, '_blank', 'noopener')}>
+            <ExternalLink className="mr-1 h-3 w-3" /> 打开文献
+          </Button>
+        )}
+        {pdfIds.length > 0 && attachmentsSupported() && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs"
+            title="用系统默认程序（如 PDF 阅读器）打开本地 PDF"
+            onClick={() => void openLocalPdf()}
+          >
+            <FileText className="mr-1 h-3 w-3" /> 本地 PDF{pdfIds.length > 1 ? ` (${pdfIds.length})` : ''}
+          </Button>
+        )}
         <div className="ml-auto">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -471,11 +537,11 @@ function LiteratureFields({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onSelect={() => void copyCitationFor(note, 'gb')}>GB/T 7714</DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => void copyCitationFor(note, 'apa')}>APA</DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => void copyCitationFor(note, 'bibtex')}>BibTeX</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => void copyCitation(note, 'gb')}>GB/T 7714</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => void copyCitation(note, 'apa')}>APA</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => void copyCitation(note, 'bibtex')}>BibTeX</DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={() => void writeCitationClipboard([litToCSL(note)], 'gb')}>
+              <DropdownMenuItem onSelect={() => void copyWordCitation(note)}>
                 插入 Word 引用（域代码）
               </DropdownMenuItem>
             </DropdownMenuContent>

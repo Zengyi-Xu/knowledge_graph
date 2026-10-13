@@ -335,7 +335,7 @@ async function main() {
   const { planZoteroSync, normalizeTitle } = await import('@/lib/zoteroSync')
   type ZItem = import('@/lib/zoteroSync').ZoteroItem
   const zItem = (partial: Partial<ZItem>): ZItem => ({
-    zoteroKey: 0,
+    zoteroKey: 'AAAA0001',
     itemType: 'journalArticle',
     title: '',
     doi: '',
@@ -343,6 +343,8 @@ async function main() {
     venue: '',
     authors: [],
     collectionPaths: [],
+    pdfCount: 0,
+    availablePdfCount: 0,
     ...partial,
   })
   await check('normalizeTitle 忽略大小写 / 标点 / 空格', () => {
@@ -354,16 +356,24 @@ async function main() {
       collections: ['已有分类'],
     })
     const plan = planZoteroSync(
-      [zItem({ zoteroKey: 1, doi: '10.1038/s41566-024-xxxx', title: '别的题目', collectionPaths: ['硅光/调制器'] })],
+      [zItem({ zoteroKey: 'AAAA0001', doi: '10.1038/s41566-024-xxxx', title: '别的题目', collectionPaths: ['硅光/调制器'] })],
       [note],
     )
     assert.equal(plan.matchedCount, 1)
     assert.deepEqual(plan.updates[0].collections, ['已有分类', '硅光/调制器'])
   })
+  await check('Zotero key 匹配优先于 DOI / 标题', () => {
+    const note = litNote({ doi: '10.1/别处', collections: [] })
+    const withKey: Note = { ...note, literature: { ...note.literature!, zoteroKey: 'Q4DVYK39' } }
+    const plan = planZoteroSync([zItem({ zoteroKey: 'Q4DVYK39', doi: '10.1/另一篇', title: '标题不同', collectionPaths: ['方向A'] })], [withKey])
+    assert.equal(plan.matchedCount, 1)
+    assert.equal(plan.updates[0].zoteroKey, 'Q4DVYK39')
+    assert.deepEqual(plan.updates[0].collections, ['方向A'])
+  })
   await check('标题归一化匹配兜底（无 DOI 时）', () => {
     const note = litNote({ doi: '' })
     const plan = planZoteroSync(
-      [zItem({ zoteroKey: 2, title: 'Silicon Photonics for Quantum Computing!' })],
+      [zItem({ zoteroKey: 'BBBB0002', title: 'Silicon Photonics for Quantum Computing!' })],
       [note],
     )
     assert.equal(plan.matchedCount, 1)
@@ -373,22 +383,48 @@ async function main() {
     const note = litNote()
     const withTags: Note = { ...note, tags: ['方向:硅光', '期刊:Nature Photonics'] }
     const plan = planZoteroSync(
-      [zItem({ zoteroKey: 3, title: note.title, venue: 'Nature Photonics', year: 2024, collectionPaths: ['硅光/调制器', '硅光/探测器'] })],
+      [zItem({ zoteroKey: 'CCCC0003', title: note.title, venue: 'Nature Photonics', year: 2024, collectionPaths: ['硅光/调制器', '硅光/探测器'] })],
       [withTags],
     )
     assert.deepEqual(plan.updates[0].tagsToAdd, ['年份:2024'])
-    const fresh = planZoteroSync([zItem({ zoteroKey: 4, title: note.title, venue: 'Nature Photonics', year: 2024, collectionPaths: ['硅光/调制器'] })], [note])
+    const fresh = planZoteroSync([zItem({ zoteroKey: 'DDDD0004', title: note.title, venue: 'Nature Photonics', year: 2024, collectionPaths: ['硅光/调制器'] })], [note])
     assert.deepEqual(fresh.updates[0].tagsToAdd.sort(), ['期刊:Nature Photonics', '年份:2024', '方向:硅光'].sort())
+  })
+  await check('Zotero 里没有分类 → 写「未分类」并加「方向:未分类」标签', () => {
+    const note = litNote({ doi: '' })
+    const plan = planZoteroSync([zItem({ zoteroKey: 'EEEE0005', title: note.title, collectionPaths: [] })], [note])
+    assert.deepEqual(plan.updates[0].collections, ['未分类'])
+    assert.ok(plan.updates[0].tagsToAdd.includes('方向:未分类'))
+    // 之后 Zotero 补了分类 → 「未分类」被真实分类取代
+    const after: Note = {
+      ...note,
+      tags: [...note.tags, ...plan.updates[0].tagsToAdd],
+      literature: { ...note.literature!, collections: plan.updates[0].collections, zoteroKey: 'EEEE0005', zoteroPdfCount: 0, zoteroAvailablePdfCount: 0 },
+    }
+    const next = planZoteroSync([zItem({ zoteroKey: 'EEEE0005', title: note.title, collectionPaths: ['硅光'] })], [after])
+    assert.deepEqual(next.updates[0].collections, ['硅光'])
+  })
+  await check('同步更新 Zotero key 与 PDF 计数（字符串 key）', () => {
+    const note = litNote({ doi: '' })
+    const plan = planZoteroSync([zItem({ zoteroKey: 'FFFF0006', title: note.title, pdfCount: 2, availablePdfCount: 1 })], [note])
+    const update = plan.updates[0]
+    assert.equal(update.zoteroKey, 'FFFF0006')
+    assert.equal(update.zoteroPdfCount, 2)
+    assert.equal(update.zoteroAvailablePdfCount, 1)
   })
   await check('无变化时不产出更新；未匹配条目进入 unmatchedZotero', () => {
     const base = litNote({ collections: ['硅光/调制器'] })
-    const note: Note = { ...base, tags: ['方向:硅光', '期刊:Nature Photonics', '年份:2024'] }
-    const same = zItem({ zoteroKey: 5, title: note.title, venue: 'Nature Photonics', year: 2024, collectionPaths: ['硅光/调制器'] })
-    const plan = planZoteroSync([same, zItem({ zoteroKey: 6, title: '库里没有的论文' })], [note])
+    const note: Note = {
+      ...base,
+      tags: ['方向:硅光', '期刊:Nature Photonics', '年份:2024'],
+      literature: { ...base.literature!, zoteroKey: 'GGGG0007', zoteroPdfCount: 1, zoteroAvailablePdfCount: 1 },
+    }
+    const same = zItem({ zoteroKey: 'GGGG0007', title: note.title, venue: 'Nature Photonics', year: 2024, collectionPaths: ['硅光/调制器'], pdfCount: 1, availablePdfCount: 1 })
+    const plan = planZoteroSync([same, zItem({ zoteroKey: 'HHHH0008', title: '库里没有的论文' })], [note])
     assert.equal(plan.updates.length, 0)
     assert.equal(plan.matchedCount, 1)
     assert.equal(plan.unmatchedZotero.length, 1)
-    assert.equal(plan.unmatchedZotero[0].zoteroKey, 6)
+    assert.equal(plan.unmatchedZotero[0].zoteroKey, 'HHHH0008')
   })
 
   console.log('\nJ. AI operations 校验（parseAiOperations / resolveOps）')
@@ -483,6 +519,74 @@ async function main() {
     }
     for (const [, d] of deg) assert.ok(d <= 2, `度数 ${d} 超过 maxPerNode=2`)
   })
+
+  console.log('\nL. 图谱档位准入（graphModel：与笔记无关联的文献不进入图谱）')
+  const {
+    buildTitleIndex: buildTI,
+    buildWikilinkEdges: buildWE,
+    computeNoteDegrees: computeND,
+    computeDegreeById: computeFD,
+    selectTopicLiterature: selectTL,
+  } = await import('@/lib/graphModel')
+
+  // 复现现场：1 篇普通项目笔记，正文只引用 [[Paper 0]]；另有 900 篇同分类（已发表文章）文献
+  const GROUP = 900
+  const groupLit = Array.from({ length: GROUP }, (_, i) => lit(`L${i}`, `Paper ${i}`, ['已发表文章']))
+  const projectNote: Note = {
+    id: 'proj',
+    title: '项目 某课题',
+    type: 'task',
+    grade: '',
+    tags: [],
+    content: '参考了 [[Paper 0]] 这一篇。',
+    createdAt: 1_700_000_000_000,
+    updatedAt: 1_700_000_000_000,
+  }
+  const allNotes = [projectNote, ...groupLit]
+  const tIdx = buildTI(allNotes)
+
+  // 真实组件流程：先算与笔记的双链度数 → linked 档只选「会显示的文献」→ 只为它们建话题边
+  const degNote = computeND(allNotes, tIdx)
+  const linkedLit = selectTL(groupLit, degNote, 'linked', 1)
+  const s0 = performance.now()
+  const linkedTopicEdges = buildTopicEdges(linkedLit)
+  const linkedTopicMs = performance.now() - s0
+  const degLinked = computeFD(allNotes, tIdx, linkedTopicEdges)
+  const wlEdges = buildWE(allNotes, tIdx)
+
+  // 对照：旧逻辑对全部 900 篇（含隐藏文献）建话题边，用于展示浪费与误显示来源
+  const f0 = performance.now()
+  const fullTopicEdges = buildTopicEdges(groupLit)
+  const fullTopicMs = performance.now() - f0
+  const degFull = computeFD(allNotes, tIdx, fullTopicEdges)
+
+  await check('被普通笔记引用的文献 noteDegree=1，其余 899 篇同组文献 noteDegree=0', () => {
+    assert.equal(degNote.get('L0'), 1)
+    for (let i = 1; i < GROUP; i++) {
+      assert.equal(degNote.get(`L${i}`) ?? 0, 0, `Paper ${i} 不应与普通笔记有关联`)
+    }
+  })
+  await check('linked 档只选 Paper 0；旧逻辑下 L1 全量度数>0（话题边误显示来源）', () => {
+    assert.equal(linkedLit.length, 1)
+    assert.equal(linkedLit[0].id, 'L0')
+    assert.ok((degFull.get('L1') ?? 0) > 0, 'L1 与同组文献有话题边——旧逻辑会把它误带进图谱')
+    assert.equal(degLinked.get('L1') ?? 0, 0, '新流程不为 L1 建边，度数应为 0')
+  })
+  await check('双链边只有 项目→Paper 0；linked 话题边为空（仅 1 篇文献无法成边）', () => {
+    assert.equal(wlEdges.length, 1)
+    assert.equal(linkedTopicEdges.length, 0)
+  })
+
+  console.log(
+    `      [规模] 总节点 ${allNotes.length}；旧逻辑全量话题边 ${fullTopicEdges.length} 条 / ${fullTopicMs.toFixed(
+      0,
+    )} ms，linked 仅 ${linkedTopicEdges.length} 条 / ${linkedTopicMs.toFixed(1)} ms`,
+  )
+  console.log(
+    `      [linked 档] 进入图谱 ${1 + linkedLit.length} 个节点（1 普通笔记 + ${linkedLit.length} 关联文献），其余 ${
+      GROUP - linkedLit.length
+    } 篇已移出图谱`,
+  )
 
   console.log(`\n结果：${passed} 通过，${failures.length} 失败`)
   if (failures.length) {

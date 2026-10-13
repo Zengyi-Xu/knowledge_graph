@@ -1,11 +1,12 @@
 # Dependencies
 node_modules/
 
-# Build output
-dist/
-dist-dev/
-dist-ssr/
-release/
+# Build output（只忽略仓库根目录构建产物；public/vditor/dist 是编辑器运行时资源，必须入库）
+/dist/
+/dist-dev/
+/dist-ssr/
+/release/
+!public/vditor/dist/
 
 # 测试脚手架 / 临时产物（vault 自测与端到端验证）
 .tmp-*/

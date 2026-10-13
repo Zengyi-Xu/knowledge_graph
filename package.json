@@ -1,7 +1,7 @@
 {
   "name": "knowledge-graph",
   "private": true,
-  "version": "0.3.1",
+  "version": "0.3.3",
   "description": "本地优先的知识图谱笔记应用",
   "author": "Zengyi Xu",
   "main": "electron/main.cjs",
@@ -18,6 +18,16 @@
     "test:md-render": "esbuild scripts/md-ssr-entry.tsx --bundle --platform=node --format=cjs --target=node20 --alias:@=./src --outfile=.tmp-md-visual/ssr.cjs && node .tmp-md-visual/ssr.cjs",
     "visual:md": "node scripts/md-visual.mjs",
     "preview": "vite preview",
+    "web:local": "node scripts/local-web.mjs",
+    "test:web": "node scripts/local-web-selftest.mjs",
+    "zotero:build": "esbuild scripts/zotero-vault-sync.ts --bundle --platform=node --format=cjs --target=node20 --alias:@=./src --outfile=.tmp-zotero/zotero-vault-sync.cjs",
+    "zotero:sync": "npm run zotero:build && node .tmp-zotero/zotero-vault-sync.cjs",
+    "test:zotero": "node scripts/zotero-selftest.mjs",
+    "test:zotero-import": "esbuild scripts/zotero-import-selftest.ts --bundle --platform=node --format=cjs --target=node20 --alias:@=./src --outfile=.tmp-vault-test/zotero-import-selftest.cjs && node .tmp-vault-test/zotero-import-selftest.cjs",
+    "test:zotero-e2e": "npm run zotero:build && node scripts/zotero-import-e2e.mjs",
+    "test:wysiwyg-e2e": "node scripts/wysiwyg-e2e.mjs",
+    "test:startup": "esbuild scripts/perf-startup.ts --bundle --platform=node --format=cjs --target=node20 --alias:@=./src --outfile=.tmp-vault-test/perf.cjs && node .tmp-vault-test/perf.cjs",
+    "test:startup-e2e": "node scripts/startup-e2e.mjs",
     "desktop:dev": "npm run build:dev && electron .",
     "desktop:pack": "npm run build && electron-builder --win portable",
     "desktop:installer": "npm run build && electron-builder --win nsis",
@@ -106,6 +116,7 @@
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.4.0",
     "vaul": "^1.1.2",
+    "vditor": "^4.0.0",
     "zod": "^4.3.5"
   },
   "devDependencies": {
