@@ -52,6 +52,23 @@ DOI/arXiv 导入与手动 AI 调用沿用原功能的网络请求。普通笔记
 浏览器自身写不了 `text/rtf`：本地网页端由本机服务代写剪贴板（`/api/local` 的 `clipboard:write-rtf`，PowerShell `SetDataObject`，载荷走临时文件），桌面版走 Electron 原生剪贴板，Safari 走原生剪贴板 API，其余环境降级为纯文本并提示。
 回归：`npm run verify:word`（Windows + Word，真机粘贴断言 fields=1）；`npm run test:lit` 覆盖域代码格式（`\fldinst` 指令不得用花括号包裹，否则 Word 会退化成字面文本）。
 
+## 文献库去重
+
+Zotero 库自身可能存在重复条目（同一 DOI / 同一标题两条，常见于同一批文献被导入过两次）。
+vault 同步会如实镜像，因此笔记里会出现重复文献。用合并脚本清理：
+
+```powershell
+npm run dedupe:vault -- --vault "<vault>"          # dry-run：列出重复组与保留策略
+npm run dedupe:vault -- --vault "<vault>" --apply  # 写盘：先整库备份，再合并/删除
+```
+
+- 分组：同一 DOI ⇒ 同篇；标题相近且 DOI 不冲突（至少一边为空）⇒ 同篇（并查集连通）。
+- 保留：有分类 > 有本机 PDF > 有 DOI > created 最早 > 文件名序；collections/tags/attachments 取并集。
+- 幂等：再跑应为 0 组；顺带清理指向已删文件的悬空 `meta.json` 条目。
+- 与后续同步兼容：导入匹配顺序是 zoteroKey > DOI > 标题，被合并掉的那条会按 DOI/标题匹配回保留项，不会重新长出来。
+- 诊断：`node scripts/audit-vault-dupes.mjs`（vault 侧）、`node scripts/audit-zotero-dupes.mjs`（Zotero 库侧）。
+- 2026-10-13 实测：1367 → 668 篇（合并 560 组，删除 699 个重复文件，全部有备份）。
+
 ## 验证命令
 
 ```powershell
