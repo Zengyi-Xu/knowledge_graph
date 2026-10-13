@@ -97,6 +97,20 @@ try {
   check('双链工具栏插入模板', await wait(`fixture.note.content.includes('[[笔记标题]]')`))
   await act('fixture.remount()')
   check('组件重载后仍是所见即所得且内容不重写', await wait(`${content}?.textContent.includes('外部同步更新')`))
+  // 标签自动补全：候选、沿用已有拼写、大小写归一
+  const tagInput = 'document.querySelector("[aria-label=添加标签]")'
+  const tagList = 'document.querySelector("[role=listbox][aria-label=已有标签]")'
+  await act(`${tagInput}.focus()`)
+  await send('Input.insertText', { text: '激光' })
+  check('标签输入出现已有标签候选', await wait(`${tagList}?.textContent.includes('量子点激光器')`))
+  await act(`[...${tagList}.querySelectorAll('[role=option]')].find(o => o.textContent.includes('量子点激光器'))?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))`)
+  check('点击候选添加已有标签并清空输入', await evaluate(`fixture.note.tags.includes('量子点激光器') && ${tagInput}.value === ''`))
+  await act(`${tagInput}.focus()`)
+  await send('Input.insertText', { text: 'laser' })
+  check('候选匹配忽略大小写', await wait(`${tagList}?.textContent.includes('Laser')`))
+  await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
+  await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
+  check('回车采用已有拼写（不新增 laser 小写变体）', await wait(`fixture.note.tags.includes('Laser') && !fixture.note.tags.includes('laser')`))
   await act('document.querySelector("[aria-label=编辑模式]").click()')
   await act('[...document.querySelectorAll("[role=option]")].find(e=>e.textContent==="经典模式").click()')
   check('可切换经典模式并持久化', await evaluate('localStorage.getItem("kg-dev-editor-mode-v1") === "classic" && !document.querySelector("[data-testid=wysiwyg-editor]")'))

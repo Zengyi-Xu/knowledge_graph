@@ -67,6 +67,8 @@ interface Props {
 
 export function NoteEditor({ note, allNotes, onChange, onDelete, onOpenNote, onCreateNote, onAiUpdate, splitView = false }: Props) {
   const [tagInput, setTagInput] = useState('')
+  const [tagSuggestIndex, setTagSuggestIndex] = useState(0)
+  const [tagSuggestDismissed, setTagSuggestDismissed] = useState(false)
   const [tab, setTab] = useState<'edit' | 'preview'>('preview')
   const [theme, setTheme] = useState<PreviewTheme>(savedTheme)
   const [editorMode, setEditorMode] = useState<'classic' | 'wysiwyg'>(() => readSetting(EDITOR_MODE_KEY) === 'classic' ? 'classic' : 'wysiwyg')
@@ -146,9 +148,51 @@ export function NoteEditor({ note, allNotes, onChange, onDelete, onOpenNote, onC
     })
   }
 
-  const addTag = () => {
-    const t = tagInput.trim().replace(/^#/, '')
-    if (t && !note.tags.includes(t)) onChange({ tags: [...note.tags, t] })
+  /** 跨全部笔记的已有标签池：输入时给候选，避免造出重复标签 */
+  const tagPool = useMemo(() => {
+    const counts = new Map<string, number>()
+    const spelling = new Map<string, string>()
+    for (const n of allNotes) {
+      for (const t of n.tags) {
+        const key = t.toLowerCase()
+        counts.set(key, (counts.get(key) ?? 0) + 1)
+        if (!spelling.has(key)) spelling.set(key, t)
+      }
+    }
+    return { counts, spelling }
+  }, [allNotes])
+
+  const tagQuery = tagInput.trim().replace(/^#/, '').toLowerCase()
+  /** 候选：前缀匹配排在包含匹配之前，各自按使用次数降序；本笔记已有的标签不再提示 */
+  const tagSuggestions = useMemo(() => {
+    if (!tagQuery) return []
+    const own = new Set(note.tags.map((t) => t.toLowerCase()))
+    const starts: string[] = []
+    const contains: string[] = []
+    for (const key of tagPool.counts.keys()) {
+      if (own.has(key)) continue
+      const label = tagPool.spelling.get(key) ?? key
+      if (key.startsWith(tagQuery)) starts.push(label)
+      else if (key.includes(tagQuery)) contains.push(label)
+    }
+    const byUse = (a: string, b: string) =>
+      (tagPool.counts.get(b.toLowerCase()) ?? 0) - (tagPool.counts.get(a.toLowerCase()) ?? 0)
+    starts.sort(byUse)
+    contains.sort(byUse)
+    return [...starts, ...contains].slice(0, 8)
+  }, [tagQuery, tagPool, note.tags])
+  const tagSuggestOpen = tagSuggestions.length > 0 && !tagSuggestDismissed
+
+  const addTag = (value?: string) => {    const raw = (value ?? tagInput).trim().replace(/^#/, '')
+    if (!raw) {
+      setTagInput('')
+      return
+    }
+    // 已有标签里存在同样内容（忽略大小写）时，沿用已有拼写，避免造出 NPU / npu 这类重复
+    const canonical = tagPool.spelling.get(raw.toLowerCase()) ?? raw
+    if (!note.tags.some((t) => t.toLowerCase() === canonical.toLowerCase())) {
+      onChange({ tags: [...note.tags, canonical] })
+    }
     setTagInput('')
   }
 
@@ -422,19 +466,75 @@ export function NoteEditor({ note, allNotes, onChange, onDelete, onOpenNote, onC
                 #{t} ×
               </Badge>
             ))}
-            <Input
-              value={tagInput}
-              onChange={(e) => setTagInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault()
+            <div className="relative">
+              <Input
+                value={tagInput}
+                onChange={(e) => {
+                  setTagInput(e.target.value)
+                  setTagSuggestIndex(0)
+                  setTagSuggestDismissed(false)
+                }}
+                onKeyDown={(e) => {
+                  if (tagSuggestOpen && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+                    e.preventDefault()
+                    setTagSuggestIndex((i) =>
+                      (i + (e.key === 'ArrowDown' ? 1 : tagSuggestions.length - 1)) % tagSuggestions.length,
+                    )
+                    return
+                  }
+                  if (tagSuggestOpen && e.key === 'Escape') {
+                    e.preventDefault()
+                    setTagSuggestDismissed(true)
+                    return
+                  }
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    // 有高亮候选就采用它（沿用已有拼写），否则用输入内容新建
+                    addTag(tagSuggestOpen ? tagSuggestions[tagSuggestIndex] : undefined)
+                    setTagSuggestDismissed(true)
+                  }
+                }}
+                onBlur={() => {
                   addTag()
-                }
-              }}
-              onBlur={addTag}
-              placeholder="+ 标签"
-              className="h-11 w-24 text-sm md:h-7 md:text-xs"
-            />
+                  setTagSuggestDismissed(true)
+                }}
+                placeholder="+ 标签"
+                className="h-11 w-24 text-sm md:h-7 md:text-xs"
+                aria-label="添加标签"
+                aria-autocomplete="list"
+                aria-expanded={tagSuggestOpen}
+              />
+              {tagSuggestOpen && (
+                <div
+                  className="absolute left-0 top-full z-20 mt-1 max-h-56 w-52 overflow-y-auto rounded-md border bg-popover shadow-md"
+                  role="listbox"
+                  aria-label="已有标签"
+                >
+                  {tagSuggestions.map((t, i) => (
+                    <button
+                      key={t}
+                      type="button"
+                      role="option"
+                      aria-selected={i === tagSuggestIndex}
+                      onMouseDown={(e) => {
+                        // 保住输入框焦点：blur 里的 addTag 不会重复添加
+                        e.preventDefault()
+                        addTag(t)
+                        setTagSuggestDismissed(true)
+                      }}
+                      className={`flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left text-xs hover:bg-accent ${
+                        i === tagSuggestIndex ? 'bg-accent' : ''
+                      }`}
+                    >
+                      <span className="min-w-0 truncate">#{t}</span>
+                      <span className="shrink-0 text-muted-foreground">
+                        {tagPool.counts.get(t.toLowerCase()) ?? 0} 篇
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
           <span className="text-xs text-muted-foreground md:ml-auto">
             {saved && (
