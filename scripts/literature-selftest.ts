@@ -96,6 +96,10 @@ async function main() {
     const csl = litToCSL(litNote({ year: '' }))
     assert.equal('issued' in csl, false)
   })
+  await check('Zotero key 作为 Word 域关联信息保留', () => {
+    const csl = litToCSL(litNote({ zoteroKey: 'Q4DVYK39' }))
+    assert.equal(csl._zoteroKey, 'Q4DVYK39')
+  })
 
   console.log('\nB. 引文格式化（内嵌样式，离线）')
   await check('GB/T 7714 单条引文带 [1] 编号与题名', () => {
@@ -280,23 +284,26 @@ async function main() {
   /** 从 RTF 域指令里取出 JSON payload（RTF 转义还原后 JSON.parse；测试辅助） */
   const extractPayload = (rtf: string) => {
     // 起点取「 ADDIN ZOTERO_ITEM 」之后（含被转义的 \{ 与 \}），整体反转义
-    const marker = ' ADDIN ZOTERO_ITEM '
+    const marker = ' ADDIN ZOTERO_ITEM CSL_CITATION '
     const start = rtf.indexOf(marker) + marker.length
-    const end = rtf.indexOf('\\}}{\\fldrslt', start) + 2 // 含 JSON 末尾被转义的 \}
+    const end = rtf.indexOf(' }{\\fldrslt', start)
     const body = rtf.slice(start, end).replace(/\\(.)/gs, '$1') // \{ → {、\} → }、\\ → \
     return JSON.parse(body)
   }
   await check('域指令含合法 JSON（citationItems/properties/schema）', () => {
     const rtf = buildCitationFieldRtf([rtfItem], 'apa')
     // 指令不能带花括号：{\*\fldinst{ … }} 在 Word 里会退化成字面文本（2026-10-13 实测）
-    assert.ok(rtf.startsWith('{\\field{\\*\\fldinst ADDIN ZOTERO_ITEM '), rtf.slice(0, 60))
+    assert.ok(rtf.startsWith('{\\field{\\*\\fldinst ADDIN ZOTERO_ITEM CSL_CITATION '), rtf.slice(0, 80))
     assert.ok(!rtf.includes('\\fldinst{'), 'fldinst 指令不得用花括号包裹')
     const payload = extractPayload(rtf)
+    assert.ok(payload.citationID.startsWith('kg-'))
     assert.equal(payload.citationItems.length, 1)
     assert.equal(payload.citationItems[0].id, 'zhang2024silicon')
     assert.equal(payload.citationItems[0].itemData.title, 'Silicon photonics for quantum computing')
     assert.equal(payload.properties.formattedCitation, '(Zhang & Li, 2024)')
-    assert.ok(payload.schema.startsWith('https://github.com/zotero/zotero/schema/citation.json'))
+    assert.equal(payload.properties.plainCitation, '(Zhang & Li, 2024)')
+    assert.equal(payload.properties.noteIndex, 0)
+    assert.equal(payload.schema, 'https://github.com/citation-style-language/schema/raw/master/csl-citation.json')
     assert.ok(rtf.includes('{\\fldrslt (Zhang & Li, 2024)}}'))
   })
   await check('GB 数字标记在 fldrslt 里用上标', () => {
@@ -307,6 +314,13 @@ async function main() {
     const rtf = buildCitationFieldRtf([rtfItem, rtfItem2], 'gb')
     const payload = extractPayload(rtf)
     assert.deepEqual(payload.citationItems.map((c: { id: string }) => c.id), ['zhang2024silicon', 'li2023another'])
+  })
+  await check('已同步条目优先用真实 Zotero key，私有辅助字段不写入 itemData', () => {
+    const rtf = buildCitationFieldRtf([litToCSL(litNote({ zoteroKey: 'Q4DVYK39' }))], 'gb')
+    const payload = extractPayload(rtf)
+    assert.equal(payload.citationItems[0].id, 'Q4DVYK39')
+    assert.equal(payload.citationItems[0].itemData.id, 'Q4DVYK39')
+    assert.equal(payload.citationItems[0].itemData._zoteroKey, undefined)
   })
   await check('特殊字符快照：中文标题与非 ASCII 作者正确转义', () => {
     const zhNote = {
@@ -326,7 +340,7 @@ async function main() {
   })
   await check('buildClipboardParts：citation 给域代码+标记，bibliography 给文献表', () => {
     const c = buildClipboardParts([rtfItem], 'apa', 'citation')
-    assert.ok(c.rtf.includes('ADDIN ZOTERO_ITEM'))
+    assert.ok(c.rtf.includes('ADDIN ZOTERO_ITEM CSL_CITATION'))
     assert.equal(c.plain, '(Zhang & Li, 2024)')
     const b = buildClipboardParts([rtfItem], 'apa', 'bibliography')
     assert.ok(!b.rtf.includes('ZOTERO_ITEM'))
@@ -392,16 +406,20 @@ async function main() {
     const fresh = planZoteroSync([zItem({ zoteroKey: 'DDDD0004', title: note.title, venue: 'Nature Photonics', year: 2024, collectionPaths: ['硅光/调制器'] })], [note])
     assert.deepEqual(fresh.updates[0].tagsToAdd.sort(), ['期刊:Nature Photonics', '年份:2024', '方向:硅光'].sort())
   })
-  await check('Zotero 里没有分类 → 写「未分类」并加「方向:未分类」标签', () => {
+  await check('Zotero 里没有分类 → collections 为空（界面动态显示「未分类」），不写占位', () => {
     const note = litNote({ doi: '' })
+    note.tags = ['方向:未分类', '我的标签']
     const plan = planZoteroSync([zItem({ zoteroKey: 'EEEE0005', title: note.title, collectionPaths: [] })], [note])
-    assert.deepEqual(plan.updates[0].collections, ['未分类'])
-    assert.ok(plan.updates[0].tagsToAdd.includes('方向:未分类'))
-    // 之后 Zotero 补了分类 → 「未分类」被真实分类取代
+    assert.deepEqual(plan.updates[0].collections, [])
+    assert.ok(!plan.updates[0].tagsToAdd.includes('方向:未分类'))
+    // 历史占位「方向:未分类」标签要被清掉，其它标签保留
+    assert.ok(plan.updates[0].tagsToRemove.includes('方向:未分类'))
+    assert.ok(!plan.updates[0].tagsToRemove.includes('我的标签'))
+    // 之后 Zotero 补了分类 → 真实分类写入
     const after: Note = {
       ...note,
-      tags: [...note.tags, ...plan.updates[0].tagsToAdd],
-      literature: { ...note.literature!, collections: plan.updates[0].collections, zoteroKey: 'EEEE0005', zoteroPdfCount: 0, zoteroAvailablePdfCount: 0 },
+      tags: [...note.tags, ...plan.updates[0].tagsToAdd].filter((t) => t !== '方向:未分类'),
+      literature: { ...note.literature!, collections: plan.updates[0].collections, zoteroKey: 'EEEE0005', zoteroKeys: ['EEEE0005'], zoteroPdfCount: 0, zoteroAvailablePdfCount: 0 },
     }
     const next = planZoteroSync([zItem({ zoteroKey: 'EEEE0005', title: note.title, collectionPaths: ['硅光'] })], [after])
     assert.deepEqual(next.updates[0].collections, ['硅光'])
@@ -419,7 +437,7 @@ async function main() {
     const note: Note = {
       ...base,
       tags: ['方向:硅光', '期刊:Nature Photonics', '年份:2024'],
-      literature: { ...base.literature!, zoteroKey: 'GGGG0007', zoteroPdfCount: 1, zoteroAvailablePdfCount: 1 },
+      literature: { ...base.literature!, zoteroKey: 'GGGG0007', zoteroKeys: ['GGGG0007'], zoteroPdfCount: 1, zoteroAvailablePdfCount: 1 },
     }
     const same = zItem({ zoteroKey: 'GGGG0007', title: note.title, venue: 'Nature Photonics', year: 2024, collectionPaths: ['硅光/调制器'], pdfCount: 1, availablePdfCount: 1 })
     const plan = planZoteroSync([same, zItem({ zoteroKey: 'HHHH0008', title: '库里没有的论文' })], [note])
@@ -589,6 +607,26 @@ async function main() {
       GROUP - linkedLit.length
     } 篇已移出图谱`,
   )
+
+  await check('显示用标题清洗：解 HTML 实体 / 去内联标签 / 去站点尾缀 / 去 $ 定界符', async () => {
+    const { cleanLiteratureTitle } = await import('@/lib/literature')
+    assert.equal(cleanLiteratureTitle('Crystal <sub>1/2</sub> phase transitions'), 'Crystal 1/2 phase transitions')
+    assert.equal(cleanLiteratureTitle('Silicon&#x2013;photonics &amp; chips'), 'Silicon–photonics & chips')
+    assert.equal(cleanLiteratureTitle('Deep learning for optics | ScienceDirect.com'), 'Deep learning for optics')
+    assert.equal(cleanLiteratureTitle('Quantum dots - Nature'), 'Quantum dots')
+    assert.equal(cleanLiteratureTitle('Room-temperature $x^2$ nonlinearity'), 'Room-temperature x^2 nonlinearity')
+    // 含反斜杠的 LaTeX 命令保持原样，不做危险的“清洗”
+    assert.equal(cleanLiteratureTitle('Study of $\\alpha$-Si'), 'Study of $\\alpha$-Si')
+    assert.equal(cleanLiteratureTitle('  多余   空白  '), '多余 空白')
+  })
+
+  await check('真实分类过滤：只有「未分类」占位的笔记在界面上算作未分类', async () => {
+    const { realCollectionsOf } = await import('@/lib/zoteroMeta')
+    assert.deepEqual(realCollectionsOf(['未分类']), [])
+    assert.deepEqual(realCollectionsOf(['未分类', '硅光/调制器']), ['硅光/调制器'])
+    assert.deepEqual(realCollectionsOf([]), [])
+    assert.deepEqual(realCollectionsOf(undefined), [])
+  })
 
   console.log(`\n结果：${passed} 通过，${failures.length} 失败`)
   if (failures.length) {

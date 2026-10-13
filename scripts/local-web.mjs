@@ -15,11 +15,17 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.json': 'application/json', '.mjs': 'text/javascript' }
 const canonical = (p) => process.platform === 'win32' ? path.resolve(p).toLowerCase() : path.resolve(p)
 
-/** 默认用系统关联程序打开文件（Windows 走 cmd start，其他平台走 open / xdg-open） */
+/**
+ * 默认用系统关联程序打开文件。Windows 走 explorer.exe、macOS 走 open、Linux 走 xdg-open：
+ * 都直接 spawn 可执行文件并单独传参，不经过 cmd/sh，文件名里的 & ( ) 等字符不会被解释。
+ */
+export function openerCommand(filePath) {
+  if (process.platform === 'win32') return ['explorer.exe', [filePath]]
+  return [process.platform === 'darwin' ? 'open' : 'xdg-open', [filePath]]
+}
+
 function systemOpener(filePath) {
-  const [command, args] = process.platform === 'win32'
-    ? ['cmd.exe', ['/c', 'start', '', filePath]]
-    : [process.platform === 'darwin' ? 'open' : 'xdg-open', [filePath]]
+  const [command, args] = openerCommand(filePath)
   spawn(command, args, { windowsHide: true, detached: true, stdio: 'ignore' }).unref()
 }
 
@@ -48,6 +54,8 @@ async function writeClipboardRtf(rtf, text) {
     "$do.SetData('Rich Text Format', $false, $ms)",
     "$do.SetData([System.Windows.Forms.DataFormats]::UnicodeText, $true, $text)",
     "[System.Windows.Forms.Clipboard]::SetDataObject($do, $true)",
+    "$written = [System.Windows.Forms.Clipboard]::GetDataObject()",
+    "if (-not $written.GetDataPresent('Rich Text Format')) { throw 'CF_RTF 写入后校验失败' }",
   ].join('\n'), 'utf8')
   await new Promise((resolve, reject) => {
     const child = spawn('powershell.exe', ['-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', psFile], { windowsHide: true })
@@ -135,9 +143,10 @@ export async function createLocalServer({ port = 4173, vault = '', zoteroDb = ''
       case 'attachments:remove': return attachmentFs.remove(assertVault(p.dir), p.rel)
       case 'zotero:read': return zoteroFs.readZotero(assertZoteroDb(p.dbPath))
       case 'zotero:open-pdf': {
-        // 只接收书目 key；数据库路径固定用服务端启动时授权的那个，前端无法指定任意文件
+        // 只接收书目 key（去重合并后的文献可带多个 key）；数据库路径固定用服务端启动时授权的那个
         if (!zoteroDbPath) throw new Error('本地网页端未配置 Zotero 数据库（启动参数 --zotero-db）')
-        const pdfPath = zoteroFs.resolveZoteroPdf(zoteroDbPath, p.zoteroKey)
+        const extraKeys = Array.isArray(p.zoteroKeys) ? p.zoteroKeys.filter((k) => typeof k === 'string') : []
+        const pdfPath = zoteroFs.resolveZoteroPdf(zoteroDbPath, p.zoteroKey, extraKeys)
         openFile(pdfPath)
         return { path: pdfPath }
       }
@@ -196,7 +205,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const local = await createLocalServer({ port: Number(option('--port', '4173')), vault: configured, zoteroDb: configuredZotero, dist: path.resolve(option('--dist', path.join(root, 'dist'))) })
     console.log(`知识图谱本地网页端：${local.origin}`)
     console.log(configured ? `笔记库：${configured}` : '在网页内选择已有笔记目录；目录与类型分区会保留。')
-    console.log(configuredZotero ? `Zotero 数据库（只读）：${configuredZotero}` : '未配置 Zotero 数据库：文献表双击打开 PDF 需用 --zotero-db 指定 zotero.sqlite。')
+    console.log(configuredZotero ? `Zotero 数据库（只读）：${configuredZotero}` : '未配置 Zotero 数据库：点文献表的 PDF 徽标打开本地 PDF 需用 --zotero-db 指定 zotero.sqlite。')
     if (!process.argv.includes('--no-open') && process.platform === 'win32') {
       spawn('rundll32.exe', ['url.dll,FileProtocolHandler', local.origin], { detached: true, windowsHide: true, stdio: 'ignore' }).unref()
     }

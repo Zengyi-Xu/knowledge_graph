@@ -3,7 +3,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import http from 'node:http'
 import { createRequire } from 'node:module'
-import { createLocalServer } from './local-web.mjs'
+import { createLocalServer, openerCommand } from './local-web.mjs'
 
 const require = createRequire(import.meta.url)
 const Database = require('better-sqlite3')
@@ -29,11 +29,13 @@ async function call(method, payload) {
   return body.result
 }
 
-/** 合成一个最小 Zotero 库：1 篇有本地 PDF 的书目 + 1 篇只有记录的（文件不在本机） */
+/** 合成一个最小 Zotero 库：1 篇有本地 PDF 的书目 + 1 篇只有记录的（文件不在本机）+ 1 篇备用 PDF */
 async function makeZoteroFixture(zoteroDir) {
   const dbPath = path.join(zoteroDir, 'zotero.sqlite')
   await fs.mkdir(path.join(zoteroDir, 'storage', 'PDFKEY01'), { recursive: true })
+  await fs.mkdir(path.join(zoteroDir, 'storage', 'PDFKEY09'), { recursive: true })
   await fs.writeFile(path.join(zoteroDir, 'storage', 'PDFKEY01', '论文.pdf'), '%PDF-1.4 fixture')
+  await fs.writeFile(path.join(zoteroDir, 'storage', 'PDFKEY09', '备用.pdf'), '%PDF-1.4 backup')
   const db = new Database(dbPath)
   db.exec(`
     CREATE TABLE itemTypes (itemTypeID INTEGER PRIMARY KEY, typeName TEXT);
@@ -53,9 +55,12 @@ async function makeZoteroFixture(zoteroDir) {
   db.prepare('INSERT INTO items VALUES (2, ?, 1)').run('NOPDFF03')
   db.prepare('INSERT INTO items VALUES (3, ?, 2)').run('PDFKEY01')
   db.prepare('INSERT INTO items VALUES (4, ?, 2)').run('MISSING1')
+  db.prepare('INSERT INTO items VALUES (5, ?, 1)').run('MULTIKEY')
+  db.prepare('INSERT INTO items VALUES (6, ?, 2)').run('PDFKEY09')
   db.prepare('INSERT INTO itemAttachments VALUES (3, 1, ?, ?, 1)').run('application/pdf', 'storage:论文.pdf')
   db.prepare('INSERT INTO itemAttachments VALUES (4, 2, ?, ?, 0)').run('application/pdf', 'storage:不在本机.pdf')
-  const values = [[1, 1, '有本地 PDF 的论文'], [2, 1, 'PDF 不在本机的论文']]
+  db.prepare('INSERT INTO itemAttachments VALUES (6, 5, ?, ?, 1)').run('application/pdf', 'storage:备用.pdf')
+  const values = [[1, 1, '有本地 PDF 的论文'], [2, 1, 'PDF 不在本机的论文'], [5, 1, '去重合并后的重复条目']]
   values.forEach(([itemID, fieldID, value], i) => {
     db.prepare('INSERT INTO itemDataValues VALUES (?, ?)').run(i + 1, value)
     db.prepare('INSERT INTO itemData VALUES (?, ?, ?)').run(itemID, fieldID, i + 1)
@@ -111,9 +116,9 @@ try {
   }
   try {
     const html2 = await fetch(local2.origin).then((r) => r.text())
-    check('页面注入 zoteroDb 配置（供文献表双击使用）', html2.includes(zoteroDb.replace(/\\/g, '\\\\')))
+    check('页面注入 zoteroDb 配置（供文献表 PDF 徽标使用）', html2.includes(zoteroDb.replace(/\\/g, '\\\\')))
     const read = await call2('zotero:read', { dbPath: zoteroDb })
-    check('授权的数据库可以只读读取', read.status === 200 && read.body.result.items.length === 2)
+    check('授权的数据库可以只读读取', read.status === 200 && read.body.result.items.length === 3)
     check('仍拒绝其他 sqlite 路径', (await call2('zotero:read', { dbPath: path.join(dir, 'other.sqlite') })).status === 400)
     const open = await call2('zotero:open-pdf', { zoteroKey: 'PDFKEY02' })
     check('open-pdf 用系统默认程序打开解析出的 PDF', open.status === 200 && open.body.result.path === path.join(dir, 'zotero', 'storage', 'PDFKEY01', '论文.pdf'))
@@ -121,11 +126,23 @@ try {
     check('前端夹带的任意路径参数被忽略', (await call2('zotero:open-pdf', { zoteroKey: 'PDFKEY02', path: 'C:\\Windows\\System32\\calc.exe', dbPath: path.join(dir, 'other.sqlite') })).status === 200 && opened.length === 2 && opened[1].endsWith('论文.pdf'))
     const missing = await call2('zotero:open-pdf', { zoteroKey: 'NOPDFF03' })
     check('没有本地 PDF → 400 且不调用 opener', missing.status === 400 && opened.length === 2 && missing.body.error.includes('没有可访问的本地 PDF'))
+    // 去重合并后的文献带多个 key：主 key 没 PDF 时按 zoteroKeys 顺序找下一份
+    const multi = await call2('zotero:open-pdf', { zoteroKey: 'NOPDFF03', zoteroKeys: ['MULTIKEY'] })
+    check('多 key 文献：主 key 无 PDF 时回退到合并保留的其它 key', multi.status === 200 && opened.length === 3 && opened[2].endsWith('备用.pdf'))
+    check('多 key 非法 key → 400', (await call2('zotero:open-pdf', { zoteroKey: 'PDFKEY02', zoteroKeys: ['..\\..\\etc'] })).status === 400)
     const unknown = await call2('zotero:open-pdf', { zoteroKey: 'ZZZZ9999' })
     check('Zotero 里不存在的 key → 400', unknown.status === 400 && unknown.body.error.includes('找不到'))
     const invalid = await call2('zotero:open-pdf', { zoteroKey: '..\\..\\etc' })
     check('非法 key → 400', invalid.status === 400 && invalid.body.error.includes('无效的 Zotero 条目 key'))
     check('缺 key → 400 而不是崩溃', (await call2('zotero:open-pdf', {})).status === 400)
   } finally { await local2.close() }
+
+  // ---- 系统打开器：不经过 cmd/sh，文件名里的 shell 字符不会被解释 ----
+  {
+    const [, argv] = openerCommand('D:/tmp/名字 & (1) - 副本.pdf')
+    const [command] = openerCommand('D:/tmp/x.pdf')
+    check('系统打开器只传一个文件参数、不经 shell', argv.length === 1 && argv[0] === 'D:/tmp/名字 & (1) - 副本.pdf')
+    check('系统打开器不是 cmd/sh 命令解释器', !/(^|[\\/])(cmd|powershell|wscript|cscript)$/i.test(command.replace(/\.exe$/i, '')))
+  }
   console.log(`\n本地网页服务：${checks}/${checks} 通过`)
 } finally { await local.close() }

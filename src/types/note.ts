@@ -34,6 +34,8 @@ export interface LiteratureMeta {
   collections: string[]
   /** Zotero 书目条目的稳定 8 位 key；用于从本机库定位 PDF */
   zoteroKey?: string
+  /** 同一规范化文献对应的全部 Zotero key；去重后再次同步仍可稳定匹配 */
+  zoteroKeys?: string[]
   /** Zotero 中登记的 PDF 数量 */
   zoteroPdfCount?: number
   /** 当前同步时实际存在于本机的 PDF 数量 */

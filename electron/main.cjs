@@ -274,7 +274,8 @@ function registerZoteroHandlers() {
     if (!payload || typeof payload.dbPath !== 'string' || !payload.dbPath || typeof payload.zoteroKey !== 'string') {
       throw new Error('Invalid zotero pdf request')
     }
-    const pdfPath = resolveZoteroPdf(payload.dbPath, payload.zoteroKey)
+    const extraKeys = Array.isArray(payload.zoteroKeys) ? payload.zoteroKeys.filter((k) => typeof k === 'string') : []
+    const pdfPath = resolveZoteroPdf(payload.dbPath, payload.zoteroKey, extraKeys)
     const error = await shell.openPath(pdfPath)
     if (error) throw new Error(`无法打开 PDF：${error}`)
     return { path: pdfPath }
@@ -350,6 +351,9 @@ function registerAttachmentHandlers() {
       throw new Error('Invalid clipboard payload')
     }
     clipboard.write({ rtf: payload.rtf, text: payload.text })
+    if (!clipboard.readRTF().trim()) {
+      throw new Error('CF_RTF clipboard verification failed')
+    }
     return { error: null }
   })
 

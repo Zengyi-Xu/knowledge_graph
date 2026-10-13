@@ -81,7 +81,7 @@ declare global {
           availablePdfCount: number
         }[]
       }>
-      openZoteroPdf: (dbPath: string, zoteroKey: string) => Promise<{ path: string }>
+      openZoteroPdf: (dbPath: string, zoteroKey: string, zoteroKeys?: string[]) => Promise<{ path: string }>
 
       // AI 网关：状态里的 keyPreview 已脱敏，绝不包含完整 key
       aiStatus: (configPath?: string) => Promise<

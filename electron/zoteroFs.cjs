@@ -137,20 +137,33 @@ function readZotero(dbPath) {
   }
 }
 
-function resolveZoteroPdf(dbPath, zoteroKey) {
-  if (typeof zoteroKey !== 'string' || !/^[A-Z0-9]{8}$/i.test(zoteroKey)) {
-    throw new Error('无效的 Zotero 条目 key')
+/**
+ * 定位一条文献的本地 PDF。接受单个 key 或 key 列表（去重合并后的文献有多个
+ * Zotero key，任一条目下有可访问 PDF 即可），按传入顺序取第一份存在的文件。
+ */
+function resolveZoteroPdf(dbPath, zoteroKey, extraKeys) {
+  const keys = [zoteroKey, ...(Array.isArray(extraKeys) ? extraKeys : [])]
+    .filter((key, index, all) => typeof key === 'string' && key && all.indexOf(key) === index)
+  if (!keys.length) throw new Error('无效的 Zotero 条目 key')
+  for (const key of keys) {
+    if (!/^[A-Z0-9]{8}$/i.test(key)) throw new Error('无效的 Zotero 条目 key')
   }
   const db = openReadonly(dbPath)
   try {
-    const item = db.prepare(
+    const itemStmt = db.prepare(
       `SELECT itemID FROM items WHERE key = ? AND itemID NOT IN (SELECT itemID FROM deletedItems)`,
-    ).get(zoteroKey)
-    if (!item) throw new Error('Zotero 中找不到这篇文献')
-    for (const pdf of pdfRowsFor(db, item.itemID)) {
-      const filename = resolveAttachmentPath(dbPath, pdf)
-      if (filename && fs.existsSync(filename)) return filename
+    )
+    let found = false
+    for (const key of keys) {
+      const item = itemStmt.get(key)
+      if (!item) continue
+      found = true
+      for (const pdf of pdfRowsFor(db, item.itemID)) {
+        const filename = resolveAttachmentPath(dbPath, pdf)
+        if (filename && fs.existsSync(filename)) return filename
+      }
     }
+    if (!found) throw new Error('Zotero 中找不到这篇文献')
     throw new Error('这篇文献没有可访问的本地 PDF')
   } finally {
     db.close()

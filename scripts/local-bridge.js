@@ -66,7 +66,7 @@
     chooseSaveAttachment: async () => null,
     readZotero: (dbPath) => call('zotero:read', { dbPath: dbPath || config.zoteroDb || '' }),
     // 网页端不能指定数据库/文件路径：服务端只用启动时 --zotero-db 授权的库解析 PDF
-    openZoteroPdf: (_dbPath, zoteroKey) => call('zotero:open-pdf', { zoteroKey }),
+    openZoteroPdf: (_dbPath, zoteroKey, zoteroKeys) => call('zotero:open-pdf', { zoteroKey, zoteroKeys }),
     aiStatus: (configPath) => call('ai:status', { configPath }),
     aiComplete: (payload) => call('ai:complete', payload),
     // 浏览器写不了 text/rtf；由本机服务代写剪贴板，Word 才能拿到真域

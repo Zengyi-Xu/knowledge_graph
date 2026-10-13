@@ -2,8 +2,8 @@
  * Zotero → 笔记库的批量导入计划（纯函数，可单测，也可被脚本/UI 复用）。
  *
  * 设计要点：
- * - 匹配优先级：已有 literature.zoteroKey > DOI（小写）> 标题归一化；
- *   一篇笔记只会被一条 Zotero 条目认领，避免两条书目抢同一篇笔记。
+ * - 先把 Zotero 中 DOI/标题一致且 DOI 不冲突的重复条目归并，再匹配已有笔记；
+ * - 匹配优先级：已有 literature.zoteroKeys/zoteroKey > DOI（小写）> 标题归一化；
  * - 匹配到的笔记：合并分类、补空缺的 venue/year/doi/authors、刷新 Zotero key 与 PDF 状态；
  *   正文、标签（只做并集）、附件、类型一律不动。
  * - 未匹配的 Zotero 书目：新建 `type: literature` 笔记，id 固定在 `zotero-<key>` 上，
@@ -13,7 +13,8 @@
 import type { LiteratureMeta, Note } from '@/types/note'
 import { emptyLiterature } from '@/types/note'
 import { makeCitekey } from '@/lib/citekey'
-import { mergeCollections, normalizeTitle, tagsForZoteroItem } from '@/lib/zoteroMeta'
+import { coalesceZoteroItems, mergeCollections, mergeZoteroTags, normalizeTitle } from '@/lib/zoteroMeta'
+import type { CoalescedZoteroItem } from '@/lib/zoteroMeta'
 import type { ZoteroItem } from '@/lib/zoteroSync'
 import { toMarkdown } from '@/lib/vaultFormat'
 
@@ -54,7 +55,13 @@ export interface ZoteroImportPlan {
 }
 
 /** 分类 / 标签 / key / PDF 状态一次写好；不改动传入对象 */
-export function mergeLiterature(lit: LiteratureMeta, item: ZoteroItem, citekey: string): LiteratureMeta {
+export function mergeLiterature(lit: LiteratureMeta, item: ZoteroItem | CoalescedZoteroItem, citekey: string): LiteratureMeta {
+  const incomingKeys = 'zoteroKeys' in item ? item.zoteroKeys : [item.zoteroKey]
+  // 主 key 优先选本机有 PDF 的那个（打开 PDF 走它），并固定排在 zoteroKeys 首位，保证多次合并顺序稳定
+  const preferIncoming = (item.availablePdfCount ?? 0) > 0 || !lit.zoteroKey
+  const zoteroKey = preferIncoming ? item.zoteroKey : lit.zoteroKey
+  const zoteroKeys = [...new Set([zoteroKey, ...(lit.zoteroKeys ?? []), ...(lit.zoteroKey ? [lit.zoteroKey] : []), ...incomingKeys])]
+    .filter((key): key is string => Boolean(key))
   return {
     ...lit,
     authors: lit.authors.length ? lit.authors : item.authors,
@@ -63,7 +70,8 @@ export function mergeLiterature(lit: LiteratureMeta, item: ZoteroItem, citekey: 
     doi: lit.doi || item.doi,
     citekey: lit.citekey || citekey,
     collections: mergeCollections(lit.collections, item.collectionPaths),
-    zoteroKey: item.zoteroKey,
+    zoteroKey,
+    zoteroKeys,
     zoteroPdfCount: item.pdfCount ?? 0,
     zoteroAvailablePdfCount: item.availablePdfCount ?? 0,
   }
@@ -76,7 +84,7 @@ export function literatureNoteFor(item: ZoteroItem, citekey: string, now: number
     title: item.title || '未命名文献',
     type: 'literature',
     grade: '',
-    tags: tagsForZoteroItem(item),
+    tags: mergeZoteroTags([], item),
     content: '',
     createdAt: now,
     updatedAt: now,
@@ -92,15 +100,20 @@ export function planZoteroImport(
   const literatures = notes.filter((n) => n.type === 'literature' && n.literature)
   const byKey = new Map<string, Note>()
   const byDoi = new Map<string, Note>()
-  const byTitle = new Map<string, Note>()
-  for (const note of literatures) {
+  const byTitle = new Map<string, Note | null>()
+  const indexNote = (note: Note) => {
     const lit = note.literature!
-    if (lit.zoteroKey) byKey.set(lit.zoteroKey, note)
+    for (const key of [...(lit.zoteroKeys ?? []), ...(lit.zoteroKey ? [lit.zoteroKey] : [])]) byKey.set(key, note)
     const doi = lit.doi.trim().toLowerCase()
     if (doi) byDoi.set(doi, note)
     const title = normalizeTitle(note.title)
-    if (title) byTitle.set(title, note)
+    if (title) {
+      const current = byTitle.get(title)
+      if (current === undefined || current?.id === note.id) byTitle.set(title, note)
+      else byTitle.set(title, null)
+    }
   }
+  for (const note of literatures) indexNote(note)
 
   const stats: ZoteroImportStats = {
     zoteroItems: items.length,
@@ -118,42 +131,39 @@ export function planZoteroImport(
     withPdfRecords: 0,
   }
 
-  const claimed = new Map<string, Note>()
-  const claimedIds = new Set<string>()
-  const claim = (note: Note | undefined): Note | undefined => {
-    if (!note || claimedIds.has(note.id)) return undefined
-    return note
-  }
-
   const existingCitekeys = new Set(
     notes.map((n) => n.literature?.citekey).filter((k): k is string => Boolean(k)),
   )
   const takenIds = new Set(notes.map((n) => n.id))
   const titles = new Map<string, number>()
+  const working = new Map(notes.map((note) => [note.id, note]))
   const created: Note[] = []
   const createdIds: string[] = []
-  const updatedIds: string[] = []
+  const matchedExistingIds = new Set<string>()
+  const originalIds = new Set(notes.map((note) => note.id))
 
   for (const item of items) {
-    let note = claim(item.zoteroKey ? byKey.get(item.zoteroKey) : undefined)
-    let via: 'key' | 'doi' | 'title' | '' = note ? 'key' : ''
-    if (!note) {
-      note = claim(item.doi ? byDoi.get(item.doi.trim().toLowerCase()) : undefined)
-      if (note) via = 'doi'
-    }
-    if (!note) {
-      note = claim(byTitle.get(normalizeTitle(item.title)))
-      if (note) via = 'title'
-    }
-
     const titleKey = normalizeTitle(item.title)
     titles.set(titleKey, (titles.get(titleKey) ?? 0) + 1)
-
     if (item.collectionPaths.length) stats.withCollections++
     else stats.unclassified++
     stats.availablePdfTotal += item.availablePdfCount ?? 0
     if ((item.availablePdfCount ?? 0) > 0) stats.withAvailablePdf++
     if ((item.pdfCount ?? 0) > 0) stats.withPdfRecords++
+  }
+
+  for (const item of coalesceZoteroItems(items)) {
+    let note = item.zoteroKeys.map((key) => byKey.get(key)).find(Boolean)
+    let via: 'key' | 'doi' | 'title' | '' = note ? 'key' : ''
+    if (!note) {
+      note = item.doi ? byDoi.get(item.doi.trim().toLowerCase()) : undefined
+      if (note) via = 'doi'
+    }
+    if (!note) {
+      const titleMatch = byTitle.get(normalizeTitle(item.title))
+      if (titleMatch && (!item.doi || !titleMatch.literature?.doi || titleMatch.literature.doi.toLowerCase() === item.doi.toLowerCase())) note = titleMatch
+      if (note) via = 'title'
+    }
 
     if (!note) {
       const citekey = makeCitekey(
@@ -169,41 +179,45 @@ export function planZoteroImport(
       takenIds.add(id)
       created.push(fresh)
       createdIds.push(id)
-      stats.created++
+      working.set(id, fresh)
+      indexNote(fresh)
       continue
     }
 
-    stats.matched++
-    if (via === 'key') stats.matchedByKey++
-    else if (via === 'doi') stats.matchedByDoi++
-    else stats.matchedByTitle++
+    const represented = item.zoteroKeys.length
+    stats.matched += represented
+    if (via === 'key') stats.matchedByKey += represented
+    else if (via === 'doi') stats.matchedByDoi += represented
+    else stats.matchedByTitle += represented
+    if (originalIds.has(note.id)) matchedExistingIds.add(note.id)
 
-    const lit = note.literature!
+    const current = working.get(note.id) ?? note
+    const lit = current.literature!
     const citekey = lit.citekey || makeCitekey({ authors: item.authors, year: item.year ?? '' }, item.title, existingCitekeys)
     existingCitekeys.add(citekey)
     const next: Note = {
-      ...note,
-      tags: [...new Set([...note.tags, ...tagsForZoteroItem(item)])],
+      ...current,
+      tags: mergeZoteroTags(current.tags, item),
       literature: mergeLiterature(lit, item, citekey),
     }
-    const changed = toMarkdown(next) !== toMarkdown(note)
-    if (!changed) {
-      stats.unchanged++
-      continue
-    }
-    next.updatedAt = now
-    claimed.set(note.id, next)
-    claimedIds.add(note.id)
-    updatedIds.push(note.id)
-    stats.updated++
+    working.set(note.id, next)
+    indexNote(next)
   }
 
-  const merged = notes.map((n) => claimed.get(n.id) ?? n)
+  const merged = notes.map((n) => {
+    const next = working.get(n.id) ?? n
+    if (toMarkdown(next) === toMarkdown(n)) return n
+    return { ...next, updatedAt: now }
+  })
+  const updatedIds = merged.filter((note, index) => toMarkdown(note) !== toMarkdown(notes[index])).map((note) => note.id)
+  stats.created = createdIds.length
+  stats.updated = updatedIds.length
+  stats.unchanged = [...matchedExistingIds].filter((id) => !updatedIds.includes(id)).length
   let duplicateTitles = 0
   for (const count of titles.values()) if (count > 1) duplicateTitles += count - 1
 
   return {
-    notes: [...merged, ...created],
+    notes: [...merged, ...created.map((note) => working.get(note.id) ?? note)],
     stats,
     createdIds,
     updatedIds,

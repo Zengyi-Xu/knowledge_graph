@@ -1,5 +1,5 @@
 /**
- * 剪贴板 RTF 域代码（真域，兼容 Zotero 的 ADDIN ZOTERO_ITEM 格式）。
+ * 剪贴板 RTF 域代码（真域，兼容 Zotero 的 ADDIN ZOTERO_ITEM CSL_CITATION 格式）。
  * 粘进 Word 得到可更新的真实域；Zotero 装插件的机器可识别刷新。
  *
  * 纯函数部分（rtfEscape / buildCitationFieldRtf / buildBibliographyRtf /
@@ -47,8 +47,8 @@ function displayToRtf(displayText: string, styleId: CitationStyleId): string {
 
 /**
  * 生成单条引用的 RTF 域代码：
- *   {\field{\*\fldinst ADDIN ZOTERO_ITEM {json}}{\fldrslt displayText}}
- * citationItems 的 id 用 citekey，itemData 是完整 CSL-JSON。
+ *   {\field{\*\fldinst ADDIN ZOTERO_ITEM CSL_CITATION {json}}{\fldrslt displayText}}
+ * citationItems 的 id 优先用 Zotero key，itemData 是完整 CSL-JSON。
  * 注意：`\fldinst` 后的指令必须是**不带花括号**的空格分隔文本
  * （`{\*\fldinst{ … }}` 在 Word 里会退化成字面文本，实测 2026-10-13）。
  */
@@ -58,13 +58,19 @@ export function buildCitationFieldRtf(
   displayText?: string,
 ): string {
   const display = displayText ?? formatCitationMarker(cslItems, styleId)
+  const citationId = `kg-${globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`}`
   const payload = {
-    citationItems: cslItems.map((it) => ({ id: it.id, itemData: it })),
-    properties: { formattedCitation: display },
-    schema: 'https://github.com/zotero/zotero/schema/citation.json# 0.1',
+    citationID: citationId,
+    properties: { formattedCitation: display, plainCitation: display, noteIndex: 0 },
+    citationItems: cslItems.map((it) => {
+      const { _zoteroKey, ...itemData } = it
+      const id = typeof _zoteroKey === 'string' && _zoteroKey ? _zoteroKey : String(it.id ?? '')
+      return { id, itemData: { ...itemData, id } }
+    }),
+    schema: 'https://github.com/citation-style-language/schema/raw/master/csl-citation.json',
   }
   const json = JSON.stringify(payload)
-  return `{\\field{\\*\\fldinst ADDIN ZOTERO_ITEM ${rtfEscape(json)}}{\\fldrslt ${displayToRtf(display, styleId)}}}`
+  return `{\\field{\\*\\fldinst ADDIN ZOTERO_ITEM CSL_CITATION ${rtfEscape(json)} }{\\fldrslt ${displayToRtf(display, styleId)}}}`
 }
 
 /** 把域代码/正文包成完整 RTF 文档（剪贴板 CF_RTF 需要完整文档头） */
@@ -141,7 +147,7 @@ async function writeRtfClipboard(parts: ClipboardParts, successMsg: string): Pro
 
 /** 「插入 Word 引用」：复制 RTF 域代码 + 纯文本双格式 */
 export async function writeCitationClipboard(cslItems: CslItem[], styleId: CitationStyleId): Promise<void> {
-  await writeRtfClipboard(buildClipboardParts(cslItems, styleId, 'citation'), '已复制 Word 引用（含域代码）')
+  await writeRtfClipboard(buildClipboardParts(cslItems, styleId, 'citation'), '已复制 Zotero Word 引用域')
 }
 
 /** 「复制参考文献表」：按所选样式排成完整文献表（GB/T 7714 带编号）双格式复制 */

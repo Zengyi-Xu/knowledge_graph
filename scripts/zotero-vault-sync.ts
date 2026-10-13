@@ -3,16 +3,21 @@
  *
  *   npm run zotero:sync -- --vault "D:\...\Vault" --db "D:\...\Zotero\zotero.sqlite"
  *   npm run zotero:sync -- --vault ... --db ... --apply
+ *   （可选：--report <file> 指定报告路径；--limit <n> 只同步前 n 条；--allow-missing 跳过读不到的索引文件）
  *
  * 行为：
  * - 只读打开 Zotero（绝不写入），排除 attachment / annotation / note；
  * - 读 vault 的 meta.json 与索引登记的 md，用 parseNoteMarkdown 还原现有笔记；
  * - 匹配（zoteroKey > DOI > 标题归一化）→ 合并分类/标签、补空缺元数据、刷新 PDF 状态；
  * - 未匹配书目 → 新建 `文献/` 里的 literature 笔记（id = zotero-<key>，幂等）；
- * - 默认 dry-run：只写报告，不动 vault；--apply 时先建带时间戳的完整备份再写盘；
+ * - 默认 dry-run：只出报告，不在 vault 里创建任何目录/文件；--apply 时先建带时间戳的完整备份再写盘；
+ * - --report <file> 指定报告落盘位置；dry-run 未指定时落到系统临时目录。
+ * - 索引里登记、磁盘上却读不到的文件（同步盘离线等）：直接中止同步，避免重建 meta.json 时丢索引；
+ *   确认是永久删除后可用 --allow-missing 跳过并让这些条目退出索引。
  * - 写盘走 planVaultWrite + vaultFs.writeVault，未纳管的 md 一律不碰，删除数必须为 0。
  */
 import fs from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 import { parseMeta, parseNoteMarkdown, planVaultWrite, type VaultIndexEntry, type WrittenNote } from '@/lib/vaultFormat'
 import { baseNameOf } from '@/lib/vaultFormat'
@@ -32,6 +37,7 @@ interface Args {
   apply: boolean
   report?: string
   limit?: number
+  allowMissing: boolean
 }
 
 function parseArgs(argv: string[]): Args {
@@ -50,6 +56,7 @@ function parseArgs(argv: string[]): Args {
     apply: argv.includes('--apply'),
     report: value('--report'),
     limit: limit ? Number(limit) : undefined,
+    allowMissing: argv.includes('--allow-missing'),
   }
 }
 
@@ -85,7 +92,7 @@ async function freshDir(base: string): Promise<string> {
 }
 
 /** 读回 vault：索引登记的 md → 笔记（与运行时 useNotes 的规则一致） */
-async function loadVaultNotes(vault: string) {
+async function loadVaultNotes(vault: string, allowMissing: boolean) {
   const listing = await listVault(vault)
   if (!listing.exists) throw new Error(`笔记库不存在：${vault}`)
   const index = parseMeta(listing.meta ?? '')
@@ -102,10 +109,16 @@ async function loadVaultNotes(vault: string) {
   const loadedIndex: VaultIndexEntry[] = []
   const seenIds = new Set<string>()
   const staleEntries: VaultIndexEntry[] = []
+  const missingEntries: VaultIndexEntry[] = []
   let needsRewrite = 0
   for (const entry of entries) {
     const text = texts.get(entry.file) ?? texts.get(entry.file.replace(/\\/g, '/'))
-    if (text == null) continue // 索引里有、磁盘上没有：不动它，也不删
+    // 索引里有、磁盘上读不到：多为同步盘离线/文件被外部删除。
+    // 跳过它会让重建后的 meta.json 丢掉这条索引，所以默认中止（--allow-missing 才跳过）。
+    if (text == null) {
+      missingEntries.push(entry)
+      continue
+    }
     const parsed = parseNoteMarkdown(text, baseNameOf(entry.file))
     // 同一篇正文被两个索引条目指着（历史上大小写不同名导致互相覆盖）：
     // 正文里的 id 才是事实来源，后出现的那个索引条目是陈旧的，跳过即可（不删文件）
@@ -119,7 +132,15 @@ async function loadVaultNotes(vault: string) {
     notes.push(parsed.note)
     loadedIndex.push({ id: parsed.note.id, file: entry.file, title: parsed.note.title })
   }
-  return { listing, index, entries, notes, written, loadedIndex, needsRewrite, staleEntries }
+  if (missingEntries.length && !allowMissing) {
+    const sample = missingEntries.slice(0, 10).map((e) => `${e.file}（id ${e.id}）`).join('；')
+    throw new Error(
+      `索引里有 ${missingEntries.length} 个文件在磁盘上读不到（如 ${sample}）。` +
+      '为避免重建 meta.json 时丢掉这些索引，本次同步中止：请确认笔记库完整（同步盘文件已在本机）后重试；' +
+      '若文件确实已永久删除，可加 --allow-missing 让它们退出索引。',
+    )
+  }
+  return { listing, index, entries, notes, written, loadedIndex, needsRewrite, staleEntries, missingEntries }
 }
 
 function chunk<T>(items: T[], size: number): T[][] {
@@ -144,7 +165,7 @@ async function main() {
   const started = Date.now()
   const read = readZotero(args.db) as { collections: string[]; items: ZoteroItem[] }
   const items = args.limit ? read.items.slice(0, args.limit) : read.items
-  const loaded = await loadVaultNotes(args.vault)
+  const loaded = await loadVaultNotes(args.vault, args.allowMissing)
   const plan = planZoteroImport(items, loaded.notes)
   const writePlan = planVaultWrite(plan.notes, loaded.loadedIndex, loaded.listing.md.map((m) => m.name), loaded.written, loaded.listing.meta ?? '')
 
@@ -156,8 +177,17 @@ async function main() {
 
   const stats: ZoteroImportStats = plan.stats
   const stamp = timestamp()
-  const backupDir = await freshDir(path.join(args.vault, '.backups', `${args.apply ? 'zotero-import' : 'zotero-preview'}-${stamp}`))
-  if (args.apply) await backupVault(args.vault, loaded.listing.md.map((m) => m.name), loaded.listing.meta, backupDir)
+  // dry-run 绝不在 vault 里创建目录/文件；--apply 才建带时间戳的完整备份
+  let backupDir: string | null = null
+  if (args.apply) {
+    backupDir = await freshDir(path.join(args.vault, '.backups', `zotero-import-${stamp}`))
+    await backupVault(args.vault, loaded.listing.md.map((m) => m.name), loaded.listing.meta, backupDir)
+  }
+  const reportPath = args.report
+    ? path.resolve(args.report)
+    : backupDir
+      ? path.join(backupDir, 'report.json')
+      : path.join(os.tmpdir(), 'knowledge-graph-zotero-reports', `report-${stamp}.json`)
 
   const report = {
     generatedAt: new Date().toISOString(),
@@ -166,6 +196,9 @@ async function main() {
     zoteroDb: args.db,
     elapsedMs: Date.now() - started,
     backupDir,
+    reportPath,
+    allowMissing: args.allowMissing,
+    missingIndexFiles: loaded.missingEntries.map((e) => e.file),
     counts: {
       zoteroItems: stats.zoteroItems,
       indexEntries: loaded.entries.length,
@@ -210,15 +243,17 @@ async function main() {
     deletes: writePlan.deletes,
   }
 
-  await fs.writeFile(path.join(backupDir, 'report.json'), JSON.stringify(report, null, 2) + '\n', 'utf8')
+  await fs.mkdir(path.dirname(reportPath), { recursive: true })
+  await fs.writeFile(reportPath, JSON.stringify(report, null, 2) + '\n', 'utf8')
 
-  console.log(`模式：${report.mode}${args.apply ? '' : '（不动笔记库，只出报告）'}`)
+  console.log(`模式：${report.mode}${args.apply ? '' : '（不在笔记库建目录/文件，只出报告）'}`)
   console.log(`Zotero 书目：${stats.zoteroItems} 条（有分类 ${stats.withCollections} / 未分类 ${stats.unclassified}）`)
   console.log(`匹配到已有文献笔记：${stats.matched}（key ${stats.matchedByKey} / DOI ${stats.matchedByDoi} / 标题 ${stats.matchedByTitle}）`)
   console.log(`新建：${stats.created}；更新：${stats.updated}；无变化：${stats.unchanged}；待规范化：${loaded.needsRewrite}`)
   console.log(`写盘：${writePlan.writes.length} 个 md；删除：${writePlan.deletes.length}（必须为 0）；meta 是否需更新：${!writePlan.metaSkipped}`)
   console.log(`PDF：本机可访问 ${stats.availablePdfTotal} 份，涉及 ${stats.withAvailablePdf} 条书目；有 PDF 记录 ${stats.withPdfRecords} 条`)
-  console.log(`报告：${path.join(backupDir, 'report.json')}`)
+  if (loaded.missingEntries.length) console.log(`注意：${loaded.missingEntries.length} 个索引内文件读不到，已按 --allow-missing 跳过并让其退出索引`)
+  console.log(`报告：${reportPath}`)
 
   if (writePlan.deletes.length > 0) {
     console.error('检测到待删除文件，出于安全考虑拒绝写入：', writePlan.deletes)

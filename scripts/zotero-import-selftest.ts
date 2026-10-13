@@ -93,16 +93,16 @@ check('DOI 也没有时按标题归一化匹配', () => {
   assert.equal(plan.stats.matchedByTitle, 1)
 })
 
-check('一对一：两条 Zotero 条目不会抢同一篇笔记', () => {
+check('同题名条目先归并为同一篇：两条 Zotero 条目都映射到同一篇笔记，不再抢注新笔记', () => {
   const note = existingNote({}, { doi: '' })
   const plan = planZoteroImport(
     [zItem({ zoteroKey: 'AAAA1111', doi: '', title: note.title }), zItem({ zoteroKey: 'BBBB2222', doi: '', title: note.title })],
     [note],
     NOW,
   )
-  assert.equal(plan.stats.matched, 1)
-  assert.equal(plan.stats.created, 1)
-  assert.equal(plan.stats.created, plan.createdIds.length)
+  assert.equal(plan.stats.created, 0)
+  assert.equal(plan.stats.matched, 2)
+  assert.deepEqual([...notesOf(plan, 'n1').literature!.zoteroKeys!].sort(), ['AAAA1111', 'BBBB2222'])
 })
 
 check('只匹配 literature 类型：普通笔记同名不会被改', () => {
@@ -135,9 +135,9 @@ check('已有的非空字段不被 Zotero 覆盖，空缺字段才补上', () =>
 
 console.log('\nB. 分类与「未分类」')
 
-check('Zotero 没有分类 → 记「未分类」', () => {
+check('Zotero 没有分类 → collections 为空，不写占位（界面动态显示「未分类」）', () => {
   const plan = planZoteroImport([zItem()], [], NOW)
-  assert.deepEqual(notesOf(plan, plan.createdIds[0]).literature!.collections, ['未分类'])
+  assert.deepEqual(notesOf(plan, plan.createdIds[0]).literature!.collections, [])
 })
 
 check('有真实分类时不再保留「未分类」', () => {
@@ -146,16 +146,61 @@ check('有真实分类时不再保留「未分类」', () => {
   assert.deepEqual(notesOf(plan, 'n1').literature!.collections, ['硅光/调制器'])
 })
 
-check('分类取并集并排序，无分类的条目补「方向:未分类」标签', () => {
+check('无分类不写「方向:未分类」标签，历史占位会被清掉', () => {
   const plan = planZoteroImport([zItem({ collectionPaths: [] })], [], NOW)
-  const lit = notesOf(plan, plan.createdIds[0]).literature!
-  assert.deepEqual(lit.collections, ['未分类'])
-  assert.ok(notesOf(plan, plan.createdIds[0]).tags.includes('方向:未分类'))
+  const created = notesOf(plan, plan.createdIds[0])
+  assert.ok(!created.tags.includes('方向:未分类'))
+  const kept = existingNote({ tags: ['方向:未分类', '我的标签'] })
+  const merged = planZoteroImport([zItem({ collectionPaths: ['硅光'] })], [kept], NOW)
+  const tags = notesOf(merged, 'n1').tags
+  assert.ok(!tags.includes('方向:未分类'))
+  assert.ok(tags.includes('我的标签') && tags.includes('方向:硅光'))
 })
 
 check('完整层级路径按原样保存', () => {
   const plan = planZoteroImport([zItem({ collectionPaths: ['01_论文库/硅光/调制器'] })], [], NOW)
   assert.deepEqual(notesOf(plan, plan.createdIds[0]).literature!.collections, ['01_论文库/硅光/调制器'])
+})
+
+console.log('\nB2. 去重合并后的稳定性（多 key 映射）')
+
+check('Zotero 里的重复条目先归并再匹配：多个 key 只对应一篇笔记', () => {
+  const items = [
+    zItem({ zoteroKey: 'DUPA0001' }),
+    zItem({ zoteroKey: 'DUPB0002' }),
+  ]
+  const plan = planZoteroImport(items, [], NOW)
+  assert.equal(plan.stats.created, 1)
+  assert.deepEqual(notesOf(plan, plan.createdIds[0]).literature!.zoteroKeys, ['DUPA0001', 'DUPB0002'])
+})
+
+check('去重后只留一个 key 的笔记，再同步按该 key 命中并补齐 zoteroKeys（不会再新建）', () => {
+  // 去重脚本旧版本的行为：合并后只剩 keeper 的 zoteroKey，没有 zoteroKeys 列表
+  const deduped = existingNote({ id: 'zotero-dupa0001' }, { zoteroKey: 'DUPA0001' })
+  assert.equal(deduped.literature!.zoteroKeys, undefined)
+  const items = [zItem({ zoteroKey: 'DUPA0001' }), zItem({ zoteroKey: 'DUPB0002' })]
+  const plan = planZoteroImport(items, [deduped], NOW)
+  assert.equal(plan.stats.created, 0)
+  const lit = notesOf(plan, 'zotero-dupa0001').literature!
+  assert.equal(lit.zoteroKey, 'DUPA0001')
+  assert.deepEqual([...lit.zoteroKeys!].sort(), ['DUPA0001', 'DUPB0002'])
+})
+
+check('去重后再同步：正文/附件不动，重复执行不再产生写入', () => {
+  const items = [zItem({ zoteroKey: 'DUPA0001' }), zItem({ zoteroKey: 'DUPB0002' })]
+  const first = planZoteroImport(items, [], NOW)
+  const second = planZoteroImport(items, first.notes, NOW + 1000)
+  assert.equal(second.stats.created, 0)
+  assert.equal(second.stats.updated, 0)
+  assert.deepEqual(second.notes.map((n) => toMarkdown(n)), first.notes.map((n) => toMarkdown(n)))
+})
+
+check('md 往返保留 zoteroKeys，去重脚本写出的多 key 能原样读回', () => {
+  const plan = planZoteroImport([zItem({ zoteroKey: 'DUPA0001' }), zItem({ zoteroKey: 'DUPB0002' })], [], NOW)
+  const note = plan.notes[plan.notes.length - 1]
+  const back = parseNoteMarkdown(toMarkdown(note), 'x')
+  assert.equal(back.needsRewrite, false)
+  assert.deepEqual(back.note.literature!.zoteroKeys, ['DUPA0001', 'DUPB0002'])
 })
 
 console.log('\nC. 新建与幂等')
@@ -205,8 +250,14 @@ check('同一条目重跑但 PDF 状态变了 → 只算更新，不新增', () 
 })
 
 check('标题重复时文件名自动加 -2/-3 后缀，不互相覆盖', () => {
-  const items = [zItem({ zoteroKey: 'AAAA1111' }), zItem({ zoteroKey: 'BBBB2222' }), zItem({ zoteroKey: 'CCCC3333' })]
+  // DOI 互不相同（同题名但确认是不同的论文，不会被归并成一篇）
+  const items = [
+    zItem({ zoteroKey: 'AAAA1111', doi: '10.1/a' }),
+    zItem({ zoteroKey: 'BBBB2222', doi: '10.1/b' }),
+    zItem({ zoteroKey: 'CCCC3333', doi: '10.1/c' }),
+  ]
   const plan = planZoteroImport(items, [], NOW)
+  assert.equal(plan.stats.created, 3)
   const names = assignFileNames(plan.notes, null, [])
   const files = ['zotero-aaaa1111', 'zotero-bbbb2222', 'zotero-cccc3333'].map((id) => names.get(id)!)
   assert.equal(new Set(files).size, 3)

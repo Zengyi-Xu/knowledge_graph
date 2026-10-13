@@ -24,6 +24,18 @@ npm run web:local -- --vault "D:\BaiduSyncdisk\Bibliotx\Vault"
 网页设置由当前浏览器保存，笔记正文由本地服务直接读写 vault。
 应用保留 Zotero 数据库只读访问、附件/PDF/标注与双向文件同步能力。
 
+## 文献表
+
+- **打开 PDF**：点「PDF」徽标（本身就是一个按钮）用系统默认阅读器打开本机 Zotero 里对应的 PDF；单击标题/行打开笔记。
+  打开动作不经过 `cmd start`，Windows 上直接 `explorer.exe <文件>`，文件名含 `&`、括号也不会被解释。
+  去重合并后的文献带多个 Zotero key，主 key 没有 PDF 时会按 `zoteroKeys` 顺序找下一份可访问的 PDF。
+- **筛选**：分类（含「未分类」）、期刊/会议、年份范围、「有本地 PDF」开关；分类计数按真实分类统计。
+- **未分类是动态状态**：只有「没有任何真实分类」才显示未分类，`collections` 里不写「未分类」，标签里不写「方向:未分类」。
+  历史数据在同步/去重时自动清理（vault 复核：668 篇里真正未分类 64 篇）。
+- **表格宽度**：「标签」列默认隐藏，可随时用「标签列」按钮打开；引用相关操作收进行尾「⋮」菜单。
+- **渲染**：一次渲染 150 行，底部「显示更多」按需追加，避免上千行一次挂载。
+- **标题清洗**（仅显示层，不改数据）：解 HTML 实体、去 `<sub>` 等内联标签、去 `$…$` 定界符（含反斜杠的 LaTeX 保持原样）、去站点尾缀。
+
 本地服务仅监听 `127.0.0.1`，文件接口校验页面来源、Host 和每次启动生成的访问令牌；外部网站不能直接调用。
 DOI/arXiv 导入与手动 AI 调用沿用原功能的网络请求。普通笔记读取和编辑在本机完成。
 更换浏览器时重新选择同一个 vault 即可；浏览器设置与旧 Electron 设置互相独立。
@@ -48,9 +60,23 @@ DOI/arXiv 导入与手动 AI 调用沿用原功能的网络请求。普通笔记
 
 ## Word 引用（域代码）
 
-文献笔记「复制引用 → 插入 Word 引用（域代码）」会写入真正的 CF_RTF 域（`ADDIN ZOTERO_ITEM`，Zotero 兼容），粘进 Word 是可刷新的真域。
+文献笔记「复制引用 → 插入 Word 引用（域代码）」会写入真正的 CF_RTF 域（`ADDIN ZOTERO_ITEM CSL_CITATION`，含完整 citation payload），粘进 Word 后可由 Zotero 插件识别。
 浏览器自身写不了 `text/rtf`：本地网页端由本机服务代写剪贴板（`/api/local` 的 `clipboard:write-rtf`，PowerShell `SetDataObject`，载荷走临时文件），桌面版走 Electron 原生剪贴板，Safari 走原生剪贴板 API，其余环境降级为纯文本并提示。
 回归：`npm run verify:word`（Windows + Word，真机粘贴断言 fields=1）；`npm run test:lit` 覆盖域代码格式（`\fldinst` 指令不得用花括号包裹，否则 Word 会退化成字面文本）。
+
+## Zotero 批量同步（扫描 → 预览 → 备份 → 应用）
+
+```powershell
+npm run zotero:sync -- --vault "<vault>" --db "<zotero.sqlite>"              # dry-run：扫描+预览；不在 vault 里建任何目录/文件
+npm run zotero:sync -- --vault "<vault>" --db "<zotero.sqlite>" --report <file>   # 指定报告落盘位置
+npm run zotero:sync -- --vault "<vault>" --db "<zotero.sqlite>" --apply      # 先整库备份，再写盘
+```
+
+- 只读打开 Zotero；排除附件/批注/笔记；匹配顺序 `zoteroKeys/zoteroKey` > DOI > 标题归一化。
+- Zotero 库里的重复条目先归并成一个同步单元：多个 key 落到同一篇笔记的 `zoteroKeys`，**重复执行不会新建重复文献**。
+- dry-run 的报告默认落系统临时目录（`--report` 可指定）；`--apply` 备份到 `.backups/zotero-import-<时间戳>/`，删除数必须为 0，未纳管 md 一律不碰。
+- 索引里登记、磁盘上读不到的文件（同步盘离线等）会**直接中止同步**，避免重建 `meta.json` 时丢索引；确认是永久删除后加 `--allow-missing`。
+- `--limit <n>` 可先小批量试跑。分类/标签会顺手清理历史占位「未分类」「方向:未分类」。
 
 ## 文献库去重
 
@@ -58,16 +84,22 @@ Zotero 库自身可能存在重复条目（同一 DOI / 同一标题两条，常
 vault 同步会如实镜像，因此笔记里会出现重复文献。用合并脚本清理：
 
 ```powershell
-npm run dedupe:vault -- --vault "<vault>"          # dry-run：列出重复组与保留策略
-npm run dedupe:vault -- --vault "<vault>" --apply  # 写盘：先整库备份，再合并/删除
+npm run dedupe:vault -- --vault "<vault>"                     # dry-run：逐组预览保留项/被合并项/风险标记
+npm run dedupe:vault -- --vault "<vault>" --report <file>     # 额外把预览报告写成 JSON
+npm run dedupe:vault -- --vault "<vault>" --apply             # 写盘：先备份本次改动的文件，再合并/删除
+npm run dedupe:vault -- --vault "<vault>" --apply --fix-placeholders   # 顺带清理全库历史占位「未分类」
 ```
 
 - 分组：同一 DOI ⇒ 同篇；标题相近且 DOI 不冲突（至少一边为空）⇒ 同篇（并查集连通）。
-- 保留：有分类 > 有本机 PDF > 有 DOI > created 最早 > 文件名序；collections/tags/attachments 取并集。
+- 保留：有真实分类 > 有本机 PDF > 有 DOI > created 最早 > 文件名序。
+- 合并只做并集、不丢数据：collections/tags/attachments 取并集（历史占位「未分类」「方向:未分类」不写入）；
+  `zoteroKeys` 记下全部 Zotero key（主 key 优先取有本机 PDF 的），被合并项的正文若不在保留项里会追加到末尾。
+- 安全：标题只是近似相等的「可疑组」默认跳过（加 `--merge-suspect` 才合并）；`--apply` 先备份到 `.backups/dedupe-<时间戳>/`。
 - 幂等：再跑应为 0 组；顺带清理指向已删文件的悬空 `meta.json` 条目。
-- 与后续同步兼容：导入匹配顺序是 zoteroKey > DOI > 标题，被合并掉的那条会按 DOI/标题匹配回保留项，不会重新长出来。
+- **去重后再同步不会重新长出来**：合并后的笔记带全部 key，官方同步按 `zoteroKeys` 命中（`npm run test:zotero-e2e` 覆盖这条链路）。
 - 诊断：`node scripts/audit-vault-dupes.mjs`（vault 侧）、`node scripts/audit-zotero-dupes.mjs`（Zotero 库侧）。
-- 2026-10-13 实测：1367 → 668 篇（合并 560 组，删除 699 个重复文件，全部有备份）。
+- 2026-10-13 实测：1367 → 668 篇（合并 560 组，删除 699 个重复文件，全部有备份）；
+  同日复核：668 篇再同步为「新建 0、更新 0、删除 0」，真正未分类 64 篇（界面动态显示，不落盘）。
 
 ## 验证命令
 
@@ -76,6 +108,9 @@ npm run build
 npm run test:vault
 npm run test:lit
 npm run test:web
+npm run test:zotero            # zoteroFs 只读读取
+npm run test:zotero-import     # 批量导入计划（含「去重后再次同步」纯逻辑）
+npm run test:zotero-e2e        # 合成库端到端：同步 → 去重 → 再同步（必须 0 新建）
 npm run test:startup
 npm run test:startup-e2e
 npm run test:wysiwyg-e2e

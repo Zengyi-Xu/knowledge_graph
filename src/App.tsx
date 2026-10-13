@@ -205,11 +205,12 @@ export default function App() {
       const note = byId.get(u.noteId)
       if (!note || !note.literature) continue
       patches.push({ id: u.noteId, patch: {
-        tags: [...new Set([...note.tags, ...u.tagsToAdd])],
+        tags: [...new Set([...note.tags.filter((tag) => !u.tagsToRemove.includes(tag)), ...u.tagsToAdd])],
         literature: {
           ...note.literature,
           collections: u.collections,
           zoteroKey: u.zoteroKey,
+          zoteroKeys: u.zoteroKeys,
           zoteroPdfCount: u.zoteroPdfCount,
           zoteroAvailablePdfCount: u.zoteroAvailablePdfCount,
         },
