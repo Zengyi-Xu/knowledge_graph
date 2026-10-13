@@ -1,17 +1,43 @@
 # Dependencies
 node_modules/
 
-# Build output
-dist/
-dist-ssr/
-release/
-release-public-final/
-release-v1.0.1/
+# Build output（只忽略仓库根目录构建产物；public/vditor/dist 是编辑器运行时资源，必须入库）
+/dist/
+/dist-dev/
+/dist-ssr/
+/release/
+!public/vditor/dist/
 
-# User data must not be published with the example application
+# 测试脚手架 / 临时产物（vault 自测与端到端验证）
+.tmp-*/
+
+# 笔记数据：只留在本机，永远不进仓库 / 不进 exe
+# （vault 目录、本地同步文件与任何导出快照都不提交）
 public/notes.json
 public/notes.json.bak-*
-*notes-*.json
+*.notes-backup.json
+notes-backup/
+
+# 本地归档 / 备份
+_backup/
+backup/
+
+# 与编辑器源码无关的本机临时材料（PPTX 调试脚本、预览产物等）
+_kaust_preview/
+_kaust_template_preview/
+_online_kaust_templates/
+_tmp/
+dsh-bench/
+pics/
+preview-*/
+probe*-png/
+probe*.pdf
+probe*.pptx
+*.pptx
+*.pptx.bak
+slide*.xml
+checks.json
+debug.log
 
 # Logs
 *.log
@@ -29,3 +55,7 @@ npm-debug.log*
 
 # Kimi Work runtime files
 *.local
+
+# electron-builder 临时输出（本机 .asar 被锁时会残留）
+release-out/
+release[0-9]/

@@ -1,0 +1,506 @@
+/*
+ * 阅读面板（#write 内）的 Markdown 基础样式。
+ *
+ * 为什么需要它：应用全局引入了 Tailwind 的 preflight，它会把
+ *   ul/ol { list-style: none; margin: 0; padding: 0 }
+ *   h1~h6 { font-size: inherit; font-weight: inherit }
+ *   blockquote/dl/dd/h1~h6/hr/figure/p/pre { margin: 0 }
+ * 全部重置掉。阅读面板在 Shadow DOM 里，preflight 同样作用到这里，
+ * 于是列表符号、标题层级、表格边框全部消失。
+ *
+ * 本文件把语义排版补回来，只作用于 #write（不碰应用界面）。
+ * 加载顺序：Tailwind base → 本文件 → 阅读主题（vue-night 等）→ 自定义 CSS，
+ * 所以主题可以覆盖这里的任何一条规则。
+ */
+
+#write {
+  --md-text: #24292f;
+  --md-muted: #57606a;
+  --md-border: #d8dee4;
+  --md-link: #0969da;
+  --md-code-bg: rgba(175, 184, 193, 0.2);
+  --md-code-color: #cf222e;
+  --md-fence-bg: #f6f8fa;
+  --md-fence-border: #d8dee4;
+  --md-quote-border: #d0d7de;
+  --md-mark-bg: #fff8c5;
+  --md-table-head: #f6f8fa;
+  --md-table-stripe: #f6f8fa;
+  color: var(--md-text);
+  font-size: 16px;
+  line-height: 1.7;
+  overflow-wrap: break-word;
+}
+
+/* ---------------------------------------------------------------- 标题 */
+
+#write h1,
+#write h2,
+#write h3,
+#write h4,
+#write h5,
+#write h6 {
+  margin: 1.4em 0 0.6em;
+  font-weight: 600;
+  line-height: 1.3;
+  color: inherit;
+}
+
+#write h1 {
+  font-size: 1.9em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--md-border);
+}
+
+#write h2 {
+  font-size: 1.5em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--md-border);
+}
+
+#write h3 {
+  font-size: 1.25em;
+}
+
+#write h4 {
+  font-size: 1.05em;
+}
+
+#write h5 {
+  font-size: 1em;
+}
+
+#write h6 {
+  font-size: 0.95em;
+  color: var(--md-muted);
+}
+
+/* 正文第一块不要顶部外边距 */
+#write .md-body > :first-child,
+#write blockquote > :first-child,
+#write li > :first-child,
+#write dd > :first-child {
+  margin-top: 0;
+}
+
+#write .md-body > :last-child,
+#write blockquote > :last-child,
+#write li > :last-child,
+#write dd > :last-child {
+  margin-bottom: 0;
+}
+
+/* ---------------------------------------------------------------- 段落 */
+
+#write p {
+  margin: 0.9em 0;
+}
+
+#write sup,
+#write sub {
+  font-size: 0.78em;
+  line-height: 0;
+}
+
+#write sup {
+  vertical-align: super;
+}
+
+#write sub {
+  vertical-align: sub;
+}
+
+#write strong {
+  font-weight: 600;
+}
+
+#write mark {
+  padding: 0 0.15em;
+  border-radius: 2px;
+  background-color: var(--md-mark-bg);
+  color: inherit;
+}
+
+#write kbd {
+  padding: 0.1em 0.35em;
+  border: 1px solid var(--md-border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background-color: var(--md-fence-bg);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.85em;
+}
+
+#write a {
+  color: var(--md-link);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------- 列表 */
+
+#write ul,
+#write ol {
+  margin: 0.9em 0;
+  padding-left: 1.8em;
+}
+
+#write ul {
+  list-style: disc outside;
+}
+
+#write ol {
+  list-style: decimal outside;
+}
+
+#write ul ul {
+  list-style-type: circle;
+}
+
+#write ul ul ul {
+  list-style-type: square;
+}
+
+#write ol ol {
+  list-style-type: lower-alpha;
+}
+
+#write ol ol ol {
+  list-style-type: lower-roman;
+}
+
+#write li {
+  margin: 0.25em 0;
+}
+
+#write li > ul,
+#write li > ol {
+  margin: 0.25em 0;
+}
+
+#write li > p {
+  margin: 0.5em 0;
+}
+
+#write li::marker {
+  color: var(--md-muted);
+}
+
+/* 任务列表：checkbox 顶到标记位置（Typora 主题用 margin-left: -1.3em） */
+#write li.md-task-list-item,
+#write li.task-list-item {
+  list-style: none;
+  text-indent: 0;
+}
+
+#write .md-task-checkbox {
+  margin: 0 0.45em 0 -1.35em;
+  vertical-align: middle;
+}
+
+/* ---------------------------------------------------------------- 代码 */
+
+#write code,
+#write tt {
+  padding: 0.15em 0.35em;
+  border-radius: 4px;
+  background-color: var(--md-code-bg);
+  color: var(--md-code-color);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 0.9em;
+}
+
+#write pre,
+#write .md-fences {
+  margin: 1em 0;
+  padding: 0.9em 1em;
+  overflow-x: auto;
+  border: 1px solid var(--md-fence-border);
+  border-radius: 6px;
+  background-color: var(--md-fence-bg);
+  font-size: 0.88em;
+  line-height: 1.55;
+  white-space: pre;
+}
+
+#write pre code,
+#write .md-fences code {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font-size: 1em;
+  white-space: inherit;
+}
+
+/* YAML 前置元数据 */
+#write pre.md-meta-block {
+  margin: 1em 0;
+  padding: 0.9em 1em;
+  border: 1px dashed var(--md-border);
+  border-radius: 6px;
+  background-color: var(--md-fence-bg);
+  color: var(--md-muted);
+  font-size: 0.85em;
+  white-space: pre-wrap;
+}
+
+/* ---------------------------------------------------------------- 引用 */
+
+#write blockquote {
+  margin: 1em 0;
+  padding: 0.2em 1em;
+  border-left: 4px solid var(--md-quote-border);
+  color: var(--md-muted);
+}
+
+#write blockquote blockquote {
+  margin: 0.6em 0;
+  opacity: 0.9;
+}
+
+/* ---------------------------------------------------------------- 表格 */
+
+#write .md-table {
+  margin: 1em 0;
+  overflow-x: auto;
+}
+
+#write .md-table table {
+  border-collapse: collapse;
+  border-spacing: 0;
+  font-size: 0.95em;
+}
+
+#write table th,
+#write table td {
+  padding: 0.45em 0.85em;
+  border: 1px solid var(--md-border);
+}
+
+#write table thead th {
+  background-color: var(--md-table-head);
+  font-weight: 600;
+}
+
+#write table tbody tr:nth-child(2n) {
+  background-color: var(--md-table-stripe);
+}
+
+/* ---------------------------------------------------------------- 其他块 */
+
+#write hr {
+  height: 1px;
+  margin: 1.6em 0;
+  border: 0;
+  background-color: var(--md-border);
+}
+
+#write img {
+  max-width: 100%;
+  height: auto;
+}
+
+#write figure.md-image {
+  margin: 1.2em 0;
+  text-align: center;
+}
+
+#write figure.md-image > img {
+  border-radius: 4px;
+}
+
+#write figcaption.md-meta,
+#write .md-meta {
+  margin-top: 0.4em;
+  color: var(--md-muted);
+  font-size: 0.85em;
+}
+
+#write dl.md-deflist {
+  margin: 1em 0;
+}
+
+#write dl.md-deflist dt {
+  margin-top: 0.7em;
+  font-weight: 600;
+}
+
+#write dl.md-deflist dd {
+  margin: 0.2em 0 0.2em 1.4em;
+  color: var(--md-muted);
+}
+
+#write .md-html-block {
+  margin: 1em 0;
+}
+
+/* ---------------------------------------------------------------- 数学 */
+
+#write .md-math-inline {
+  padding: 0 0.15em;
+  font-family: "Latin Modern Math", "STIX Two Math", Cambria Math, "Times New Roman", serif;
+}
+
+#write .mathjax-block {
+  margin: 1em 0;
+  padding: 0.8em 1em;
+  overflow-x: auto;
+  border: 1px solid var(--md-fence-border);
+  border-radius: 6px;
+  background-color: var(--md-fence-bg);
+  text-align: center;
+}
+
+#write .mathjax-block .md-math-src {
+  font-family: "Latin Modern Math", "STIX Two Math", Cambria Math, "Times New Roman", serif;
+  font-size: 1.05em;
+}
+
+#write .tex-display {
+  display: inline-block;
+  font-family: "Latin Modern Math", "STIX Two Math", Cambria Math, "Times New Roman", serif;
+  font-size: 1.15em;
+  line-height: 1.6;
+}
+
+#write .tex-text {
+  font-family: inherit;
+  font-style: normal;
+}
+
+#write .tex-op {
+  margin: 0 0.12em;
+  font-size: 1.2em;
+  line-height: 0;
+}
+
+#write .tex-space {
+  display: inline-block;
+}
+
+#write .tex-frac {
+  display: inline-flex;
+  flex-direction: column;
+  vertical-align: -0.45em;
+  margin: 0 0.15em;
+  text-align: center;
+  line-height: 1.25;
+}
+
+#write .tex-frac-num {
+  padding: 0 0.25em;
+  border-bottom: 1px solid currentColor;
+}
+
+#write .tex-frac-den {
+  padding: 0 0.25em;
+}
+
+#write .tex-sqrt {
+  display: inline-flex;
+  align-items: flex-start;
+}
+
+#write .tex-sqrt-idx {
+  margin-right: -0.35em;
+  font-size: 0.65em;
+  line-height: 1;
+  transform: translateY(-0.1em);
+}
+
+#write .tex-sqrt-body {
+  padding: 0 0.15em;
+  border-top: 1px solid currentColor;
+}
+
+#write .tex-subsup {
+  display: inline-flex;
+  flex-direction: column;
+  vertical-align: middle;
+  margin: 0 0.05em;
+  line-height: 1;
+  font-size: 0.72em;
+}
+
+#write .tex-accent {
+  position: relative;
+  display: inline-block;
+}
+
+#write .tex-accent::after {
+  content: attr(data-mark);
+  position: absolute;
+  left: 50%;
+  top: -0.72em;
+  transform: translateX(-50%);
+  font-size: 0.95em;
+  line-height: 1;
+  font-style: normal;
+}
+
+#write .tex-accent-below::after {
+  top: auto;
+  bottom: -0.55em;
+}
+
+/* ---------------------------------------------------------------- 脚注 */
+
+#write sup.md-footnote {
+  font-size: 0.75em;
+  vertical-align: super;
+}
+
+#write sup.md-footnote > a {
+  padding: 0 0.2em;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+#write section.md-footnotes {
+  margin-top: 2.2em;
+  font-size: 0.9em;
+  color: var(--md-muted);
+}
+
+#write section.md-footnotes hr.md-footnotes-sep {
+  margin-bottom: 0.8em;
+}
+
+#write section.md-footnotes ol {
+  padding-left: 1.5em;
+}
+
+#write section.md-footnotes li {
+  margin: 0.4em 0;
+}
+
+#write a.md-footnote-back {
+  margin-left: 0.35em;
+  text-decoration: none;
+}
+
+/* ---------------------------------------------------------------- 目录 */
+
+#write nav.md-toc {
+  margin: 1.2em 0;
+  padding: 0.8em 1em;
+  border: 1px solid var(--md-border);
+  border-radius: 6px;
+  background-color: var(--md-fence-bg);
+}
+
+#write .md-toc-title {
+  margin-bottom: 0.4em;
+  font-weight: 600;
+}
+
+#write ul.md-toc-list {
+  margin: 0;
+  padding-left: 0.2em;
+  list-style: none;
+}
+
+#write li.md-toc-item {
+  margin: 0.15em 0;
+}

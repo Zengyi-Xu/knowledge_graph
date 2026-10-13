@@ -1,0 +1,18 @@
+/* 知识图谱「纸页」主题（与经典模式预览的 paper 调色板一致） */
+.vditor-reset {
+  background-color: #fcfaf5;
+  color: #273430;
+  font-family: Georgia, "Noto Serif CJK SC", serif;
+  line-height: 1.8;
+}
+.vditor-reset h1,
+.vditor-reset h2,
+.vditor-reset h3 { color: #146b69; }
+.vditor-reset a { color: #ad503a; }
+.vditor-reset code,
+.vditor-reset pre { background-color: #f0ede5; color: #9c462f; }
+.vditor-reset blockquote { border-color: #d67c5e; color: #52605b; }
+.vditor-reset table td,
+.vditor-reset table th { border-color: #e0d8c8; }
+.vditor-reset table th { background-color: #f2eee5; }
+.vditor-reset hr { border-color: #e0d8c8; }

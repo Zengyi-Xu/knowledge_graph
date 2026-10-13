@@ -1,0 +1,22 @@
+/* 知识图谱「Vue 浅色」主题（与经典模式预览的 vue-light / typora-vue-theme 调色板一致） */
+.vditor-reset {
+  background-color: #ffffff;
+  color: #34495e;
+  font-family: "Ubuntu", "Source Sans Pro", system-ui, sans-serif;
+}
+.vditor-reset h1,
+.vditor-reset h2,
+.vditor-reset h3,
+.vditor-reset h4,
+.vditor-reset h5,
+.vditor-reset h6 { color: #34495e; }
+.vditor-reset h1 { border-bottom: none; }
+.vditor-reset a { color: #42b983; }
+.vditor-reset code,
+.vditor-reset pre { background-color: #f8f8f8; color: #e96900; }
+.vditor-reset blockquote { border-left-color: #42b983; color: #777777; }
+.vditor-reset table td,
+.vditor-reset table th { border-color: #dfe2e5; }
+.vditor-reset table th { background-color: #f2f2f2; }
+.vditor-reset hr { border-color: #dfe2e5; }
+.vditor-reset mark { background-color: #ebffeb; }

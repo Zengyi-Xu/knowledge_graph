@@ -1,10 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNotes } from '@/hooks/useNotes'
 import { NoteList } from '@/components/NoteList'
 import { NoteEditor } from '@/components/NoteEditor'
-import { GraphView } from '@/components/GraphView'
 import type { Filters } from '@/components/GraphView'
+import { makeCitekey } from '@/lib/citekey'
+import { toLiteratureMeta } from '@/lib/literatureMeta'
+import type { ImportedLit } from '@/lib/literature'
+import type { ZoteroSyncUpdate } from '@/lib/zoteroSync'
 import { ConflictDialog } from '@/components/ConflictDialog'
+import { FolderMoveDialog } from '@/components/FolderMoveDialog'
 import { NOTE_TYPE_META, GRADE_META } from '@/types/note'
 import type { NoteType, Grade, Note } from '@/types/note'
 import { Button } from '@/components/ui/button'
@@ -17,17 +21,22 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { useIsMobile } from '@/hooks/use-mobile'
 import {
   Network,
   NotebookText,
   Upload,
   FileUp,
   FolderSync,
+  FolderOpen,
+  HardDrive,
   Settings2,
   Save,
   PanelLeft,
   RefreshCw,
   Columns2,
+  BookOpen,
+  Sparkles,
   MoreVertical,
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
@@ -42,31 +51,68 @@ import {
   saveNotesToSyncFile,
   serializeNotes,
 } from '@/lib/syncFile'
+import { chooseVaultDir, listVault, openVaultDir, vaultSupported } from '@/lib/vaultFs'
 import { Switch } from '@/components/ui/switch'
-import { useIsMobile } from '@/hooks/use-mobile'
+import { APP_NAME, ENV_LABEL, isDevApp, readSetting, storageKey, writeSetting } from '@/lib/env'
+import { loadPhysics, savePhysics, type GraphPhysics } from '@/lib/graphPhysics'
 
-type View = 'notes' | 'graph' | 'both'
+const GraphView = lazy(() => import('@/components/GraphView').then((m) => ({ default: m.GraphView })))
+const LiteratureView = lazy(() => import('@/components/LiteratureView').then((m) => ({ default: m.LiteratureView })))
+const AiPanel = lazy(() => import('@/components/AiPanel').then((m) => ({ default: m.AiPanel })))
+
+type View = 'notes' | 'graph' | 'both' | 'literature'
+
+const AI_LOG_KEY = 'ai-log-v1'
+interface AiLogEntry {
+  at: number
+  applied: number
+  created: number
+  updated: number
+}
+
+/** AI 运行日志（脱敏：时间/条数，不含内容不含 key），失败不阻塞 */
+function appendAiLog(entry: AiLogEntry) {
+  try {
+    const list = JSON.parse(readSetting(AI_LOG_KEY) ?? '[]') as AiLogEntry[]
+    list.unshift(entry)
+    writeSetting(AI_LOG_KEY, JSON.stringify(list.slice(0, 50)))
+  } catch {
+    /* 日志失败静默 */
+  }
+}
 
 export default function App() {
   const api = useNotes()
-  const { notes, hydrated, replaceAll } = api
+  const { notes, hydrated, replaceAll, vault } = api
+  const loadingRef = useRef(true)
+  loadingRef.current = !hydrated || Boolean(vault.loading) || vault.conflicts > 0
+  const requireFullLibrary = () => {
+    if (!loadingRef.current) return true
+    toast.info('请等待笔记库加载完成，并处理文件冲突后再导入、导出或同步全库')
+    return false
+  }
+  const [view, setView] = useState<View>('notes')
   // 手机断点来自仓库已有的 useIsMobile()（matchMedia），不散落全局事件监听
   const isMobile = useIsMobile()
-  const [view, setView] = useState<View>('notes')
   // 「并列」是图谱 + 编辑器的左右并排，手机上两栏都不可用：
   // 手机端把视图降级到「笔记」，并从折叠状态的列表进入详情（配合抽屉式列表）
   const effectiveView: View = isMobile && view === 'both' ? 'notes' : view
   const [activeId, setActiveId] = useState<string | null>(null)
   const [focusId, setFocusId] = useState<string | null>(null)
-  const [listOpen, setListOpen] = useState(() => localStorage.getItem('note-graph-list-open') !== '0')
+  const [listOpen, setListOpen] = useState(() => readSetting('list-open-v1') !== '0')
   const [filters, setFilters] = useState<Filters>({ types: new Set(), grades: new Set(), tags: new Set(), search: '' })
   const fileRef = useRef<HTMLInputElement>(null)
   const mdRef = useRef<HTMLInputElement>(null)
-  const [syncPath, setSyncPath] = useState(() => localStorage.getItem(SYNC_PATH_KEY) ?? '')
-  const [autoSync, setAutoSync] = useState(() => localStorage.getItem(AUTO_SYNC_KEY) === '1')
+  const [syncPath, setSyncPath] = useState(() => readSetting(SYNC_PATH_KEY) ?? '')
+  const [aiOpen, setAiOpen] = useState(false)
+  const [aiTask, setAiTask] = useState<import('@/lib/aiPrompts').AiTask | null>(null)
+  const [autoSync, setAutoSync] = useState(() => readSetting(AUTO_SYNC_KEY) === '1')
+  const [physics, setPhysics] = useState<GraphPhysics>(() => loadPhysics())
   const [syncing, setSyncing] = useState(false)
   const [lastSyncAt, setLastSyncAt] = useState<number | null>(null)
   const [conflict, setConflict] = useState<{ local: Note[]; remote: Note[] } | null>(null)
+  /** 改类型（= 换文件夹）时的待确认迁移 */
+  const [typeMove, setTypeMove] = useState<{ note: Note; to: NoteType; patch: Partial<Note> } | null>(null)
 
   const active = notes.find((n) => n.id === activeId) ?? notes[0] ?? null
 
@@ -78,14 +124,10 @@ export default function App() {
   const baselineRef = useRef<string>('')
   const setBaseline = useCallback((v: string) => {
     baselineRef.current = v
-    try {
-      localStorage.setItem(SYNC_BASELINE_KEY, v)
-    } catch {
-      /* ignore */
-    }
+    writeSetting(SYNC_BASELINE_KEY, v)
   }, [])
   useEffect(() => {
-    baselineRef.current = localStorage.getItem(SYNC_BASELINE_KEY) ?? ''
+    baselineRef.current = readSetting(SYNC_BASELINE_KEY) ?? ''
   }, [])
   const busyRef = useRef(false)
   const conflictRef = useRef(false)
@@ -134,18 +176,106 @@ export default function App() {
   }
 
   const createNote = (title?: string) => {
+    if (!hydrated) {
+      toast.info('正在读取笔记目录，请等待普通笔记出现后再新建')
+      return null
+    }
     const n = api.createNote(title ? { title, content: '' } : {})
     setActiveId(n.id)
     setView((v) => (v === 'both' ? 'both' : 'notes'))
     return n
   }
 
+  /** 文献导入：逐条创建 literature 笔记，citekey 撞名自动追加后缀 */
+  const importLiterature = (items: ImportedLit[]) => {
+    if (!requireFullLibrary()) return
+    const existing = new Set(
+      notes.filter((n) => n.literature?.citekey).map((n) => n.literature!.citekey),
+    )
+    const incoming = items.map((item) => {
+      const citekey = makeCitekey({ authors: item.authors, year: item.year }, item.title, existing)
+      existing.add(citekey)
+      return {
+        title: item.title || '未命名文献',
+        type: 'literature' as const,
+        grade: '' as const,
+        tags: [],
+        content: '',
+        literature: toLiteratureMeta(item, citekey),
+      }
+    })
+    const added = api.createNotes(incoming)
+    const lastId = added.at(-1)?.id
+    if (lastId) setActiveId(lastId)
+    toast.success(`已导入 ${items.length} 篇文献`)
+  }
+
+  /** 应用 Zotero 同步计划：合并 collections、追加新标签、刷新 Zotero key 与 PDF 状态 */
+  const applyZoteroSync = (updates: ZoteroSyncUpdate[]) => {
+    if (!requireFullLibrary()) return
+    const byId = new Map(notes.map((n) => [n.id, n]))
+    const patches: { id: string; patch: Partial<Note> }[] = []
+    for (const u of updates) {
+      const note = byId.get(u.noteId)
+      if (!note || !note.literature) continue
+      patches.push({ id: u.noteId, patch: {
+        tags: [...new Set([...note.tags, ...u.tagsToAdd])],
+        literature: {
+          ...note.literature,
+          collections: u.collections,
+          zoteroKey: u.zoteroKey,
+          zoteroPdfCount: u.zoteroPdfCount,
+          zoteroAvailablePdfCount: u.zoteroAvailablePdfCount,
+        },
+      } })
+    }
+    api.updateNotes(patches)
+    toast.success(`已同步 ${patches.length} 篇文献的分类与标签`)
+  }
+
+  /**
+   * AI 统筹：应用确认后的 operations。
+   * create 走 createNote；update/retag 按 id 或标题定位后 updateNote。
+   * 运行日志写 localStorage（脱敏：只记任务、模型、条数）。
+   */
+  const applyAiOps = (ops: import('@/lib/aiOps').AiOperation[]) => {
+    if (!requireFullLibrary()) return
+    const byId = new Map(notes.map((n) => [n.id, n]))
+    const byTitle = new Map(notes.map((n) => [n.title.trim(), n]))
+    let created = 0
+    let updated = 0
+    for (const op of ops) {
+      if (op.type === 'create') {
+        api.createNote({ title: op.title, type: op.noteType, grade: '', tags: op.tags, content: op.content })
+        created++
+        continue
+      }
+      const target = (op.id && byId.get(op.id)) || (op.title && byTitle.get(op.title.trim()))
+      if (!target) continue
+      if (op.type === 'retag') {
+        const next = new Set(target.tags)
+        for (const t of op.addTags) next.add(t)
+        for (const t of op.removeTags) next.delete(t)
+        api.updateNote(target.id, { tags: [...next] })
+      } else {
+        api.updateNote(target.id, {
+          ...(op.content !== undefined ? { content: op.content } : {}),
+          ...(op.tags ? { tags: op.tags } : {}),
+        })
+      }
+      updated++
+    }
+    appendAiLog({ at: Date.now(), applied: ops.length, created, updated })
+  }
+
   const exportJson = () => {
-    downloadNotes(notes, `kaust-notes-${new Date().toISOString().slice(0, 10)}.json`)
+    if (!requireFullLibrary()) return
+    downloadNotes(notes, `knowledge-graph-notes-${new Date().toISOString().slice(0, 10)}.json`)
     toast.success('已导出全部笔记为 JSON 备份')
   }
 
   const importJson = async (file: File) => {
+    if (!requireFullLibrary()) return
     try {
       const arr = JSON.parse(await file.text()) as Note[]
       if (!Array.isArray(arr)) throw new Error('bad format')
@@ -156,23 +286,38 @@ export default function App() {
     }
   }
 
+  /** 用同步文件（notes.json）覆盖当前本地笔记；仓库不再内置 notes.json */
   const reloadFromJson = async () => {
-    if (!window.confirm('将用仓库里的 notes.json 覆盖当前本地笔记，本地尚未同步的改动会丢失。继续？')) return
+    if (!requireFullLibrary()) return
+    if (!isDesktop()) {
+      toast.info('浏览器版没有本地文件读取权限，请用「导入备份」选择 JSON 文件')
+      return
+    }
+    let path = syncPath
+    if (!path) {
+      const chosen = await chooseSyncFile()
+      if (!chosen) return
+      path = chosen
+    }
+    if (!window.confirm(`将用同步文件覆盖当前本地笔记：\n${path}\n\n本地尚未同步的改动会丢失。继续？`)) return
     try {
-      const r = await fetch(`${import.meta.env.BASE_URL}notes.json`, { cache: 'no-cache' })
-      if (!r.ok) throw new Error('not found')
-      const arr = (await r.json()) as Note[]
-      if (!Array.isArray(arr)) throw new Error('bad format')
-      const count = api.replaceAll(arr)
+      const text = await readSyncFileText(path)
+      if (text === null) throw new Error('not found')
+      const arr = parseNotes(text)
+      if (!arr) throw new Error('bad format')
+      const count = replaceAll(arr)
+      // 覆盖后本地与同步文件一致，刷新基线，避免下一轮轮询误判「两边都改了」
+      setBaseline(serializeNotes(arr))
       setActiveId(null)
       setFocusId(null)
-      toast.success(`已从 notes.json 重新载入 ${count} 篇笔记`)
+      toast.success(`已从同步文件重新载入 ${count} 篇笔记`)
     } catch {
-      toast.error('重新载入失败：读不到 notes.json')
+      toast.error('重新载入失败：读不到有效的同步文件')
     }
   }
 
   const importMd = async (file: File) => {
+    if (!hydrated) { toast.info('正在读取笔记目录，请稍后再导入'); return }
     const text = await file.text()
     const fmMatch = text.match(/^---\n([\s\S]*?)\n---\n?/)
     const get = (k: string) => fmMatch?.[1].match(new RegExp(`^${k}:\\s*(.+)$`, 'm'))?.[1]?.trim()
@@ -195,6 +340,45 @@ export default function App() {
     toast.success(`已导入「${title}」`)
   }
 
+  /** 选择/切换本地笔记目录（vault：每篇一个 .md + 一个 meta.json 索引） */
+  const pickVault = async () => {
+    if (!requireFullLibrary()) return
+    if (!vaultSupported()) {
+      toast.info('浏览器版没有目录写入权限：请用桌面版，或继续使用浏览器本地存储')
+      return
+    }
+    const dir = await chooseVaultDir()
+    if (!dir) return
+    if (dir === vault.dir) {
+      toast.info('这已经是当前的笔记目录')
+      return
+    }
+    const listing = await listVault(dir)
+    if (!listing?.exists) {
+      toast.error('读不到该目录，请换一个位置')
+      return
+    }
+    if (listing.meta) {
+      if (
+        !window.confirm(
+          `该目录已是一个笔记目录（${listing.md.length} 个 md 文件）。\n将用目录里的内容替换当前显示的 ${notes.length} 篇笔记，尚未落盘的改动会丢失。继续？`,
+        )
+      )
+        return
+    } else if (listing.md.length > 0) {
+      if (
+        !window.confirm(
+          `该目录里有 ${listing.md.length} 个 md 文件，但没有 meta.json。\n当前 ${notes.length} 篇笔记会写入该目录（重名会加 -2 后缀），已有文件不会被读取或改动。继续？`,
+        )
+      )
+        return
+    } else if (notes.length > 0) {
+      if (!window.confirm(`将把当前 ${notes.length} 篇笔记写入该目录：每篇一个 .md，并生成 meta.json。继续？`)) return
+    }
+    api.setVaultDir(dir)
+    toast.success('已切换笔记目录，正在读取…')
+  }
+
   const chooseSyncFile = useCallback(async () => {
     const desk = window.knowledgeGraphDesktop
     if (!desk) {
@@ -203,7 +387,7 @@ export default function App() {
     }
     const selected = await desk.chooseSyncFile()
     if (!selected) return null
-    localStorage.setItem(SYNC_PATH_KEY, selected)
+    writeSetting(SYNC_PATH_KEY, selected)
     setSyncPath(selected)
     toast.success('已设置同步文件位置')
     return selected
@@ -212,6 +396,7 @@ export default function App() {
   /** 把本地笔记写入同步文件，并把当前内容记为「已一致」基线 */
   const pushToFile = useCallback(
     async (silent = false) => {
+      if (loadingRef.current) return false
       if (!syncPath) return false
       if (!window.knowledgeGraphDesktop) return false
       try {
@@ -229,14 +414,27 @@ export default function App() {
     [syncPath, setBaseline],
   )
 
+  /** AI 运行前的硬门槛：先快照到同步文件，失败拒绝运行 */
+  const ensureAiSnapshot = useCallback(async () => {
+    if (!syncPath) {
+      toast.error('AI 运行前需要快照：请先用顶栏「选择同步文件」按钮设置同步文件位置')
+      return false
+    }
+    const ok = await pushToFile(true)
+    if (!ok) toast.error('快照保存失败，已拒绝 AI 运行')
+    return ok
+  }, [syncPath, pushToFile])
+
   /** 比较本地与同步文件：谁改了推谁；两边都改了就开冲突面板 */
   const checkSync = useCallback(async () => {
+    if (loadingRef.current) return
     if (!autoSync || !syncPath) return
     if (busyRef.current || conflictRef.current) return
     if (!window.knowledgeGraphDesktop?.readSyncFile) return
     busyRef.current = true
     try {
       const remoteText = await readSyncFileText(syncPath)
+      if (loadingRef.current) return
       if (remoteText === null) {
         // 文件还不存在：以本地为准创建
         await pushToFile(true)
@@ -277,25 +475,39 @@ export default function App() {
     checkRef.current = checkSync
   }, [checkSync])
 
+  // vault 模式：同步文件默认放在 <vault>\sync\notes.json（只用于同步/备份）
+  useEffect(() => {
+    if (!api.vault.active || !api.vault.dir || syncPath) return
+    const dir = api.vault.dir
+    const sep = dir.includes('\\') ? '\\' : '/'
+    const def = `${dir}${dir.endsWith(sep) ? '' : sep}sync${sep}notes.json`
+    writeSetting(SYNC_PATH_KEY, def)
+    setSyncPath(def)
+  }, [api.vault.active, api.vault.dir, syncPath])
+
   // 轮询同步文件
   useEffect(() => {
-    if (!autoSync || !syncPath || !hydrated) return
+    if (!autoSync || !syncPath || !hydrated || vault.loading || vault.conflicts > 0) return
     const tick = () => void checkRef.current()
     tick()
     const timer = window.setInterval(tick, 2500)
     return () => window.clearInterval(timer)
-  }, [autoSync, syncPath, hydrated])
+  }, [autoSync, syncPath, hydrated, vault.loading, vault.conflicts])
 
   // 本地改动 → 防抖写回文件
   useEffect(() => {
-    if (!autoSync || !syncPath || !hydrated || conflict) return
+    if (!autoSync || !syncPath || !hydrated || vault.loading || vault.conflicts > 0 || conflict) return
     if (!firstCheckDoneRef.current) return
     const timer = window.setTimeout(() => void pushToFile(true), 900)
     return () => window.clearTimeout(timer)
-  }, [autoSync, syncPath, hydrated, conflict, notes, pushToFile])
+  }, [autoSync, syncPath, hydrated, vault.loading, vault.conflicts, conflict, notes, pushToFile])
 
   const syncNow = useCallback(
     async (quiet = false) => {
+      if (loadingRef.current) {
+        if (!quiet) toast.info('笔记库仍在加载，完整加载后才能同步')
+        return
+      }
       if (!syncPath) {
         if (!quiet) {
           if (isDesktop()) {
@@ -318,6 +530,7 @@ export default function App() {
   )
 
   const applyConflict = (merged: Note[]) => {
+    if (!requireFullLibrary()) return
     replaceAll(merged)
     setConflict(null)
     snoozeRef.current = ''
@@ -327,11 +540,11 @@ export default function App() {
   }
 
   useEffect(() => {
-    localStorage.setItem(AUTO_SYNC_KEY, autoSync ? '1' : '0')
+    writeSetting(AUTO_SYNC_KEY, autoSync ? '1' : '0')
   }, [autoSync])
 
   useEffect(() => {
-    localStorage.setItem('note-graph-list-open', listOpen ? '1' : '0')
+    writeSetting('list-open-v1', listOpen ? '1' : '0')
   }, [listOpen])
 
   // 手机：选中笔记后自动收起列表抽屉，让「列表 → 详情」这一步即完成导航
@@ -339,6 +552,11 @@ export default function App() {
   useEffect(() => {
     if (isMobile) setListOpen(false)
   }, [activeId, isMobile])
+
+  // 图谱物理参数：改动即生效，并写入 localStorage（开发版/正式版各自独立）
+  useEffect(() => {
+    savePhysics(physics)
+  }, [physics])
 
   const filterPanel = (
     <div className="shrink-0 space-y-4 overflow-y-auto rounded-lg border bg-card p-3 text-sm xl:w-52">
@@ -414,54 +632,81 @@ export default function App() {
       note={n}
       allNotes={notes}
       splitView={split}
-      onChange={(p) => api.updateNote(n.id, p)}
+      onChange={(p) => {
+        if (!hydrated) return
+        // 改类型 = 换文件夹：先弹窗确认，确认后再连同文件一起迁移
+        if (p.type && p.type !== n.type && api.vault.active) {
+          setTypeMove({ note: n, to: p.type, patch: p })
+          return
+        }
+        api.updateNote(n.id, p)
+      }}
       onDelete={() => {
+        if (!hydrated) return
         api.deleteNote(n.id)
         setActiveId(null)
       }}
       onOpenNote={openNote}
       onCreateNote={(t) => createNote(t)}
+      onAiUpdate={
+        n.type === 'summary'
+          ? () => {
+              setAiTask({ kind: 'update-summary', noteId: n.id })
+              setAiOpen(true)
+            }
+          : undefined
+      }
     />
   )
 
-  /* 手机上由「更多操作」菜单复用的动作，与桌面按钮调用同一批函数，功能不删减 */
-  const onPickSyncFile = () => void chooseSyncFile()
-  const onReloadFromJson = () => void reloadFromJson()
-  const onImportBackup = () => fileRef.current?.click()
-  const onImportMd = () => mdRef.current?.click()
-
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
-      {/* 顶栏：手机上标题收起、按钮组换行并把次要操作收进菜单 */}
+      {/* 顶栏：手机上标题收起、按钮组换行并把次要操作收进菜单（功能不减） */}
       <header className="flex h-auto min-h-14 flex-wrap items-center gap-x-3 gap-y-2 border-b px-3 py-2 md:h-14 md:flex-nowrap md:px-4 md:py-0">
         <Network className="h-5 w-5 shrink-0 text-primary" />
-        <h1 className="hidden shrink-0 text-base font-bold md:block">本地笔记图谱</h1>
-        <span className="hidden shrink-0 text-xs text-muted-foreground md:block">{notes.length} 篇笔记</span>
+        <h1 className="hidden shrink-0 text-base font-bold md:block">{APP_NAME}</h1>
+        <span className="hidden shrink-0 text-xs text-muted-foreground md:block">本地条目 · {notes.length} 个条目</span>
+        <span
+          className={
+            isDevApp()
+              ? 'rounded bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-medium text-amber-700'
+              : 'rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground'
+          }
+          title={
+            isDevApp()
+              ? `开发版：数据与正式版隔离（独立存储与用户目录）。${storageKey('notes-v1')}`
+              : `正式版 v${ENV_LABEL}`
+          }
+        >
+          {ENV_LABEL}
+        </span>
         <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
           <input ref={fileRef} type="file" accept=".json" className="hidden" onChange={(e) => e.target.files?.[0] && importJson(e.target.files[0])} />
           <input ref={mdRef} type="file" accept=".md,.markdown" className="hidden" onChange={(e) => e.target.files?.[0] && importMd(e.target.files[0])} />
-
           {/* 桌面：保留原有的并排按钮 */}
           <Button variant="outline" size="sm" className="hidden md:inline-flex" onClick={() => void syncNow()}>
             <Save className="mr-1 h-3.5 w-3.5" /> 保存到同步文件
           </Button>
-          <Button variant="outline" size="icon" className="hidden md:inline-flex" title="选择同步文件" aria-label="选择同步文件" onClick={onPickSyncFile}>
+          <Button variant="outline" size="icon" className="hidden md:inline-flex" title="选择同步文件" aria-label="选择同步文件" onClick={() => void chooseSyncFile()}>
             <FolderSync className="h-4 w-4" />
           </Button>
-          <Button variant="outline" size="sm" className="hidden md:inline-flex" title="用仓库里的 notes.json 覆盖本地笔记" onClick={onReloadFromJson}>
+          <Button variant="outline" size="sm" className="hidden md:inline-flex" title="用同步文件（notes.json）覆盖本地笔记" onClick={() => void reloadFromJson()}>
             <RefreshCw className="mr-1 h-3.5 w-3.5" /> 重新载入
           </Button>
-          <Button variant="outline" size="sm" className="hidden md:inline-flex" onClick={onImportBackup}>
+          <Button variant="outline" size="sm" className="hidden md:inline-flex" onClick={() => fileRef.current?.click()}>
             <Upload className="mr-1 h-3.5 w-3.5" /> 导入备份
           </Button>
-          <Button variant="outline" size="sm" className="hidden md:inline-flex" onClick={onImportMd}>
+          <Button variant="outline" size="sm" className="hidden md:inline-flex" onClick={() => mdRef.current?.click()}>
             <FileUp className="mr-1 h-3.5 w-3.5" /> 导入 .md
+          </Button>
+          <Button variant="outline" size="sm" className="hidden md:inline-flex" onClick={() => { setAiTask(null); setAiOpen(true) }} title="调用本机 Kimi 模型网关，统筹整理笔记（改动需确认后落盘）">
+            <Sparkles className="mr-1 h-3.5 w-3.5 text-amber-500" /> AI 统筹
           </Button>
           <Button variant="outline" size="sm" className="hidden md:inline-flex" onClick={exportJson}>导出备份</Button>
 
-          {/* 手机：同步与导出/导入收进菜单，功能不减 */}
+          {/* 手机：同步与导入导出收进菜单，功能不减 */}
           <div className="flex items-center gap-2 md:hidden">
-            <Button variant="outline" size="icon" className="h-11 w-11" title="选择同步文件" aria-label="选择同步文件" onClick={onPickSyncFile}>
+            <Button variant="outline" size="icon" className="h-11 w-11" title="选择同步文件" aria-label="选择同步文件" onClick={() => void chooseSyncFile()}>
               <FolderSync className="h-4 w-4" />
             </Button>
             <Button size="sm" className="h-11" onClick={() => void syncNow()}>
@@ -474,17 +719,21 @@ export default function App() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuItem className="min-h-11" onSelect={onReloadFromJson}>
+                <DropdownMenuItem className="min-h-11" onSelect={() => void reloadFromJson()}>
                   <RefreshCw className="mr-2 h-4 w-4" />
                   重新载入 notes.json
                 </DropdownMenuItem>
-                <DropdownMenuItem className="min-h-11" onSelect={onImportBackup}>
+                <DropdownMenuItem className="min-h-11" onSelect={() => fileRef.current?.click()}>
                   <Upload className="mr-2 h-4 w-4" />
                   导入 JSON 备份
                 </DropdownMenuItem>
-                <DropdownMenuItem className="min-h-11" onSelect={onImportMd}>
+                <DropdownMenuItem className="min-h-11" onSelect={() => mdRef.current?.click()}>
                   <FileUp className="mr-2 h-4 w-4" />
                   导入 .md
+                </DropdownMenuItem>
+                <DropdownMenuItem className="min-h-11" onSelect={() => { setAiTask(null); setAiOpen(true) }}>
+                  <Sparkles className="mr-2 h-4 w-4" />
+                  AI 统筹
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem className="min-h-11" onSelect={exportJson}>
@@ -496,6 +745,74 @@ export default function App() {
           </div>
         </div>
       </header>
+
+      {/* 本地存储状态栏：vault（md + meta.json）；手机上允许换行，避免按钮组撑破 360px */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b bg-muted/20 px-3 py-1.5 text-xs text-muted-foreground md:flex-nowrap md:px-4">
+        <HardDrive className="h-3.5 w-3.5" />
+        <span className="truncate" title={vault.dir || '尚未选择笔记目录'}>
+          {vault.active
+            ? `笔记目录：${vault.dir}（每篇一个 .md + meta.json 索引）`
+            : vault.dir
+              ? !hydrated ? `正在读取笔记目录：${vault.dir}` : `笔记目录不可用：${vault.dir} · 暂时用浏览器本地存储`
+              : vaultSupported()
+                ? isDevApp()
+                  ? '开发版：尚未选择笔记目录（与正式版隔离）· 当前用浏览器本地存储（localStorage）'
+                  : '尚未选择笔记目录 · 当前用浏览器本地存储（localStorage）'
+                : '浏览器版 · 笔记存在浏览器本地存储（localStorage）'}
+        </span>
+        {vault.loading && <span className="shrink-0" role="status">
+          {vault.loading.total ? `文献加载中 ${vault.loading.loaded}/${vault.loading.total}` : '检查笔记目录中…'}
+        </span>}
+        {vault.conflicts > 0 && <div className="flex shrink-0 items-center gap-2" role="alert">
+          <span>{vault.conflicts} 篇笔记存在文件冲突，写盘已暂停</span>
+          <Button size="sm" variant="outline" onClick={() => {
+            if (window.confirm('采用磁盘中的版本会替换这些笔记尚未保存的本地编辑。继续？')) api.resolveVaultConflicts('disk')
+          }}>采用磁盘版本</Button>
+          <Button size="sm" variant="outline" onClick={() => {
+            if (window.confirm('保留本地编辑会覆盖这些笔记在磁盘上的外部修改。继续？')) api.resolveVaultConflicts('local')
+          }}>保留本地编辑</Button>
+        </div>}
+        {vault.active && vault.saving && <span className="shrink-0">写入中…</span>}
+        {vault.active && !vault.saving && vault.savedAt && (
+          <span className="shrink-0">已写入 {new Date(vault.savedAt).toLocaleTimeString()}</span>
+        )}
+        {vault.externalAt && <span className="shrink-0">已跟随目录改动 {new Date(vault.externalAt).toLocaleTimeString()}</span>}
+        {vault.unmanaged > 0 && (
+          <span className="shrink-0" title="这些 md 不在 meta.json 索引里，本应用不会读取、修改或删除它们">
+            目录中另有 {vault.unmanaged} 个未纳管 md
+          </span>
+        )}
+        {vault.error && <span className="shrink-0 text-destructive">{vault.error}</span>}
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          <label
+            className="flex min-h-11 items-center gap-2 md:min-h-0"
+            title="开启后每 3 秒检查一次目录：在 Obsidian/编辑器里的改动会自动进到应用"
+          >
+            <span>跟随目录改动</span>
+            <Switch
+              checked={api.watchVault}
+              onCheckedChange={api.setWatchVault}
+              disabled={!vault.active}
+              aria-label="跟随目录改动"
+            />
+          </label>
+          <Button variant="outline" size="sm" disabled={!vault.active} onClick={() => void api.flushVault()}>
+            写入目录
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => void pickVault()}>
+            选择目录
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            title="在文件管理器里打开笔记目录"
+            disabled={!vault.active}
+            onClick={() => void openVaultDir(vault.dir).then((err) => err && toast.error(err))}
+          >
+            <FolderOpen className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
 
       {/* 同步状态栏 */}
       <div className="flex items-center gap-3 border-b bg-muted/20 px-4 py-1.5 text-xs text-muted-foreground">
@@ -521,9 +838,8 @@ export default function App() {
         {!syncing && lastSyncAt && <span>已同步 {new Date(lastSyncAt).toLocaleTimeString()}</span>}
       </div>
 
-      <div className="relative flex min-h-0 flex-1">
-        {/* 笔记列表：桌面是常驻侧栏；手机改为覆盖在正文之上的抽屉，
-            这样正文能拿到完整的手机宽度（256px 侧栏 + 360px 屏幕放不下） */}
+      <div className="flex min-h-0 flex-1">
+        {/* 左侧：笔记列表（可整栏折叠） */}
         {listOpen && (
           <>
             {/* 手机抽屉遮罩：点一下关闭列表 */}
@@ -553,7 +869,7 @@ export default function App() {
             </Button>
             <Tabs value={effectiveView} onValueChange={(v) => setView(v as View)} className="min-w-0">
               <TabsList>
-                {/* 手机：标签只留图标，避免三个文字标签把主区最小宽度撑到约 228px */}
+                {/* 手机：标签只留图标，避免文字标签把主区最小宽度撑破 */}
                 <TabsTrigger value="notes" className="px-1.5 md:px-2">
                   <NotebookText className="h-4 w-4 md:mr-1.5" />
                   <span className="hidden md:inline">笔记</span>
@@ -567,6 +883,10 @@ export default function App() {
                   <Columns2 className="h-4 w-4 md:mr-1.5" />
                   <span className="hidden md:inline">并列</span>
                 </TabsTrigger>
+                <TabsTrigger value="literature" className="px-1.5 md:px-2">
+                  <BookOpen className="h-4 w-4 md:mr-1.5" />
+                  <span className="hidden md:inline">文献</span>
+                </TabsTrigger>
               </TabsList>
             </Tabs>
             {effectiveView !== 'notes' && (
@@ -576,29 +896,48 @@ export default function App() {
             )}
           </div>
 
+          <Suspense fallback={<div className="p-4 text-sm text-muted-foreground" role="status">正在打开视图…</div>}>
           {effectiveView === 'notes' ? (
-            active ? (
+            active && hydrated ? (
               <div className="min-h-0 flex-1">{editorFor(active, true)}</div>
             ) : (
               <div className="flex flex-1 items-center justify-center text-muted-foreground">
-                <Button onClick={() => createNote()}>新建第一篇笔记</Button>
+                <Button disabled={!hydrated} onClick={() => createNote()}>{hydrated ? '新建第一篇笔记' : '正在读取笔记目录…'}</Button>
               </div>
             )
+          ) : view === 'literature' ? (
+            <LiteratureView notes={notes} onOpenNote={openNote} onImport={importLiterature} onApplySync={applyZoteroSync} />
           ) : effectiveView === 'graph' ? (
             <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 xl:flex-row">
               {filterPanel}
               <div className="min-w-0 flex-1">
-                <GraphView notes={notes} onOpenNote={openNote} filters={filters} focusId={focusId} onFocusChange={setFocusId} />
+                <GraphView
+                  notes={notes}
+                  onOpenNote={openNote}
+                  filters={filters}
+                  focusId={focusId}
+                  onFocusChange={setFocusId}
+                  physics={physics}
+                  onPhysicsChange={setPhysics}
+                />
               </div>
             </div>
           ) : (
-            /* 并列：手机上改为上下堆叠，「并列」标签本身也在手机端隐藏（见上） */
+            /* 并列：手机上改为上下堆叠（「并列」标签本身也在手机端隐藏，见上） */
             <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 md:flex-row">
               <div className="min-h-0 min-w-0 flex-1 md:h-auto">
-                <GraphView notes={notes} onOpenNote={openNote} filters={filters} focusId={focusId} onFocusChange={setFocusId} />
+                <GraphView
+                  notes={notes}
+                  onOpenNote={openNote}
+                  filters={filters}
+                  focusId={focusId}
+                  onFocusChange={setFocusId}
+                  physics={physics}
+                  onPhysicsChange={setPhysics}
+                />
               </div>
               <div className="min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border bg-card">
-                {active ? (
+                {active && hydrated ? (
                   editorFor(active, false)
                 ) : (
                   <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
@@ -608,6 +947,7 @@ export default function App() {
               </div>
             </div>
           )}
+          </Suspense>
         </main>
       </div>
 
@@ -622,6 +962,32 @@ export default function App() {
           onApply={applyConflict}
         />
       )}
+
+      {typeMove && (
+        <FolderMoveDialog
+          note={typeMove.note}
+          to={typeMove.to}
+          onCancel={() => setTypeMove(null)}
+          onConfirm={() => {
+            api.updateNote(typeMove.note.id, typeMove.patch)
+            toast.success(`已迁移到「${NOTE_TYPE_META[typeMove.to].label}」文件夹`)
+            setTypeMove(null)
+          }}
+        />
+      )}
+
+      {aiOpen && <Suspense fallback={null}><AiPanel
+        open={aiOpen}
+        onClose={() => {
+          setAiOpen(false)
+          setAiTask(null)
+        }}
+        notes={notes}
+        ensureSnapshot={ensureAiSnapshot}
+        onApply={applyAiOps}
+        onGoLiterature={() => setView('literature')}
+        initialTask={aiTask}
+      /></Suspense>}
 
       <Toaster position="bottom-right" richColors />
     </div>
