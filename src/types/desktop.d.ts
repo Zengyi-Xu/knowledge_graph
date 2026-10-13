@@ -52,6 +52,8 @@ declare global {
       removeAttachment: (dir: string, rel: string) => Promise<{ name: string }>
       /** 用系统默认程序打开附件（如 PDF 阅读器）；成功返回 { error: null } */
       openAttachmentExternal: (dir: string, rel: string) => Promise<{ error: string | null }>
+      /** 写富文本剪贴板（CF_RTF）：Word 域代码引用需要；浏览器写不了 text/rtf */
+      writeClipboardRtf: (rtf: string, text: string) => Promise<{ error: string | null }>
       /** 原生打开对话框选 PDF；返回文件名与二进制；取消返回 null */
       chooseOpenAttachment: () => Promise<{
         filePath: string

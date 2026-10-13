@@ -46,6 +46,12 @@ DOI/arXiv 导入与手动 AI 调用沿用原功能的网络请求。普通笔记
 编辑器始终直接保存 Markdown 原文，双链、任务、表格、代码块及未识别语法不会经过富文本转换。
 支持格式工具栏、双链模板插入、撤销/重做、中文组合输入；`[[双链]]` 在编辑器内按字面文本保留，点击跳转请用经典模式/预览。
 
+## Word 引用（域代码）
+
+文献笔记「复制引用 → 插入 Word 引用（域代码）」会写入真正的 CF_RTF 域（`ADDIN ZOTERO_ITEM`，Zotero 兼容），粘进 Word 是可刷新的真域。
+浏览器自身写不了 `text/rtf`：本地网页端由本机服务代写剪贴板（`/api/local` 的 `clipboard:write-rtf`，PowerShell `SetDataObject`，载荷走临时文件），桌面版走 Electron 原生剪贴板，Safari 走原生剪贴板 API，其余环境降级为纯文本并提示。
+回归：`npm run verify:word`（Windows + Word，真机粘贴断言 fields=1）；`npm run test:lit` 覆盖域代码格式（`\fldinst` 指令不得用花括号包裹，否则 Word 会退化成字面文本）。
+
 ## 验证命令
 
 ```powershell
@@ -56,6 +62,7 @@ npm run test:web
 npm run test:startup
 npm run test:startup-e2e
 npm run test:wysiwyg-e2e
+npm run verify:word
 ```
 
 文件 I/O 性能测试与隔离浏览器测试不能代表所有百度同步盘占位文件或 Defender 扫描条件。

@@ -69,5 +69,7 @@
     openZoteroPdf: (_dbPath, zoteroKey) => call('zotero:open-pdf', { zoteroKey }),
     aiStatus: (configPath) => call('ai:status', { configPath }),
     aiComplete: (payload) => call('ai:complete', payload),
+    // 浏览器写不了 text/rtf；由本机服务代写剪贴板，Word 才能拿到真域
+    writeClipboardRtf: (rtf, text) => call('clipboard:write-rtf', { rtf, text }),
   }
 })()

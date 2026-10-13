@@ -26,6 +26,7 @@
     "test:zotero-import": "esbuild scripts/zotero-import-selftest.ts --bundle --platform=node --format=cjs --target=node20 --alias:@=./src --outfile=.tmp-vault-test/zotero-import-selftest.cjs && node .tmp-vault-test/zotero-import-selftest.cjs",
     "test:zotero-e2e": "npm run zotero:build && node scripts/zotero-import-e2e.mjs",
     "test:wysiwyg-e2e": "node scripts/wysiwyg-e2e.mjs",
+    "verify:word": "node scripts/word-field-verify.mjs",
     "test:startup": "esbuild scripts/perf-startup.ts --bundle --platform=node --format=cjs --target=node20 --alias:@=./src --outfile=.tmp-vault-test/perf.cjs && node .tmp-vault-test/perf.cjs",
     "test:startup-e2e": "node scripts/startup-e2e.mjs",
     "desktop:dev": "npm run build:dev && electron .",

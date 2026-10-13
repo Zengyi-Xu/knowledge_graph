@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } = require('electron')
+const { app, BrowserWindow, clipboard, dialog, ipcMain, net, protocol, shell } = require('electron')
 const fs = require('node:fs/promises')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
@@ -316,6 +316,15 @@ function registerAttachmentHandlers() {
       throw new Error('Invalid attachments remove payload')
     }
     return attachmentFs.remove(payload.dir, payload.rel)
+  })
+
+  // 写富文本剪贴板（CF_RTF）：Word 才能拿到真域；浏览器自身写不了 text/rtf
+  ipcMain.handle('clipboard:write-rtf', async (_event, payload) => {
+    if (!payload || typeof payload.rtf !== 'string' || typeof payload.text !== 'string') {
+      throw new Error('Invalid clipboard payload')
+    }
+    clipboard.write({ rtf: payload.rtf, text: payload.text })
+    return { error: null }
   })
 
   // 用系统默认程序打开附件（如 PDF 阅读器）；返回 { error } 供渲染进程提示

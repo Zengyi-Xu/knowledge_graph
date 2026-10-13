@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('knowledgeGraphDesktop', {
   writeAttachment: (dir, rel, data) => ipcRenderer.invoke('attachments:write', { dir, rel, data }),
   removeAttachment: (dir, rel) => ipcRenderer.invoke('attachments:remove', { dir, rel }),
   openAttachmentExternal: (dir, rel) => ipcRenderer.invoke('attachments:open-external', { dir, rel }),
+  writeClipboardRtf: (rtf, text) => ipcRenderer.invoke('clipboard:write-rtf', { rtf, text }),
   chooseOpenAttachment: () => ipcRenderer.invoke('attachments:choose-open'),
   chooseSaveAttachment: (defaultName) => ipcRenderer.invoke('attachments:choose-save', { defaultName }),
 

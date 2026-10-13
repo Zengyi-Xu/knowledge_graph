@@ -282,20 +282,22 @@ async function main() {
     // 起点取「 ADDIN ZOTERO_ITEM 」之后（含被转义的 \{ 与 \}），整体反转义
     const marker = ' ADDIN ZOTERO_ITEM '
     const start = rtf.indexOf(marker) + marker.length
-    const end = rtf.indexOf('\\} }{\\fldrslt', start) + 2 // 含 JSON 末尾被转义的 \}
+    const end = rtf.indexOf('\\}}{\\fldrslt', start) + 2 // 含 JSON 末尾被转义的 \}
     const body = rtf.slice(start, end).replace(/\\(.)/gs, '$1') // \{ → {、\} → }、\\ → \
     return JSON.parse(body)
   }
   await check('域指令含合法 JSON（citationItems/properties/schema）', () => {
     const rtf = buildCitationFieldRtf([rtfItem], 'apa')
-    assert.ok(rtf.startsWith('{\\field{\\*\\fldinst{ ADDIN ZOTERO_ITEM '), rtf.slice(0, 60))
+    // 指令不能带花括号：{\*\fldinst{ … }} 在 Word 里会退化成字面文本（2026-10-13 实测）
+    assert.ok(rtf.startsWith('{\\field{\\*\\fldinst ADDIN ZOTERO_ITEM '), rtf.slice(0, 60))
+    assert.ok(!rtf.includes('\\fldinst{'), 'fldinst 指令不得用花括号包裹')
     const payload = extractPayload(rtf)
     assert.equal(payload.citationItems.length, 1)
     assert.equal(payload.citationItems[0].id, 'zhang2024silicon')
     assert.equal(payload.citationItems[0].itemData.title, 'Silicon photonics for quantum computing')
     assert.equal(payload.properties.formattedCitation, '(Zhang & Li, 2024)')
     assert.ok(payload.schema.startsWith('https://github.com/zotero/zotero/schema/citation.json'))
-    assert.ok(rtf.includes('{\\fldrslt (Zhang & Li, 2024)}}}'))
+    assert.ok(rtf.includes('{\\fldrslt (Zhang & Li, 2024)}}'))
   })
   await check('GB 数字标记在 fldrslt 里用上标', () => {
     const rtf = buildCitationFieldRtf([rtfItem], 'gb')

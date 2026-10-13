@@ -47,8 +47,10 @@ function displayToRtf(displayText: string, styleId: CitationStyleId): string {
 
 /**
  * 生成单条引用的 RTF 域代码：
- *   {\field{\*\fldinst{ ADDIN ZOTERO_ITEM {json} }{\fldrslt displayText}}}
+ *   {\field{\*\fldinst ADDIN ZOTERO_ITEM {json}}{\fldrslt displayText}}
  * citationItems 的 id 用 citekey，itemData 是完整 CSL-JSON。
+ * 注意：`\fldinst` 后的指令必须是**不带花括号**的空格分隔文本
+ * （`{\*\fldinst{ … }}` 在 Word 里会退化成字面文本，实测 2026-10-13）。
  */
 export function buildCitationFieldRtf(
   cslItems: CslItem[],
@@ -62,7 +64,12 @@ export function buildCitationFieldRtf(
     schema: 'https://github.com/zotero/zotero/schema/citation.json# 0.1',
   }
   const json = JSON.stringify(payload)
-  return `{\\field{\\*\\fldinst{ ADDIN ZOTERO_ITEM ${rtfEscape(json)} }{\\fldrslt ${displayToRtf(display, styleId)}}}}`
+  return `{\\field{\\*\\fldinst ADDIN ZOTERO_ITEM ${rtfEscape(json)}}{\\fldrslt ${displayToRtf(display, styleId)}}}`
+}
+
+/** 把域代码/正文包成完整 RTF 文档（剪贴板 CF_RTF 需要完整文档头） */
+export function wrapRtfDocument(body: string): string {
+  return `{\\rtf1\\ansi\\ansicpg936\\deff0{\\fonttbl{\\f0\\fnil Arial;}}\\f0\\fs24 ${body}\\par}`
 }
 
 /** 参考文献表的 RTF（每条一段；GB/T 7714 的 [1] [2] 编号由样式本身输出） */
@@ -94,19 +101,42 @@ export function buildClipboardParts(
 }
 
 async function writeRtfClipboard(parts: ClipboardParts, successMsg: string): Promise<void> {
-  try {
-    await navigator.clipboard.write([
-      new ClipboardItem({
-        'text/rtf': new Blob([parts.rtf], { type: 'text/rtf' }),
-        'text/plain': new Blob([parts.plain], { type: 'text/plain' }),
-      }),
-    ])
-    toast.success(successMsg)
-  } catch {
-    // 权限不足 / 浏览器不支持富文本剪贴板 → 回退纯文本
-    await navigator.clipboard.writeText(parts.plain)
-    toast.info('当前为纯文本引用（当前环境不支持富文本剪贴板）')
+  const rtf = wrapRtfDocument(parts.rtf)
+
+  // 1) 桌面版走 Electron 原生剪贴板、本地网页端走本机服务代写：两者都是同一个桥接方法
+  //    （浏览器自身写不了 text/rtf，只有这两条通道能产出 Word 真域）
+  const desk = window.knowledgeGraphDesktop
+  if (desk?.writeClipboardRtf) {
+    try {
+      const result = await desk.writeClipboardRtf(rtf, parts.plain)
+      if (!result?.error) {
+        toast.success(successMsg)
+        return
+      }
+    } catch {
+      /* 落到下一通道 */
+    }
   }
+
+  // 2) 浏览器原生富文本（Safari 等支持 text/rtf 的环境）
+  try {
+    if (typeof ClipboardItem !== 'undefined' && ClipboardItem.supports?.('text/rtf')) {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          'text/rtf': new Blob([rtf], { type: 'text/rtf' }),
+          'text/plain': new Blob([parts.plain], { type: 'text/plain' }),
+        }),
+      ])
+      toast.success(successMsg)
+      return
+    }
+  } catch {
+    /* 落到纯文本兜底 */
+  }
+
+  // 3) 纯文本兜底
+  await navigator.clipboard.writeText(parts.plain)
+  toast.info('当前为纯文本引用（当前环境不支持富文本剪贴板）')
 }
 
 /** 「插入 Word 引用」：复制 RTF 域代码 + 纯文本双格式 */

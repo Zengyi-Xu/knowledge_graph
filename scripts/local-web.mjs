@@ -1,5 +1,6 @@
 import http from 'node:http'
 import fs from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { createRequire } from 'node:module'
@@ -20,6 +21,40 @@ function systemOpener(filePath) {
     ? ['cmd.exe', ['/c', 'start', '', filePath]]
     : [process.platform === 'darwin' ? 'open' : 'xdg-open', [filePath]]
   spawn(command, args, { windowsHide: true, detached: true, stdio: 'ignore' }).unref()
+}
+
+/**
+ * 由本机服务代写富文本剪贴板（CF_RTF）：浏览器写不了 text/rtf，Word 域代码引用需要它。
+ * 载荷走临时文件（不拼接进命令行），PowerShell 脚本文件内容固定，避免注入。
+ */
+async function writeClipboardRtf(rtf, text) {
+  if (typeof rtf !== 'string' || typeof text !== 'string') throw new Error('无效的剪贴板内容')
+  if (process.platform !== 'win32') throw new Error('当前平台不支持代写富文本剪贴板')
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'kg-clip-'))
+  const rtfFile = path.join(dir, 'payload.rtf')
+  const txtFile = path.join(dir, 'payload.txt')
+  const psFile = path.join(dir, 'set-clipboard.ps1')
+  await fs.writeFile(rtfFile, rtf, 'utf8')
+  await fs.writeFile(txtFile, text, 'utf8')
+  const quote = (p) => `'${p.replace(/'/g, "''")}'`
+  await fs.writeFile(psFile, [
+    'Add-Type -AssemblyName System.Windows.Forms',
+    `$rtf = [System.IO.File]::ReadAllText(${quote(rtfFile)}, [System.Text.Encoding]::UTF8)`,
+    `$text = [System.IO.File]::ReadAllText(${quote(txtFile)}, [System.Text.Encoding]::UTF8)`,
+    "$do = New-Object System.Windows.Forms.DataObject",
+    "$bytes = [System.Text.Encoding]::ASCII.GetBytes($rtf)",
+    "$ms = New-Object System.IO.MemoryStream",
+    "$ms.Write($bytes, 0, $bytes.Length); $ms.Position = 0",
+    "$do.SetData('Rich Text Format', $false, $ms)",
+    "$do.SetData([System.Windows.Forms.DataFormats]::UnicodeText, $true, $text)",
+    "[System.Windows.Forms.Clipboard]::SetDataObject($do, $true)",
+  ].join('\n'), 'utf8')
+  await new Promise((resolve, reject) => {
+    const child = spawn('powershell.exe', ['-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', psFile], { windowsHide: true })
+    child.on('error', reject)
+    child.on('exit', (code) => code === 0 ? resolve() : reject(new Error(`写剪贴板失败（PowerShell 退出码 ${code}）`)))
+  }).finally(() => { fs.rm(dir, { recursive: true, force: true }).catch(() => {}) })
+  return { error: null }
 }
 
 export async function createLocalServer({ port = 4173, vault = '', zoteroDb = '', dist = path.join(root, 'dist'), opener } = {}) {
@@ -108,6 +143,7 @@ export async function createLocalServer({ port = 4173, vault = '', zoteroDb = ''
       }
       case 'ai:status': return require('../electron/aiGateway.cjs').aiStatus(p.configPath)
       case 'ai:complete': return require('../electron/aiGateway.cjs').aiComplete(p)
+      case 'clipboard:write-rtf': return writeClipboardRtf(p.rtf, p.text)
       default: throw new Error('不支持的本地操作')
     }
   }
