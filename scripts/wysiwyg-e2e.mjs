@@ -62,6 +62,20 @@ try {
   check('标题/粗斜删除线/任务列表/引用/表格/代码/分割线/链接图片渲染', await evaluate(`(() => { const c=${content}; return ['h1','strong','em','s','input[type=checkbox]','blockquote','table','pre code','hr','a','img'].every(q=>c.querySelector(q)) })()`))
   check('双链按字面文本保留', await evaluate(`${content}.textContent.includes('[[已有笔记]]')`))
   check('双链渲染为样式化标记', await wait(`${content}.querySelectorAll('.kg-wiki').length >= 2`))
+  check('双链括号隐藏（与经典一致）', await evaluate(`(() => {
+    const w = ${content}.querySelector('.kg-wiki')
+    const bracket = w?.querySelector('.kg-wiki-bracket')
+    return w?.dataset.title === '已有笔记' && w?.dataset.found === 'true' &&
+      getComputedStyle(bracket).fontSize === '0px' && w.textContent.startsWith('[[')
+  })()`))
+  check('不存在的双链显示问号且配色区分', await evaluate(`(() => {
+    const miss = [...${content}.querySelectorAll('.kg-wiki')].find(w => w.dataset.found === 'false')
+    const hit = [...${content}.querySelectorAll('.kg-wiki')].find(w => w.dataset.found === 'true')
+    if (!miss || !hit) return false
+    const color = (el) => getComputedStyle(el).color
+    return miss.querySelector('.kg-wiki-missing')?.textContent === '?' &&
+      !hit.querySelector('.kg-wiki-missing') && color(miss) !== color(hit)
+  })()`))
   await act(`${content}.querySelector('.kg-wiki').click()`)
   check('双链点击跳转已有笔记', await evaluate(`fixture.events.includes('open:existing')`))
   await act(`${content}.querySelectorAll('.kg-wiki')[1].click()`)

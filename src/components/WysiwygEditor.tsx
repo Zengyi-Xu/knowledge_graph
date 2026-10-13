@@ -87,11 +87,13 @@ function scopeCss(css: string, scope: string): string {
 const WIKI_RE = /\[\[([^[\]]+)\]\]/
 
 /**
- * 把正文里的 [[双链]] 文本包成样式化 span，与经典预览的视觉一致。
+ * 把正文里的 [[双链]] 文本包成样式化 span，与经典预览的视觉一致：
+ * 隐藏 `[[ ]]` 括号、按笔记是否存在决定配色、不存在的补一个「?」。
  * 跳过代码块（`.vditor-wysiwyg__pre` / `[data-type=code-block]` 是 Vditor 保存的源码）与预览块；
  * 注意不能连普通 `<pre>` 一起排除：Vditor 的渲染块整体就装在 `pre.vditor-reset` 里。
- * 只包纯文本节点，不改动任何 Markdown 语义；收集后统一替换，避免迭代器失效。 */
-function decorateWikilinks(root: HTMLElement) {
+ * 只包纯文本节点，不改动任何 Markdown 语义（括号仍是 DOM 文本，序列化不受影响）。 */
+function decorateWikilinks(root: HTMLElement, notes: Note[]) {
+  const titles = new Set(notes.map((n) => n.title.toLowerCase()))
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
   const targets: Text[] = []
   let node = walker.nextNode()
@@ -101,7 +103,7 @@ function decorateWikilinks(root: HTMLElement) {
     const value = text.nodeValue ?? ''
     if (
       el && !el.closest('code, .vditor-wysiwyg__pre, [data-type=code-block], .vditor-wysiwyg__preview') &&
-      !el.classList.contains('kg-wiki') &&
+      !el.closest('.kg-wiki') &&
       value.includes('[[') && WIKI_RE.test(value)
     ) {
       targets.push(text)
@@ -116,9 +118,27 @@ function decorateWikilinks(root: HTMLElement) {
       const m = rest.match(WIKI_RE)
       if (!m || m.index === undefined) break
       if (m.index > 0) frag.appendChild(document.createTextNode(rest.slice(0, m.index)))
+      const title = m[1]
+      const found = titles.has(title.toLowerCase())
       const span = document.createElement('span')
       span.className = 'kg-wiki'
-      span.textContent = m[0]
+      span.dataset.title = title
+      span.dataset.found = String(found)
+      span.title = found ? '打开笔记' : '点击创建这篇笔记'
+      const open = document.createElement('span')
+      open.className = 'kg-wiki-bracket'
+      open.textContent = '[['
+      const label = document.createTextNode(title)
+      const close = document.createElement('span')
+      close.className = 'kg-wiki-bracket'
+      close.textContent = ']]'
+      span.append(open, label, close)
+      if (!found) {
+        const missing = document.createElement('span')
+        missing.className = 'kg-wiki-missing'
+        missing.textContent = '?'
+        span.appendChild(missing)
+      }
       frag.appendChild(span)
       rest = rest.slice(m.index + m[0].length)
     }
@@ -142,7 +162,7 @@ export default function WysiwygEditor({ value, onChange, onOpenNote, onCreateNot
 
   const decorate = () => {
     const root = hostRef.current?.querySelector('.vditor-wysiwyg')
-    if (root) decorateWikilinks(root as HTMLElement)
+    if (root) decorateWikilinks(root as HTMLElement, navRef.current.notes)
   }
 
   useEffect(() => {
@@ -217,7 +237,6 @@ export default function WysiwygEditor({ value, onChange, onOpenNote, onCreateNot
     observer.observe(root, { childList: true, subtree: true })
     decorate()
     return () => observer.disconnect()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready])
 
   // 阅读主题 → Vditor 内容主题；夜读类主题或应用暗黑模式下整个编辑器（外壳+内容）转深色
@@ -237,15 +256,15 @@ export default function WysiwygEditor({ value, onChange, onOpenNote, onCreateNot
     return () => style.remove()
   }, [theme, customCss])
 
-  // 双链点击 = 应用内跳转（与经典预览一致）：已有笔记直接打开，否则按标题新建
+  // 双链点击 = 应用内跳转（与经典预览一致）：已有笔记直接打开（含自身，等于无操作），否则按标题新建
   const handleHostClick = (e: React.MouseEvent) => {
-    const span = (e.target as HTMLElement).closest?.('.kg-wiki')
+    const span = (e.target as HTMLElement).closest?.('.kg-wiki') as HTMLElement | null
     if (!span) return
     e.preventDefault()
-    const title = (span.textContent ?? '').replace(/^\[\[|\]\]$/g, '')
+    const title = span.dataset.title ?? (span.textContent ?? '').replace(/^\[\[|\]\]\??$/g, '')
     if (!title) return
-    const { onOpenNote: open, onCreateNote: create, noteId: self, notes: all } = navRef.current
-    const found = all.find((n) => n.id !== self && n.title === title)
+    const { onOpenNote: open, onCreateNote: create, notes: all } = navRef.current
+    const found = all.find((n) => n.title === title)
     if (found) open(found.id)
     else create(title)
   }

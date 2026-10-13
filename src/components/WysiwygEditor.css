@@ -69,14 +69,20 @@
   color: var(--md-link, #4f8cff);
 }
 
-/* 双链：与经典预览一致的视觉（主题色 + 点下划线），点击跳转在组件里处理 */
+/* 双链：与经典预览一致——隐藏 [[ ]] 括号，按笔记是否存在决定配色，点击跳转在组件里处理 */
 .kg-vditor .vditor-reset .kg-wiki {
   text-decoration: underline dotted;
-  text-underline-offset: 3px;
+  text-underline-offset: 2px;
+  border-radius: 4px;
+  padding: 0 2px;
   cursor: pointer;
 }
-.kg-vditor .vditor:not(.vditor--dark) .vditor-reset .kg-wiki { color: #087e84; }
-.kg-vditor .vditor--dark .vditor-reset .kg-wiki { color: #9bd5cb; }
+.kg-vditor .vditor-reset .kg-wiki[data-found='true'] { color: hsl(var(--primary)); }
+.kg-vditor .vditor-reset .kg-wiki[data-found='false'] { color: hsl(var(--muted-foreground)); }
+.kg-vditor .vditor-reset .kg-wiki[data-found='true']:hover { background-color: hsl(var(--primary) / 0.1); }
+.kg-vditor .vditor-reset .kg-wiki[data-found='false']:hover { background-color: hsl(var(--muted)); }
+.kg-vditor .vditor-reset .kg-wiki-bracket { font-size: 0; }
+.kg-vditor .vditor-reset .kg-wiki-missing { margin-left: 2px; opacity: 0.6; }
 
 /* 悬停块时出现的块操作条（折叠/删除/设锚点 ID）会遮挡正文、删除易误触，隐藏 */
 .kg-vditor .vditor-wysiwyg .vditor-panel {
