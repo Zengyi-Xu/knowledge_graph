@@ -14,9 +14,10 @@ const testRoot = path.join(sandbox, '中文 分享测试')
 fs.mkdirSync(testRoot)
 const dir = path.join(testRoot, name)
 if (archiveIndex >= 0) {
-  const result = spawnSync(path.join(root, 'node_modules/7zip-bin/win/x64/7za.exe'), [
-    'x', '-y', '-bso0', '-bsp0', `-o${testRoot}`, path.resolve(process.argv[archiveIndex + 1]),
-  ], { encoding: 'utf8' })
+  const result = spawnSync(path.join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe'), [
+    '-NoProfile', '-NonInteractive', '-Command',
+    'Expand-Archive -LiteralPath $env:KG_ZIP_SOURCE -DestinationPath $env:KG_ZIP_DEST -ErrorAction Stop',
+  ], { encoding: 'utf8', env: { ...process.env, KG_ZIP_SOURCE: path.resolve(process.argv[archiveIndex + 1]), KG_ZIP_DEST: testRoot } })
   assert.equal(result.status, 0, result.stderr)
 } else {
   fs.cpSync(path.join(root, 'release', `web-v${pkg.version}`, name), dir, { recursive: true })

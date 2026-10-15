@@ -84,9 +84,10 @@ if (!args.includes('--stage-only')) {
   }, null, 2) + '\n')
   const archive = path.join(output, `${name}.zip`)
   if (fs.existsSync(archive)) throw new Error(`ZIP 已存在，拒绝追加或覆盖：${archive}`)
-  execFileSync(path.join(root, 'node_modules', '7zip-bin', 'win', 'x64', '7za.exe'), [
-    'a', '-tzip', '-mx=5', '-mcu=on', '-bso0', '-bsp0', archive, name,
-  ], { cwd: output, stdio: 'inherit' })
+  execFileSync(path.join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe'), [
+    '-NoProfile', '-NonInteractive', '-Command',
+    'Compress-Archive -LiteralPath $env:KG_ZIP_SOURCE -DestinationPath $env:KG_ZIP_DEST -CompressionLevel Optimal -ErrorAction Stop',
+  ], { cwd: output, stdio: 'inherit', env: { ...process.env, KG_ZIP_SOURCE: stage, KG_ZIP_DEST: archive } })
   const hash = sha256(archive)
   fs.writeFileSync(path.join(output, 'SHA256SUMS.txt'), `${hash}  ${path.basename(archive)}\n`)
   console.log(`ZIP：${archive}\n大小：${(fs.statSync(archive).size / 1024 / 1024).toFixed(1)} MiB\nSHA256：${hash}`)
