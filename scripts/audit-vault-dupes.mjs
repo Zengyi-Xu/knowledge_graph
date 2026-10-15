@@ -2,7 +2,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
-const dir = process.argv[2] ?? 'D:/BaiduSyncdisk/Bibliotx/Vault/文献'
+const dir = process.argv[2]
+if (!dir) throw new Error('用法：node scripts/audit-vault-dupes.mjs <vault/文献>')
 const files = fs.readdirSync(dir).filter((f) => f.endsWith('.md'))
 
 const readField = (text, field) => {

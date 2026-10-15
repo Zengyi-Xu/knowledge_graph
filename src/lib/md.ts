@@ -1,3 +1,4 @@
+// FROZEN(md-parser) 全冻结：内部实现是黑箱，不要读也不要改 → 契约见 docs/FROZEN.md
 /**
  * Markdown 解析器（纯函数，不依赖 React / 浏览器）—— 产出 AST，由 Markdown.tsx 渲染。
  *

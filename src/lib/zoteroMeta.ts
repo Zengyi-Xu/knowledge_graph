@@ -1,3 +1,4 @@
+// FROZEN(zotero-rules) 契约冻结：导出名与 AGENTS.md「文献数据模型」不变量已锁定，内部可改 —— 改完跑 npm run test:frozen（docs/FROZEN.md）
 /**
  * Zotero 条目 → 笔记字段的公共规则（纯函数，批量导入脚本与 UI 增量同步共用）。
  * 「未分类」只在界面按“没有真实分类”动态显示，不写成永久分类或标签。

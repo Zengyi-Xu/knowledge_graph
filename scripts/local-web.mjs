@@ -15,6 +15,7 @@ const zoteroFs = require('../electron/zoteroFs.cjs')
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.json': 'application/json', '.mjs': 'text/javascript' }
 const canonical = (p) => process.platform === 'win32' ? path.resolve(p).toLowerCase() : path.resolve(p)
+const MAX_INLINE_PDF_BYTES = 150 * 1024 * 1024
 
 /**
  * 默认用系统关联程序打开文件。Windows 走 explorer.exe、macOS 走 open、Linux 走 xdg-open：
@@ -111,6 +112,22 @@ export async function createLocalServer({ port = 4173, vault = '', zoteroDb = ''
     locks.set(key, next)
     try { return await next } finally { if (locks.get(key) === next) locks.delete(key) }
   }
+  const assertLocalPdf = (filePath) => {
+    const target = typeof filePath === 'string' ? path.resolve(filePath) : ''
+    if (!target || path.extname(target).toLowerCase() !== '.pdf') throw new Error('只允许读取本地 PDF 文件')
+    const key = canonical(target)
+    const inVault = [...vaults].some((dir) => key.startsWith(dir + path.sep))
+    const inRoot = allowedPdfRoots.some((dir) => key.startsWith(dir + path.sep))
+    if (!inVault && !inRoot) throw new Error('该 PDF 不在允许的目录里：请用 --pdf-root 指定它的上级目录后重启本地网页端')
+    if (!fsSync.existsSync(target)) throw new Error('文件不存在（可能已移动或改名）')
+    return target
+  }
+  const readPdfPayload = async (filePath) => {
+    const stat = await fs.stat(filePath)
+    if (!stat.isFile()) throw new Error('PDF 文件不存在')
+    if (stat.size > MAX_INLINE_PDF_BYTES) throw new Error('PDF 超过 150 MB，请改用系统阅读器打开')
+    return { data: (await fs.readFile(filePath)).toString('base64'), name: path.basename(filePath), path: filePath }
+  }
   async function dispatch(method, p) {
     switch (method) {
       case 'vault:authorize': {
@@ -159,6 +176,7 @@ export async function createLocalServer({ port = 4173, vault = '', zoteroDb = ''
         openFile(target)
         return { path: target, error: null }
       }
+      case 'file:read-pdf': return readPdfPayload(assertLocalPdf(p.path))
       case 'zotero:select-item': {
         // 在 Zotero 里定位条目；只接受 8 位条目 key，URL 由服务端拼
         const key = typeof p.zoteroKey === 'string' ? p.zoteroKey : ''
@@ -182,6 +200,11 @@ export async function createLocalServer({ port = 4173, vault = '', zoteroDb = ''
         const pdfPath = zoteroFs.resolveZoteroPdf(zoteroDbPath, p.zoteroKey, extraKeys)
         openFile(pdfPath)
         return { path: pdfPath }
+      }
+      case 'zotero:read-pdf': {
+        if (!zoteroDbPath) throw new Error('本地网页端未配置 Zotero 数据库（启动参数 --zotero-db）')
+        const extraKeys = Array.isArray(p.zoteroKeys) ? p.zoteroKeys.filter((k) => typeof k === 'string') : []
+        return readPdfPayload(zoteroFs.resolveZoteroPdf(zoteroDbPath, p.zoteroKey, extraKeys))
       }
       case 'ai:status': return require('../electron/aiGateway.cjs').aiStatus(p.configPath)
       case 'ai:complete': return require('../electron/aiGateway.cjs').aiComplete(p)

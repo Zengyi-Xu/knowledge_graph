@@ -260,15 +260,17 @@ async function main() {
     }, 15000, 400)
     check(
       '界面里的编辑被写进对应的 md 文件',
-      Array.isArray(changedFiles) && changedFiles.length === 1 && changedFiles[0] === first.file,
+      Array.isArray(changedFiles) && changedFiles.length === 1,
       String(changedFiles),
     )
-    const afterEdit = await readVaultFile(first.file)
+    // 当前默认是并列视图，界面选中的第一篇不保证等于 meta 的第一条；以实际改动文件继续验证。
+    const editedFile = changedFiles?.[0] ?? first.file
+    const afterEdit = await readVaultFile(editedFile)
     check('写入是增量且保留 frontmatter', Boolean(afterEdit?.includes(marker) && afterEdit.startsWith('---\n')), afterEdit?.slice(0, 160))
 
     // ---- 外部改动 → 应用跟随 ----
     const externalMarker = `外部改动-${Date.now()}`
-    await fs.writeFile(path.join(vaultDir, first.file), `${afterEdit}\n\n${externalMarker}`, 'utf8')
+    await fs.writeFile(path.join(vaultDir, editedFile), `${afterEdit}\n\n${externalMarker}`, 'utf8')
     // 注意：textarea 的 innerText 不含当前 value，所以要看 value 与渲染区（innerHTML）
     const followed = await waitFor(async () => {
       const r = await cdp.eval(`(() => {

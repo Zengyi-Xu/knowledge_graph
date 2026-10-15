@@ -1,3 +1,4 @@
+// FROZEN(zotero-rules) 契约冻结：导出名与 AGENTS.md「文献数据模型」不变量已锁定，内部可改 —— 改完跑 npm run test:frozen（docs/FROZEN.md）
 /**
  * Zotero → 笔记库的分类/标签同步（纯函数，可单测）。
  * 只做「计划」：比对 Zotero 读出的条目与本地文献笔记，产出待应用的更新，

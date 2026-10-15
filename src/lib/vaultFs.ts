@@ -1,3 +1,4 @@
+// FROZEN(vault-io) 契约冻结：导出名已锁定，内部可改 —— 改完跑 npm run test:frozen（docs/FROZEN.md）
 /**
  * 渲染进程侧的 vault 访问封装：只做能力探测与 IPC 转发，格式语义在 vaultFormat.ts。
  * 浏览器版没有文件系统权限，这里的所有函数都会返回「不支持」，由 useNotes 回退到 localStorage。

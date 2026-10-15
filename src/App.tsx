@@ -49,6 +49,7 @@ import { loadPhysics, savePhysics, type GraphPhysics } from '@/lib/graphPhysics'
 
 const GraphView = lazy(() => import('@/components/GraphView').then((m) => ({ default: m.GraphView })))
 const LiteratureView = lazy(() => import('@/components/LiteratureView').then((m) => ({ default: m.LiteratureView })))
+const PdfReadingWorkspace = lazy(() => import('@/components/PdfReadingWorkspace').then((m) => ({ default: m.PdfReadingWorkspace })))
 const AiPanel = lazy(() => import('@/components/AiPanel').then((m) => ({ default: m.AiPanel })))
 
 type View = 'notes' | 'graph' | 'both' | 'literature'
@@ -82,8 +83,10 @@ export default function App() {
     toast.info('请等待笔记库加载完成，并处理文件冲突后再导入、导出或同步全库')
     return false
   }
-  const [view, setView] = useState<View>('notes')
+  // 启动默认进「并列」视图（图谱 + 笔记同屏），不再默认单栏「笔记」
+  const [view, setView] = useState<View>('both')
   const [activeId, setActiveId] = useState<string | null>(null)
+  const [readingNoteId, setReadingNoteId] = useState<string | null>(null)
   const [focusId, setFocusId] = useState<string | null>(null)
   const [listOpen, setListOpen] = useState(() => readSetting('list-open-v1') !== '0')
   const [filters, setFilters] = useState<Filters>({ types: new Set(), grades: new Set(), tags: new Set(), search: '' })
@@ -101,6 +104,7 @@ export default function App() {
   const [typeMove, setTypeMove] = useState<{ note: Note; to: NoteType; patch: Partial<Note> } | null>(null)
 
   const active = notes.find((n) => n.id === activeId) ?? notes[0] ?? null
+  const readingNote = notes.find((n) => n.id === readingNoteId) ?? null
 
   // ---- 双向同步：基线 + 引用 ----
   const notesRef = useRef(notes)
@@ -830,7 +834,7 @@ export default function App() {
               </div>
             )
           ) : view === 'literature' ? (
-            <LiteratureView notes={notes} onOpenNote={openNote} onImport={importLiterature} onApplySync={applyZoteroSync} />
+            <LiteratureView notes={notes} onOpenNote={openNote} onReadPdf={setReadingNoteId} onImport={importLiterature} onApplySync={applyZoteroSync} />
           ) : view === 'graph' ? (
             <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 xl:flex-row">
               {filterPanel}
@@ -911,6 +915,19 @@ export default function App() {
         onGoLiterature={() => setView('literature')}
         initialTask={aiTask}
       /></Suspense>}
+
+      {readingNote && (
+        <Suspense fallback={<div className="fixed inset-0 z-[80] flex items-center justify-center bg-background text-sm text-muted-foreground">正在打开 PDF 阅读工作台…</div>}>
+          <PdfReadingWorkspace
+            note={readingNote}
+            notes={notes}
+            onChange={(patch) => api.updateNote(readingNote.id, patch)}
+            onClose={() => setReadingNoteId(null)}
+            onOpenNote={openNote}
+            onCreateNote={(title) => { createNote(title) }}
+          />
+        </Suspense>
+      )}
 
       <Toaster position="bottom-right" richColors />
     </div>

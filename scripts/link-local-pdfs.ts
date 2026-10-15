@@ -31,8 +31,12 @@ const argValue = (name: string): string | undefined => {
 }
 const argAll = (name: string): string[] => args.flatMap((value, index) => (value === name && args[index + 1] ? [args[index + 1]] : []))
 
-const vault = path.resolve(argValue('--vault') ?? 'D:/BaiduSyncdisk/Bibliotx/Vault')
-const zoteroDb = argValue('--db') ?? 'D:/BaiduSyncdisk/Bibliotx/Zotero/zotero.sqlite'
+const vaultArg = argValue('--vault')
+if (!vaultArg) throw new Error('请用 --vault <目录> 指定笔记库')
+const vault = path.resolve(vaultArg)
+const zoteroDb = argValue('--db')
+  ?? process.env.KG_ZOTERO_DB
+  ?? path.join(process.env.APPDATA ?? '', 'Zotero', 'Zotero', 'zotero.sqlite')
 const apply = args.includes('--apply')
 const loose = args.includes('--loose')
 const minScore = Number(argValue('--min-score') ?? (loose ? 0.7 : 0.92))
@@ -40,12 +44,8 @@ const reportPath = argValue('--report')
 const searchRoots = [
   ...argAll('--search'),
   ...(argAll('--search').length ? [] : [
-    'D:/BaiduSyncdisk/Bibliotx/Literature',
-    'D:/BaiduSyncdisk/Bibliotx/Archive',
-    'D:/BaiduSyncdisk/Bibliotx/Inform',
-    'D:/BaiduSyncdisk/Bibliotx/Datasheet',
-    'D:/BaiduSyncdisk/Bibliotx/Zotero/storage',
-    'C:/Users/Administrator/Zotero/storage',
+    path.join(path.dirname(zoteroDb), 'storage'),
+    path.join(process.env.USERPROFILE ?? '', 'Zotero', 'storage'),
   ]),
 ].map((dir) => path.resolve(dir))
 const litDir = path.join(vault, '文献')

@@ -9,7 +9,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
-import { ZoomIn, ZoomOut, ChevronLeft, ChevronRight, Search, Highlighter } from 'lucide-react'
+import { ZoomIn, ZoomOut, ChevronLeft, ChevronRight, Search, Highlighter, Link2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { buildAnchor, locateAnchor, type TextAnchor } from '@/lib/pdfAnchor'
@@ -39,6 +39,10 @@ interface Props {
   onDeleteAnnotation: (id: string) => void
   /** 「导出到笔记」：把高亮文本追加到文献笔记正文（由外层走 updateNote） */
   onExportAnnotation: (a: PdfAnnotation) => void
+  /** 把当前选区保存为高亮并插入一条可返回 PDF 原文的笔记链接 */
+  onLinkSelection?: (a: NewAnnotation) => void
+  /** 外层请求定位某条标注；阅读器会跳页并短暂强调 */
+  focusAnnotationId?: string | null
 }
 
 interface Rect {
@@ -115,6 +119,8 @@ export function PdfViewer({
   onUpdateAnnotation,
   onDeleteAnnotation,
   onExportAnnotation,
+  onLinkSelection,
+  focusAnnotationId,
 }: Props) {
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null)
   const [error, setError] = useState('')
@@ -126,6 +132,7 @@ export function PdfViewer({
   const [pageText, setPageText] = useState('')
   const [highlights, setHighlights] = useState<{ id: string; color: string; rects: Rect[]; missing?: boolean }[]>([])
   const [searchRects, setSearchRects] = useState<Rect[]>([])
+  const [focusedId, setFocusedId] = useState<string | null>(null)
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -300,6 +307,23 @@ export function PdfViewer({
     setPalette(null)
   }
 
+  const linkSelection = () => {
+    if (!palette || !onLinkSelection) return
+    onLinkSelection({ page: pageNum, anchor: palette.anchor, color: HIGHLIGHT_COLORS[0] })
+    window.getSelection()?.removeAllRanges()
+    setPalette(null)
+  }
+
+  useEffect(() => {
+    if (!focusAnnotationId) return
+    const annotation = annotations.find((item) => item.id === focusAnnotationId)
+    if (!annotation) return
+    setPageNum(annotation.page)
+    setFocusedId(annotation.id)
+    const timer = window.setTimeout(() => setFocusedId(null), 1800)
+    return () => window.clearTimeout(timer)
+  }, [focusAnnotationId, annotations])
+
   const gotoPage = (n: number) => {
     if (n >= 1 && n <= numPages) {
       setPageNum(n)
@@ -405,7 +429,7 @@ export function PdfViewer({
             h.missing ? null : h.rects.map((r, i) => (
               <div
                 key={`${h.id}-${i}`}
-                className="absolute cursor-pointer opacity-60 hover:opacity-80"
+                className={`absolute cursor-pointer opacity-60 hover:opacity-80 ${focusedId === h.id ? 'ring-2 ring-primary opacity-90' : ''}`}
                 style={{ left: r.left, top: r.top, width: r.width, height: r.height, background: h.color }}
                 onClick={(e) => {
                   const layer = layerRef.current
@@ -435,6 +459,11 @@ export function PdfViewer({
                   onClick={() => addHighlight(c)}
                 />
               ))}
+              {onLinkSelection && (
+                <Button size="sm" variant="secondary" className="ml-1 h-6 gap-1 px-2 text-xs" onClick={linkSelection} title="高亮并链接到右侧笔记">
+                  <Link2 className="h-3 w-3" /> 链接到笔记
+                </Button>
+              )}
             </div>
           )}
 

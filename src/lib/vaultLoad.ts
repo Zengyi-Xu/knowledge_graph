@@ -1,3 +1,4 @@
+// FROZEN(vault-io) 契约冻结：导出名已锁定，内部可改 —— 改完跑 npm run test:frozen（docs/FROZEN.md）
 import type { Note } from '@/types/note'
 import { uid } from '@/types/note'
 import { baseNameOf, parseNoteMarkdown, type VaultIndexEntry, type WrittenNote } from '@/lib/vaultFormat'

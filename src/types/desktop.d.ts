@@ -1,3 +1,5 @@
+// FROZEN(desktop-bridge) 契约冻结：本文件就是契约，可以读；实现在 electron/*.cjs（黑箱，排查故障时才读）。
+// 新增/改名方法要同时改 electron/preload.cjs，然后 npm run frozen:update -- "desktop-bridge ..."（docs/FROZEN.md）
 export {}
 
 /** 与 electron/vaultFs.cjs 的返回结构保持一致 */
@@ -82,8 +84,12 @@ declare global {
         }[]
       }>
       openZoteroPdf: (dbPath: string, zoteroKey: string, zoteroKeys?: string[]) => Promise<{ path: string }>
+      /** 读取 Zotero key 对应的本地 PDF，供应用内 PDF.js 阅读；最大 150 MB */
+      readZoteroPdf: (dbPath: string, zoteroKey: string, zoteroKeys?: string[]) => Promise<{ data: Uint8Array; name: string; path: string }>
       /** 打开笔记 localPdf 字段记录的本地 PDF（只接受存在的 .pdf 绝对路径） */
       openExternalFile: (filePath: string) => Promise<{ error: string | null }>
+      /** 读取笔记 localPdf 字段记录的 PDF，供应用内 PDF.js 阅读；最大 150 MB */
+      readExternalPdf: (filePath: string) => Promise<{ data: Uint8Array; name: string; path: string }>
       /** 在 Zotero 里定位到该条目（zotero://select） */
       selectZoteroItem: (zoteroKey: string) => Promise<{ error: string | null }>
 

@@ -1,7 +1,7 @@
 {
   "name": "knowledge-graph",
   "private": true,
-  "version": "0.3.3",
+  "version": "1.2.0",
   "description": "本地优先的知识图谱笔记应用",
   "author": "Zengyi Xu",
   "main": "electron/main.cjs",
@@ -11,6 +11,9 @@
     "build": "tsc -b && vite build",
     "build:dev": "tsc -b && vite build --mode development",
     "lint": "eslint .",
+    "frozen:check": "node scripts/frozen-check.mjs",
+    "frozen:update": "node scripts/frozen-check.mjs --update",
+    "test:frozen": "node scripts/frozen-check.mjs --run-guards",
     "test:vault": "esbuild scripts/vault-selftest.ts --bundle --platform=node --format=cjs --target=node20 --alias:@=./src --outfile=.tmp-vault-test/selftest.cjs && node .tmp-vault-test/selftest.cjs",
     "test:lit": "esbuild scripts/literature-selftest.ts --bundle --platform=node --format=cjs --target=node20 --alias:@=./src --outfile=.tmp-vault-test/lit-selftest.cjs && node .tmp-vault-test/lit-selftest.cjs",
     "test:vault-e2e": "node scripts/vault-e2e.mjs",
@@ -36,6 +39,7 @@
     "desktop:installer": "npm run build && electron-builder --win nsis",
     "desktop:dist": "npm run build && electron-builder --win portable nsis",
     "release:portable": "node scripts/package-portable.mjs",
+    "release:web": "node scripts/package-web-portable.mjs",
     "pdf:build": "esbuild scripts/link-local-pdfs.ts --bundle --platform=node --format=cjs --target=node20 --alias:@=./src --outfile=.tmp-vault-test/link-pdfs.cjs",
     "pdf:link": "npm run pdf:build && node .tmp-vault-test/link-pdfs.cjs"
   },
@@ -61,6 +65,7 @@
       ]
     },
     "nsis": {
+      "include": "build/installer.nsh",
       "artifactName": "${productName}-Setup-${version}-${arch}.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,

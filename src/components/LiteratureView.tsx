@@ -53,6 +53,7 @@ import {
 interface Props {
   notes: Note[]
   onOpenNote: (id: string) => void
+  onReadPdf: (id: string) => void
   /** 批量创建文献笔记（citekey 撞名由调用方处理） */
   onImport: (items: ImportedLit[]) => void
   /** 应用 Zotero 同步计划：合并 collections 与新增标签（调用方负责写库） */
@@ -63,12 +64,10 @@ type SortKey = 'title' | 'author' | 'year' | 'venue' | 'citekey'
 
 /** 本机 Zotero 数据库位置；本地网页端由启动参数 --zotero-db 固定 */
 export const ZOTERO_DB_KEY = 'zotero-db-v1'
-const DEFAULT_ZOTERO_DB = 'D:\\BaiduSyncdisk\\Bibliotx\\Zotero\\zotero.sqlite'
-
 /** 首选项：上次选过的库 > 运行环境给的默认值（Electron preload / 本地网页服务端） */
 function initialZoteroDb(): string {
   const desktop = typeof window !== 'undefined' ? window.knowledgeGraphDesktop : undefined
-  return readSetting(ZOTERO_DB_KEY) || desktop?.defaultZoteroDb || DEFAULT_ZOTERO_DB
+  return readSetting(ZOTERO_DB_KEY) || desktop?.defaultZoteroDb || ''
 }
 
 /** 一个列表一次渲染的最大行数，避免上千行一次挂载 */
@@ -87,13 +86,63 @@ function collectionLabel(note: Note): string {
   return paths.length ? paths.join('；') : '未分类'
 }
 
-/** 分类筛选用一级分类（路径首段） */
-function topCollectionOf(path: string): string {
-  return path.split('/')[0].trim()
+/** 分类筛选用的一级名称 → 与左侧分类树同源的树节点 */
+interface CollectionNode {
+  name: string
+  children: Map<string, CollectionNode>
+  /** 直属这篇分类下的笔记 id（子树计数时把子分类的也算进来） */
+  ids: Set<string>
 }
 
+/** 与 `NoteList` 的文献分类树同源：按 "父/子/…" 路径建树 */
+function buildCollectionTree(literature: Note[]): CollectionNode {
+  const root: CollectionNode = { name: '', children: new Map(), ids: new Set() }
+  for (const note of literature) {
+    const seen = new Set<string>()
+    for (const path of realCollections(note)) {
+      const segs = path.split('/').map((s) => s.trim()).filter(Boolean)
+      const key = segs.join('/')
+      if (!segs.length || seen.has(key)) continue
+      seen.add(key)
+      let node = root
+      for (const seg of segs) {
+        let child = node.children.get(seg)
+        if (!child) {
+          child = { name: seg, children: new Map(), ids: new Set() }
+          node.children.set(seg, child)
+        }
+        node = child
+      }
+      node.ids.add(note.id)
+    }
+  }
+  return root
+}
 
-export function LiteratureView({ notes, onOpenNote, onImport, onApplySync }: Props) {
+/** 展开成下拉项：先序 = 左侧分类树的顺序，计数 = 子树唯一篇数（和侧栏括号里的数字一致） */
+function flattenCollections(root: CollectionNode): { path: string; name: string; depth: number; count: number }[] {
+  const counts = new Map<CollectionNode, number>()
+  const measure = (node: CollectionNode): Set<string> => {
+    const ids = new Set(node.ids)
+    for (const child of node.children.values()) measure(child).forEach((id) => ids.add(id))
+    counts.set(node, ids.size)
+    return ids
+  }
+  measure(root)
+  const out: { path: string; name: string; depth: number; count: number }[] = []
+  const sorted = (node: CollectionNode) => [...node.children.values()].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
+  const emit = (node: CollectionNode, prefix: string, depth: number) => {
+    for (const child of sorted(node)) {
+      const path = prefix ? `${prefix}/${child.name}` : child.name
+      out.push({ path, name: child.name, depth, count: counts.get(child) ?? 0 })
+      emit(child, path, depth + 1)
+    }
+  }
+  emit(root, '', 0)
+  return out
+}
+
+export function LiteratureView({ notes, onOpenNote, onReadPdf, onImport, onApplySync }: Props) {
   const [search, setSearch] = useState('')
   const [sortKey, setSortKey] = useState<SortKey>('year')
   const [sortAsc, setSortAsc] = useState(false)
@@ -120,18 +169,15 @@ export function LiteratureView({ notes, onOpenNote, onImport, onApplySync }: Pro
 
   const literature = useMemo(() => notes.filter((n) => n.type === 'literature'), [notes])
 
-  /** 分类筛选项：一级分类 → 篇数（没有真实分类的归入 __none__） */
+  /** 分类筛选项：与左侧「文献」分类树同源同序（Zotero 全路径、层级缩进、计数 = 子树唯一篇数） */
   const collectionOptions = useMemo(() => {
-    const counts = new Map<string, number>()
-    let none = 0
-    for (const note of literature) {
-      const tops = new Set(realCollections(note).map(topCollectionOf).filter(Boolean))
-      if (!tops.size) none++
-      else for (const top of tops) counts.set(top, (counts.get(top) ?? 0) + 1)
-    }
-    const options = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'zh'))
+    const options = flattenCollections(buildCollectionTree(literature))
+    const none = literature.filter((n) => !realCollections(n).length).length
     return { options, none }
   }, [literature])
+
+  /** 当前选中的分类在树里的篇数（触发按钮上跟着显示，和列表一致） */
+  const selectedCollectionCount = collectionOptions.options.find((o) => o.path === fCollection)?.count
 
   /** 期刊筛选项：出现的期刊按篇数倒序，取前 80 个 */
   const venueOptions = useMemo(() => {
@@ -163,7 +209,8 @@ export function LiteratureView({ notes, onOpenNote, onImport, onApplySync }: Pro
       if (fCollection === '__none__') {
         if (realCollections(n).length) return false
       } else if (fCollection !== 'all') {
-        if (!realCollections(n).some((c) => topCollectionOf(c) === fCollection)) return false
+        const prefix = `${fCollection}/`
+        if (!realCollections(n).some((c) => c === fCollection || c.startsWith(prefix))) return false
       }
       if (fVenue !== 'all' && (n.literature?.venue ?? '').trim() !== fVenue) return false
       if (yearFrom !== null || yearTo !== null) {
@@ -284,10 +331,10 @@ export function LiteratureView({ notes, onOpenNote, onImport, onApplySync }: Pro
           variant="secondary"
           size="sm"
           className="h-6 gap-1 px-2 text-[10px]"
-          title={`打开本地 PDF：${lit.localPdf}`}
+          title="在软件内全屏阅读 PDF"
           onClick={(e) => {
             e.stopPropagation()
-            void openLocalPdf(note)
+            onReadPdf(note.id)
           }}
         >
           <FileText className="h-3 w-3" /> PDF
@@ -303,10 +350,10 @@ export function LiteratureView({ notes, onOpenNote, onImport, onApplySync }: Pro
           variant="secondary"
           size="sm"
           className="h-6 gap-1 px-2 text-[10px]"
-          title="用系统默认阅读器打开本地 PDF"
+          title="在软件内全屏阅读 PDF"
           onClick={(e) => {
             e.stopPropagation()
-            void openLocalPdf(note)
+            onReadPdf(note.id)
           }}
         >
           <FileText className="h-3 w-3" /> PDF
@@ -381,14 +428,26 @@ export function LiteratureView({ notes, onOpenNote, onImport, onApplySync }: Pro
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         <SlidersHorizontal className="h-3.5 w-3.5" />
         <Select value={fCollection} onValueChange={setFCollection}>
-          <SelectTrigger className="h-7 w-[170px] text-xs" aria-label="按分类筛选">
-            <SelectValue />
+          <SelectTrigger className="h-7 w-[210px] text-xs" aria-label="按分类筛选">
+            <SelectValue>
+              {fCollection === 'all'
+                ? '全部分类'
+                : fCollection === '__none__'
+                  ? `未分类（${collectionOptions.none}）`
+                  : `${fCollection}${selectedCollectionCount === undefined ? '' : `（${selectedCollectionCount}）`}`}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部分类</SelectItem>
             <SelectItem value="__none__">未分类（{collectionOptions.none}）</SelectItem>
-            {collectionOptions.options.map(([name, count]) => (
-              <SelectItem key={name} value={name}>{name}（{count}）</SelectItem>
+            {collectionOptions.options.map((o) => (
+              <SelectItem
+                key={o.path}
+                value={o.path}
+                style={{ paddingLeft: `${8 + o.depth * 14}px` }}
+              >
+                {o.name}（{o.count}）
+              </SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -443,7 +502,7 @@ export function LiteratureView({ notes, onOpenNote, onImport, onApplySync }: Pro
             清除筛选
           </Button>
         )}
-        <span className="ml-auto hidden md:inline">单击标题打开笔记；点 PDF 徽标打开本地文件</span>
+        <span className="ml-auto hidden md:inline">单击标题打开笔记；点 PDF 徽标进入全屏阅读</span>
       </div>
 
       {/* 文献表 */}
@@ -497,7 +556,8 @@ export function LiteratureView({ notes, onOpenNote, onImport, onApplySync }: Pro
                     <DropdownMenuContent align="end">
                       {((n.literature?.zoteroAvailablePdfCount ?? 0) > 0 || n.literature?.localPdf) && (
                         <>
-                          <DropdownMenuItem onSelect={() => void openLocalPdf(n)}>打开本地 PDF</DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => onReadPdf(n.id)}>在软件内全屏阅读</DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => void openLocalPdf(n)}>用系统阅读器打开</DropdownMenuItem>
                           <DropdownMenuSeparator />
                         </>
                       )}

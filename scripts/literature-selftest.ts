@@ -7,6 +7,7 @@
 import assert from 'node:assert/strict'
 import type { Note } from '@/types/note'
 import { makeCitekey } from '@/lib/citekey'
+import { appendPdfReference, pdfReferenceIdFromHref, referencedAnnotationIds } from '@/lib/pdfReference'
 import {
   buildBibtex,
   formatBibliography,
@@ -75,6 +76,21 @@ function stubFetch(handler: (url: string) => { ok: boolean; status: number; json
 }
 
 async function main() {
+  console.log('0. PDF 摘录链接')
+  await check('插入可读摘录并能从链接还原标注 id', () => {
+    const annotation = {
+      id: 'ann_123', page: 7, color: '#fde047', comment: '', createdAt: 1,
+      anchor: { exact: '  selected\ntext  ', prefix: 'before', suffix: 'after' },
+    }
+    const content = appendPdfReference('# 阅读笔记', annotation, 'paper.pdf')
+    assert.match(content, /## PDF 摘录/)
+    assert.match(content, /> selected text/)
+    assert.match(content, /\[↗ PDF 第 7 页 · paper\.pdf\]\(#pdfref-ann_123\)/)
+    assert.equal(pdfReferenceIdFromHref('#pdfref-ann_123'), 'ann_123')
+    assert.deepEqual([...referencedAnnotationIds(content)], ['ann_123'])
+    assert.equal((appendPdfReference(content, { ...annotation, id: 'ann_456' }, 'paper.pdf').match(/## PDF 摘录/g) ?? []).length, 1)
+  })
+
   console.log('A. CSL 转换')
   await check('“Family, Given” 作者按逗号切', () => {
     const csl = litToCSL(litNote())

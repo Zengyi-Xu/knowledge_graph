@@ -33,8 +33,10 @@ contextBridge.exposeInMainWorld('knowledgeGraphDesktop', {
   // Zotero：只读同步 zotero.sqlite（需先退出 Zotero 释放锁）
   readZotero: (dbPath) => ipcRenderer.invoke('zotero:read', { dbPath }),
   openZoteroPdf: (dbPath, zoteroKey, zoteroKeys) => ipcRenderer.invoke('zotero:open-pdf', { dbPath, zoteroKey, zoteroKeys }),
+  readZoteroPdf: (dbPath, zoteroKey, zoteroKeys) => ipcRenderer.invoke('zotero:read-pdf', { dbPath, zoteroKey, zoteroKeys }),
   // 打开笔记里记录的本地 PDF（localPdf 字段）
   openExternalFile: (filePath) => ipcRenderer.invoke('file:open-external', { path: filePath }),
+  readExternalPdf: (filePath) => ipcRenderer.invoke('file:read-pdf', { path: filePath }),
   // 在 Zotero 里定位条目（zotero:// 协议）
   selectZoteroItem: (zoteroKey) => ipcRenderer.invoke('zotero:select-item', { zoteroKey }),
 

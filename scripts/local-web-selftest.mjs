@@ -123,6 +123,8 @@ try {
     const open = await call2('zotero:open-pdf', { zoteroKey: 'PDFKEY02' })
     check('open-pdf 用系统默认程序打开解析出的 PDF', open.status === 200 && open.body.result.path === path.join(dir, 'zotero', 'storage', 'PDFKEY01', '论文.pdf'))
     check('opener 收到的就是 Zotero 库里的那份 PDF', opened.length === 1 && opened[0] === open.body.result.path)
+    const inline = await call2('zotero:read-pdf', { zoteroKey: 'PDFKEY02' })
+    check('内置阅读器可只读取得 Zotero PDF 字节', inline.status === 200 && Buffer.from(inline.body.result.data, 'base64').toString() === '%PDF-1.4 fixture')
     check('前端夹带的任意路径参数被忽略', (await call2('zotero:open-pdf', { zoteroKey: 'PDFKEY02', path: 'C:\\Windows\\System32\\calc.exe', dbPath: path.join(dir, 'other.sqlite') })).status === 200 && opened.length === 2 && opened[1].endsWith('论文.pdf'))
     const missing = await call2('zotero:open-pdf', { zoteroKey: 'NOPDFF03' })
     check('没有本地 PDF → 400 且不调用 opener', missing.status === 400 && opened.length === 2 && missing.body.error.includes('没有可访问的本地 PDF'))
@@ -154,7 +156,10 @@ try {
     try {
       const okOpen = await call3('file:open-external', { path: path.join(vault, 'pdfs', '本地.pdf') })
       check('打开笔记库内的本地 PDF', okOpen.status === 200 && opened2.length === 1 && okOpen.body.result.path.endsWith('本地.pdf'))
+      const inline = await call3('file:read-pdf', { path: path.join(vault, 'pdfs', '本地.pdf') })
+      check('内置阅读器可只读取得白名单内 PDF 字节', inline.status === 200 && Buffer.from(inline.body.result.data, 'base64').toString() === '%PDF-1.4 local')
       check('笔记库外的 PDF 默认拒绝', (await call3('file:open-external', { path: path.join(outsideDir, '外面.pdf') })).status === 400 && opened2.length === 1)
+      check('内置阅读器同样拒绝白名单外 PDF', (await call3('file:read-pdf', { path: path.join(outsideDir, '外面.pdf') })).status === 400)
       check('非 PDF 一律拒绝', (await call3('file:open-external', { path: path.join(vault, '学习', '测试.md') })).status === 400)
       check('缺路径/相对路径拒绝', (await call3('file:open-external', {})).status === 400 && (await call3('file:open-external', { path: 'pdfs/本地.pdf' })).status === 400)
       check('在 Zotero 里定位条目的 URL 由服务端拼', (await call3('zotero:select-item', { zoteroKey: 'abcd1234' })).status === 200 && urlOpened.length === 1 && urlOpened[0] === 'zotero://select/library/items/ABCD1234')
@@ -165,6 +170,9 @@ try {
       const response = await fetch(local4.origin + '/api/local', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-KG-Token': local4.token }, body: JSON.stringify({ method: 'file:open-external', payload: { path: path.join(outsideDir, '外面.pdf') } }) })
       const body = await response.json()
       check('--pdf-root 授权的目录可以打开', response.status === 200 && opened2.length === 2 && body.result.path.endsWith('外面.pdf'))
+      const inlineResponse = await fetch(local4.origin + '/api/local', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-KG-Token': local4.token }, body: JSON.stringify({ method: 'file:read-pdf', payload: { path: path.join(outsideDir, '外面.pdf') } }) })
+      const inlineBody = await inlineResponse.json()
+      check('--pdf-root 授权的目录可供内置阅读器读取', inlineResponse.status === 200 && Buffer.from(inlineBody.result.data, 'base64').toString() === '%PDF-1.4 outside')
     } finally { await local4.close() }
   }
 

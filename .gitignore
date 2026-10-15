@@ -6,6 +6,9 @@ node_modules/
 /dist-dev/
 /dist-ssr/
 /release/
+/release-*/
+/build-tmp/
+/dist-tmp/
 !public/vditor/dist/
 
 # 测试脚手架 / 临时产物（vault 自测与端到端验证）

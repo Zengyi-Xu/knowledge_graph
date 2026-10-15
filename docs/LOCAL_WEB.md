@@ -1,4 +1,4 @@
-# v0.3.2 本地网页端
+# v1.2.0 本地网页端
 
 ## 使用
 
@@ -10,14 +10,17 @@
 
 ```powershell
 npm run build
-npm run web:local -- --vault "D:\BaiduSyncdisk\Bibliotx\Vault"
+npm run web:local -- --vault "D:\Notes\KnowledgeGraph" --zotero-db "%APPDATA%\Zotero\Zotero\zotero.sqlite" --pdf-root "D:\Papers"
 ```
-
-这次交付使用网页入口，不生成新的桌面 exe，也不修改旧 release 文件。
 
 ## 本地笔记库
 
-默认沿用 `D:\BaiduSyncdisk\Bibliotx\Vault`。网页顶栏显示当前完整路径，切换库用「选择目录」输入已有目录的绝对路径。
+启动脚本优先使用已有的 `D:\BaiduSyncdisk\Bibliotx\Vault`，否则使用已有的
+`%USERPROFILE%\Documents\知识图谱`；两者都不存在时在网页内选择目录，不自动创建空库。
+Zotero 优先使用 `D:\BaiduSyncdisk\Bibliotx\Zotero\zotero.sqlite`，再尝试 `%APPDATA%` 下的库。
+已有的 Literature、Archive、Inform 和 Zotero storage 目录会作为本地 PDF 目录授权。
+也可先设置 `KG_VAULT_DIR` 与
+`KG_ZOTERO_DB` 环境变量。网页顶栏显示当前完整路径，切换库用「选择目录」输入已有目录的绝对路径。
 
 笔记仍保存为原目录里的 `.md` 和 `meta.json`，人物、项目、技能、学习、其他、文献文件夹继续保留。
 附件保存在 `attachments/`；JSON 同步快照保存在 `sync/notes.json` 或用户选择的本地 JSON 文件。
@@ -26,7 +29,7 @@ npm run web:local -- --vault "D:\BaiduSyncdisk\Bibliotx\Vault"
 
 ## 文献表
 
-- **打开 PDF**：点「PDF」徽标（本身就是一个按钮）用系统默认阅读器打开本机 PDF：优先笔记里记的 `localPdf`（pdf:link 脚本匹配到的绝对路径），否则按 Zotero key 解析（多 key 回退）。
+- **打开 PDF**：点「PDF」徽标进入全屏双栏阅读工作台；左侧阅读 PDF，右侧编辑/预览笔记。选中原文后点「链接到笔记」，会插入带页码的摘录；点击笔记中的链接可跳回原页和高亮。也可点「系统阅读器」。PDF 来源优先使用 `localPdf`，否则按 Zotero key 解析（多 key 回退）。
   打开动作不经过 `cmd start`，Windows 上直接 `explorer.exe <文件>`，文件名含 `&`、括号也不会被解释。
   本机没有这份 PDF 时，PDF 列显示「文件不在本机 · 在 Zotero 打开」，点它会用 `zotero://select/library/items/<key>` 跳到 Zotero 并选中该条目（Zotero 会按需下载附件）。
 - **本地 PDF 匹配**：笔记标题/Zotero 附件名 → 在指定目录里搜 PDF，命中后把路径写进 `literature.localPdf`（只记路径，不复制不移动文件）：
@@ -37,11 +40,10 @@ npm run web:local -- --vault "D:\BaiduSyncdisk\Bibliotx\Vault"
   npm run pdf:link -- --vault "<vault>" --apply            # 写盘（先备份改动文件）
   ```
   匹配优先级：Zotero 附件文件名（换了附件 key 也能认回）> 标题完全相同 > 前缀包含 > 词集相似（默认阈值 0.92，--loose 降到 0.70）；同一份 PDF 只归一篇。
-  实测（2026-10-13，真实 vault）：668 篇里 280 篇本来就能开，脚本又认回 **61** 篇（标题精确 36 / 前缀包含 23 / Zotero 附件名 2）→ 界面「有本地 PDF」筛出 **341/668**；其余 327 篇的 PDF 本机确实没有（Zotero 侧只有全文缓存 `.zotero-ft-cache`）。
-- **网页端打开 localPdf**：需要把它的上级目录用 `--pdf-root` 授权（`启动网页端.cmd` 已带上 Literature / Archive / Inform / Zotero storage 与 C 盘 Zotero storage）；未授权的路径会被服务端拒绝。
+- **网页端打开 localPdf**：需要把它的上级目录用 `--pdf-root` 授权；未授权的路径会被服务端拒绝。
 - **筛选**：分类（含「未分类」）、期刊/会议、年份范围、「有本地 PDF」开关；分类计数按真实分类统计。
 - **未分类是动态状态**：只有「没有任何真实分类」才显示未分类，`collections` 里不写「未分类」，标签里不写「方向:未分类」。
-  历史数据在同步/去重时自动清理（vault 复核：668 篇里真正未分类 64 篇）。
+  历史数据在同步/去重时自动清理。
 - **表格宽度**：「标签」列默认隐藏，可随时用「标签列」按钮打开；引用相关操作收进行尾「⋮」菜单。
 - **渲染**：一次渲染 150 行，底部「显示更多」按需追加，避免上千行一次挂载。
 - **标题清洗**（仅显示层，不改数据）：解 HTML 实体、去 `<sub>` 等内联标签、去 `$…$` 定界符（含反斜杠的 LaTeX 保持原样）、去站点尾缀。

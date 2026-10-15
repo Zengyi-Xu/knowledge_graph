@@ -1,3 +1,4 @@
+// FROZEN(md-render) 全冻结：内部实现是黑箱，不要读也不要改 → 契约见 docs/FROZEN.md
 import React, { useMemo } from 'react'
 import type { Note } from '@/types/note'
 import { parseMarkdown } from '@/lib/md'

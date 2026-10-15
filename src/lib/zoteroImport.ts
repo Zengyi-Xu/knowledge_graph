@@ -1,3 +1,4 @@
+// FROZEN(zotero-rules) 契约冻结：导出名与 AGENTS.md「文献数据模型」不变量已锁定，内部可改 —— 改完跑 npm run test:frozen（docs/FROZEN.md）
 /**
  * Zotero → 笔记库的批量导入计划（纯函数，可单测，也可被脚本/UI 复用）。
  *

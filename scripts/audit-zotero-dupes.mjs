@@ -3,7 +3,8 @@ import { createRequire } from 'node:module'
 const require = createRequire(import.meta.url)
 const { readZotero } = require('../electron/zoteroFs.cjs')
 
-const db = process.argv[2] ?? 'D:/BaiduSyncdisk/Bibliotx/Zotero/zotero.sqlite'
+const db = process.argv[2]
+if (!db) throw new Error('用法：node scripts/audit-zotero-dupes.mjs <zotero.sqlite>')
 const { items, collections } = await readZotero(db)
 console.log(`collection 数: ${collections.length}；Zotero 条目数: ${items.length}`)
 

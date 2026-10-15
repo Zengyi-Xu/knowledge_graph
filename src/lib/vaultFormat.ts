@@ -1,3 +1,4 @@
+// FROZEN(vault-format) 契约冻结：导出名与 front matter 字段已锁定，内部可改 —— 改完跑 npm run test:frozen（docs/FROZEN.md）
 /**
  * vault 本地存储格式（纯函数，不依赖浏览器/Electron API，便于单测）：
  *

@@ -23,6 +23,17 @@ const IS_DEV = !app.isPackaged
 const APP_ENV = IS_DEV ? 'development' : 'production'
 const APP_TITLE = IS_DEV ? '知识图谱（开发版）' : '知识图谱'
 const APP_USER_MODEL_ID = 'com.zengyixu.knowledgegraph'
+const MAX_INLINE_PDF_BYTES = 150 * 1024 * 1024
+
+async function readPdfFile(filePath) {
+  if (!filePath || !path.isAbsolute(filePath) || path.extname(filePath).toLowerCase() !== '.pdf') {
+    throw new Error('只允许读取本地 PDF 文件')
+  }
+  const stat = await fs.stat(filePath).catch(() => null)
+  if (!stat?.isFile()) throw new Error('PDF 文件不存在（可能已移动或改名）')
+  if (stat.size > MAX_INLINE_PDF_BYTES) throw new Error('PDF 超过 150 MB，请改用系统阅读器打开')
+  return { data: await fs.readFile(filePath), name: path.basename(filePath), path: filePath }
+}
 
 if (IS_DEV) {
   // 必须在 app ready 之前改，才能影响 Chromium profile / localStorage / 单实例锁
@@ -205,15 +216,11 @@ function registerVaultHandlers() {
   })
 }
 
-/**
- * Zotero 库的默认位置。Zotero 数据目录可能被放到同步盘（本研究环境是
- * D:\BaiduSyncdisk\Bibliotx\Zotero），因此先探测候选路径，只把真实存在的那个交给渲染端。
- */
+/** Zotero 库的默认位置：环境变量优先，其次探测 Zotero 的标准目录。 */
 function defaultZoteroDb() {
   const candidates = [
     process.env.KG_ZOTERO_DB,
     path.join(process.env.APPDATA ?? '', 'Zotero', 'Zotero', 'zotero.sqlite'),
-    'D:\\BaiduSyncdisk\\Bibliotx\\Zotero\\zotero.sqlite',
     path.join(require('node:os').homedir(), 'Zotero', 'zotero.sqlite'),
   ].filter((p) => typeof p === 'string' && p)
   for (const candidate of candidates) {
@@ -233,13 +240,12 @@ function defaultZoteroDbArg() {
 
 /**
  * 笔记目录（vault）的默认位置。与 Zotero 同样先探测候选：
- * 环境变量 KG_VAULT_DIR → 本研究环境的同步盘路径 → 用户「文档/知识图谱」。
+ * 环境变量 KG_VAULT_DIR → 用户「文档/知识图谱」。
  * 只有真实存在的目录才会交给渲染端，用户仍可在界面里改成别的目录。
  */
 function defaultVaultDir() {
   const candidates = [
     process.env.KG_VAULT_DIR,
-    'D:\\BaiduSyncdisk\\Bibliotx\\Vault',
     path.join(require('node:os').homedir(), 'Documents', '知识图谱'),
   ].filter((p) => typeof p === 'string' && p)
   for (const candidate of candidates) {
@@ -279,6 +285,14 @@ function registerZoteroHandlers() {
     const error = await shell.openPath(pdfPath)
     if (error) throw new Error(`无法打开 PDF：${error}`)
     return { path: pdfPath }
+  })
+
+  ipcMain.handle('zotero:read-pdf', async (_event, payload) => {
+    if (!payload || typeof payload.dbPath !== 'string' || !payload.dbPath || typeof payload.zoteroKey !== 'string') {
+      throw new Error('Invalid zotero pdf request')
+    }
+    const extraKeys = Array.isArray(payload.zoteroKeys) ? payload.zoteroKeys.filter((k) => typeof k === 'string') : []
+    return readPdfFile(resolveZoteroPdf(payload.dbPath, payload.zoteroKey, extraKeys))
   })
 
   // 在 Zotero 里定位到该条目（zotero:// 协议；Zotero 会选中并展示它，可顺手下载附件）
@@ -397,6 +411,11 @@ function registerAttachmentHandlers() {
     }
     const error = await shell.openPath(target)
     return { error: error || null }
+  })
+
+  ipcMain.handle('file:read-pdf', async (_event, payload) => {
+    const target = payload && typeof payload.path === 'string' ? payload.path : ''
+    return readPdfFile(target)
   })
 
   ipcMain.handle('attachments:choose-open', async () => {

@@ -27,7 +27,9 @@ const argValue = (name: string): string | undefined => {
   const index = args.indexOf(name)
   return index >= 0 ? args[index + 1] : undefined
 }
-const vault = path.resolve(argValue('--vault') ?? 'D:/BaiduSyncdisk/Bibliotx/Vault')
+const vaultArg = argValue('--vault')
+if (!vaultArg) throw new Error('请用 --vault <目录> 指定笔记库')
+const vault = path.resolve(vaultArg)
 const apply = args.includes('--apply')
 const mergeSuspect = args.includes('--merge-suspect')
 const fixPlaceholders = args.includes('--fix-placeholders')

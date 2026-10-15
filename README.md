@@ -1,8 +1,8 @@
 # 知识图谱
 
-当前 v0.3.2 提供可直接使用现有本地笔记库的网页入口：双击 `启动网页端.cmd`，
-或按 [本地网页端说明](docs/LOCAL_WEB.md) 启动。旧桌面 release 的排查记录见
-[启动与数据验证记录](docs/STARTUP_0.3.2.md)。
+当前 v1.2.0 提供附带 Node 的 Windows x64 免安装网页包：解压后双击 `启动知识图谱.cmd`，无需安装 Node、npm 或 Electron。
+详见 [免安装网页使用说明](docs/WEB_PORTABLE.md)。开发目录网页端仍可双击 `启动网页端.cmd`，
+或按 [本地网页端说明](docs/LOCAL_WEB.md) 启动。
 
 本地优先的 Markdown 笔记 + 知识图谱应用。笔记之间用 `[[双链]]` 关联，在图谱视图里
 把「谁做过什么、一个问题牵涉哪些工作」看成一整张网。
@@ -25,17 +25,19 @@ Windows 桌面版（Electron）提供**免安装 exe**与安装程序；笔记�
   - 新增「文献」笔记类型与文献视图：表格排序 / 搜索，DOI（CrossRef/DataCite）与
     arXiv 一键导入元数据，BibTeX / RIS 粘贴批量导入（citekey 自动生成、撞名追加后缀）
   - 复制引用：**GB/T 7714-2015**（国标顺序编码制）/ **APA** / BibTeX 三种格式
-  - PDF 附件（仅桌面版）：应用内阅读（翻页 / 缩放 / 搜索），**划词高亮标注**存在
-    vault 的 `attachments/` 里，评论与「导出到笔记」；浏览器版显示降级提示
+  - PDF 阅读工作台：从文献表点 PDF 徽标进入全屏双栏阅读，左侧翻页 / 缩放 / 搜索，
+    右侧编辑或预览文献笔记；选中 PDF 原文可建立页码链接，点笔记中的链接可跳回原文
+  - PDF 标注存在 vault 的 `attachments/` 里；也可随时改用系统 PDF 阅读器
   - **插入 Word 引用**：复制 RTF 域代码（`ADDIN ZOTERO_ITEM`，与 Zotero 兼容），
     粘进 Word 是可更新的真实域（Alt+F9 可见域代码）；一键复制参考文献表
 
 ## 安装
 
-在 [Releases](https://github.com/Zengyi-Xu/local-note-graph/releases) 页面下载：
+在 [最新 Release](https://github.com/Zengyi-Xu/knowledge_graph/releases/latest) 页面下载：
 
 | 文件 | 用途 |
 | --- | --- |
+| `knowledge-graph-web-<版本>-windows-x64.zip` | 推荐：附带 Node，解压后双击启动网页 |
 | `知识图谱-Portable-<版本>-x64.exe` | 免安装，双击启动 |
 | `知识图谱-Setup-<版本>-x64.exe` | 安装后从桌面 / 开始菜单启动 |
 
