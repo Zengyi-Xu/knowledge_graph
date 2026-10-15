@@ -30,7 +30,11 @@ if (!args.includes('--zip-only')) {
   const runtime = JSON.parse(execFileSync(node, ['-p', 'JSON.stringify({version:process.version,platform:process.platform,arch:process.arch})'], { encoding: 'utf8' }))
   if (runtime.platform !== 'win32' || runtime.arch !== 'x64') throw new Error('需要 Windows x64 Node 运行环境')
   if (!fs.existsSync(nodeLicense)) throw new Error('缺少对应 Node 版本的官方 LICENSE；请用 --node-license 指定')
-  copy(path.join(root, 'dist'), path.join(stage, 'dist'))
+  // dist can contain ignored local notes copied from public by Vite.
+  // Only ship the three application resource roots, never the whole dist tree.
+  for (const file of ['index.html', 'assets', 'vditor']) {
+    copy(path.join(root, 'dist', file), path.join(stage, 'dist', file))
+  }
   copy(node, path.join(stage, 'runtime', 'node.exe'))
   copy(nodeLicense, path.join(stage, 'runtime', 'LICENSE'))
   for (const file of ['local-web.mjs', 'local-bridge.js', 'start-portable-web.mjs']) {
@@ -73,6 +77,8 @@ if (!args.includes('--zip-only')) {
 }
 if (!args.includes('--stage-only')) {
   if (fs.existsSync(path.join(stage, 'data'))) throw new Error('发布目录含有 data；拒绝将运行后产生的用户数据打包')
+  const privateFiles = walk(stage).filter((file) => /(^|[\\/])notes\.json(?:$|[.-])|\.(?:sqlite(?:3)?(?:-wal|-shm)?|db|pdf)$|(^|[\\/])\.env(?:$|\.)/i.test(file))
+  if (privateFiles.length) throw new Error('发布目录含笔记快照、数据库、PDF 或环境配置，拒绝生成 ZIP')
   const sourceCommit = option('--commit', execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim())
   const manifestPath = path.join(stage, 'MANIFEST.json')
   const files = walk(stage).filter((file) => file !== manifestPath).sort().map((file) => ({

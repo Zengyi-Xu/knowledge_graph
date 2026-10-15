@@ -4,7 +4,7 @@
 
 ## 第一次使用
 
-1. 从 GitHub 最新 Release 下载 `knowledge-graph-web-1.2.0-windows-x64.zip`。
+1. 从 GitHub 最新 Release 下载 `knowledge-graph-web-1.2.1-windows-x64.zip`。
 2. 完整解压到一个可写的固定文件夹，不能直接在压缩包内运行。
 3. 双击 `启动知识图谱.cmd`，默认浏览器打开 `http://127.0.0.1:4173`。
 4. 保留命令窗口；关闭窗口或按 Ctrl+C 可停止服务。

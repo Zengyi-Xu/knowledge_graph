@@ -1,6 +1,6 @@
 # 知识图谱
 
-当前 v1.2.0 提供附带 Node 的 Windows x64 免安装网页包：解压后双击 `启动知识图谱.cmd`，无需安装 Node、npm 或 Electron。
+当前 v1.2.1 提供附带 Node 的 Windows x64 免安装网页包：解压后双击 `启动知识图谱.cmd`，无需安装 Node、npm 或 Electron。
 详见 [免安装网页使用说明](docs/WEB_PORTABLE.md)。开发目录网页端仍可双击 `启动网页端.cmd`，
 或按 [本地网页端说明](docs/LOCAL_WEB.md) 启动。
 

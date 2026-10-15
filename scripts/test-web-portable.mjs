@@ -22,6 +22,8 @@ if (archiveIndex >= 0) {
 } else {
   fs.cpSync(path.join(root, 'release', `web-v${pkg.version}`, name), dir, { recursive: true })
 }
+assert.equal(fs.existsSync(path.join(dir, 'dist', 'notes.json')), false, '禁止携带 public 中的本地笔记快照')
+assert.deepEqual(fs.readdirSync(path.join(dir, 'dist')).sort(), ['assets', 'index.html', 'vditor'])
 const env = {
   ...process.env, NODE_PATH: '', KG_VAULT_DIR: '', KG_ZOTERO_DB: '',
   USERPROFILE: path.join(dir, 'test-profile'), APPDATA: path.join(dir, 'test-profile', 'AppData', 'Roaming'),
