@@ -130,9 +130,11 @@ try {
   await act('fixture.remount()')
   check('组件重载后仍是所见即所得且内容不重写', await wait(`${content}?.textContent.includes('外部同步更新')`))
   // 语法错误不能进入「渲染 → 写回纯文本 → MutationObserver 再次触发渲染」的循环。
-  await act(String.raw`fixture.setContent('坏公式 $\\notacommand{x}$')`)
-  const errorPreview = `[...${content}.querySelectorAll('.vditor-wysiwyg__block[data-type="math-inline"]')].find((item) => item.querySelector('code[data-type="math-inline"]')?.textContent.includes('notacommand'))?.querySelector('.vditor-wysiwyg__preview .language-math')`
-  check('无法解析的公式保留源码并标记错误', await wait(`(() => { const p=${errorPreview}; return p?.dataset.mathError === 'true' && p.textContent.includes('notacommand') })()`))
+  await act(String.raw`fixture.setContent('坏公式 $\\frac{1}{$')`)
+  const errorPreview = `[...${content}.querySelectorAll('.vditor-wysiwyg__block[data-type="math-inline"]')].find((item) => item.querySelector('code[data-type="math-inline"]')?.textContent.includes('frac{1}{'))?.querySelector('.vditor-wysiwyg__preview .language-math')`
+  const errorPreviewReady = await wait(`(() => { const p=${errorPreview}; return p?.dataset.mathError === 'true' && p.textContent.includes('frac{1}{') })()`)
+  if (!errorPreviewReady) console.log('  错误公式 DOM:', await evaluate(`JSON.stringify([...${content}.querySelectorAll('.vditor-wysiwyg__block[data-type^="math-"]')].map((b) => ({ type: b.dataset.type, src: b.querySelector('code')?.textContent, preview: b.querySelector('.vditor-wysiwyg__preview')?.innerHTML.slice(0, 160) })))`))
+  check('无法解析的公式保留源码并标记错误', errorPreviewReady)
   await delay(300)
   const errorMutations = await evaluate(`new Promise((resolve) => {
     const target = ${content}

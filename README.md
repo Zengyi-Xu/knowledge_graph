@@ -1,7 +1,8 @@
 # 知识图谱
 
 当前 v1.2.1 提供附带 Node 的 Windows x64 免安装网页包：解压后双击 `启动知识图谱.wsf`（无窗口启动），无需安装 Node、npm 或 Electron。
-详见 [免安装网页使用说明](docs/WEB_PORTABLE.md)。开发目录网页端仍可双击 `启动网页端.wsf`，
+详见 [免安装网页使用说明](docs/WEB_PORTABLE.md)；完整功能用法见 [使用手册](docs/USAGE.md)。
+开发目录网页端仍可双击 `启动网页端.wsf`，
 或按 [本地网页端说明](docs/LOCAL_WEB.md) 启动。
 
 本地优先的 Markdown 笔记 + 知识图谱应用。笔记之间用 `[[双链]]` 关联，在图谱视图里
