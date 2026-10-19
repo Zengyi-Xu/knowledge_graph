@@ -2,14 +2,17 @@
 
 ## 冻结单元（黑箱）——先看这一节，能省掉大量读码
 
-`frozen.json` + `scripts/frozen-check.mjs` 把 9 个单元锁成黑箱（完整契约与解冻流程：[docs/FROZEN.md](docs/FROZEN.md)）：
+`frozen.json` + `scripts/frozen-check.mjs` 把 18 个单元锁成黑箱（完整契约与解冻流程：[docs/FROZEN.md](docs/FROZEN.md)）：
 `ui-kit`(`src/components/ui/**`)、`csl-data`、`editor-runtime`(`public/vditor/**`)、`md-parser`(`md.ts`+`tex.ts`)、
-`md-render`(`Markdown.tsx`+`previewTheme.ts`+`markdown-base.css`+`themes/**`)、`vault-format`、`vault-io`、`zotero-rules`、`desktop-bridge`(`electron/**`+`types/desktop.d.ts`)。
+`md-render`(`Markdown.tsx`+`previewTheme.ts`+`markdown-base.css`+`themes/**`)、`vault-format`、`vault-io`、`zotero-rules`、`desktop-bridge`(`electron/**`+`types/desktop.d.ts`)、
+`vault-gate`、`note-store`(`types/note.ts`+`noteStore.ts`)、`md-import`、`math-pipeline`(`mathMarkup.ts`+`katexRuntime.ts`)、
+`lit-view-logic`(`components/literature/` 的 5 个纯模块)、`citation-copy`(`copyCitation.ts`+`rtfField.ts`)、
+`pdf-source`(`pdfSource.ts`+`localPdfFallback.ts`)、`ai-chat`(`aiChat.ts`+`aiPrompts.ts`)、`capabilities`(`env.ts`+`capabilities.ts`+`degrade.ts`)。
 
 - **不要读这些单元的内部实现，也不要改**。要什么能力直接查契约：Markdown 语法 → `docs/MARKDOWN_RENDERER.md`；
   vault 字段 → `docs/VAULT_FORMAT.md`；桌面能力 → `src/types/desktop.d.ts`；其余 → `docs/FROZEN.md`。
   手写冻结模块开头有 `FROZEN(...)` 标记，看到就停手。
-- 校验：`npm run frozen:check`（秒级，看有没有碰坏锁定内容）；`npm run test:frozen` = 校验 + 全部守护测试（约 40s）。
+- 校验：`npm run frozen:check`（秒级，看有没有碰坏锁定内容）；`npm run test:frozen` = 校验 + 全部守护测试（几分钟，含无头 Chrome 组）。
 - 确实必须改（不是顺手重构）：先让 `test:frozen` 全绿，再 `npm run frozen:update -- "<单元> <理由>"` 显式解冻，并同步契约文档。
 
 ## 常用命令

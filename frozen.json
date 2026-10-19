@@ -708,6 +708,335 @@
         ],
         "baselineAt": "2026-10-19"
       }
+    },
+    {
+      "id": "note-store",
+      "tier": 2,
+      "check": "exports",
+      "title": "笔记数据模型与纯数据操作（类型定义、缓存、合并、双链边）",
+      "files": [
+        "src/types/note.ts",
+        "src/lib/noteStore.ts"
+      ],
+      "guards": [
+        "test:use-notes"
+      ],
+      "locked": {
+        "exports": {
+          "src/types/note.ts": [
+            "GRADE_COLORS",
+            "GRADE_META",
+            "Grade",
+            "LiteratureMeta",
+            "NOTE_TYPE_META",
+            "Note",
+            "NoteType",
+            "emptyLiterature",
+            "extractLinks",
+            "uid"
+          ],
+          "src/lib/noteStore.ts": [
+            "EMPTY_FLAG",
+            "NOTES_CACHE_KEY",
+            "clearExplicitlyEmpty",
+            "createNotesFrom",
+            "indexByTitle",
+            "isExplicitlyEmpty",
+            "markExplicitlyEmpty",
+            "mergeNotesByTitle",
+            "noteEdges",
+            "patchNotes",
+            "readCachedNotes",
+            "sanitizeIncomingNotes",
+            "seedNotes",
+            "writeCachedNotes"
+          ]
+        },
+        "baselineAt": "2026-10-19"
+      }
+    },
+    {
+      "id": "md-import",
+      "tier": 2,
+      "check": "exports",
+      "title": "外部 Markdown 导入解析（front matter 标量剥引号、CRLF/BOM）",
+      "files": [
+        "src/lib/mdImport.ts"
+      ],
+      "guards": [
+        "test:md-import"
+      ],
+      "locked": {
+        "exports": {
+          "src/lib/mdImport.ts": [
+            "parseMdImport"
+          ]
+        },
+        "baselineAt": "2026-10-19"
+      }
+    },
+    {
+      "id": "math-pipeline",
+      "tier": 2,
+      "check": "exports",
+      "title": "公式渲染管线（占位抽取 + KaTeX 运行时水合）",
+      "files": [
+        "src/lib/mathMarkup.ts",
+        "src/lib/katexRuntime.ts"
+      ],
+      "guards": [
+        "test:math"
+      ],
+      "locked": {
+        "exports": {
+          "src/lib/mathMarkup.ts": [
+            "MATH_PLACEHOLDER_RE",
+            "MathExpression",
+            "PreparedMathMarkdown",
+            "prepareMathMarkdown"
+          ],
+          "src/lib/katexRuntime.ts": [
+            "hydrateMath",
+            "hydrateVditorMath",
+            "installKatexDocumentStyles",
+            "installKatexStyles"
+          ]
+        },
+        "baselineAt": "2026-10-19"
+      }
+    },
+    {
+      "id": "lit-view-logic",
+      "tier": 2,
+      "check": "exports",
+      "title": "文献表视图纯逻辑（分类树、筛选分页、PDF 徽标、导入输入、同步流程）",
+      "files": [
+        "src/components/literature/collectionTree.ts",
+        "src/components/literature/literatureQuery.ts",
+        "src/components/literature/pdfCell.ts",
+        "src/components/literature/importInput.ts",
+        "src/components/literature/zoteroSyncFlow.ts"
+      ],
+      "guards": [
+        "test:lit-view",
+        "test:lit-dom"
+      ],
+      "locked": {
+        "exports": {
+          "src/components/literature/collectionTree.ts": [
+            "ALL_COLLECTIONS",
+            "CollectionNode",
+            "NO_COLLECTION",
+            "collectionLabel",
+            "collectionTreeOf",
+            "findCollection",
+            "matchesCollectionFilter",
+            "realCollections",
+            "topCollection",
+            "topCollections"
+          ],
+          "src/components/literature/literatureQuery.ts": [
+            "ALL_VENUES",
+            "LiteratureQueryState",
+            "PAGE_SIZE",
+            "PageSlice",
+            "PageState",
+            "PreparedQuery",
+            "SortKey",
+            "VENUE_OPTION_LIMIT",
+            "hasActiveFilters",
+            "initialQueryState",
+            "matchesQuery",
+            "nextVisibleCount",
+            "paginate",
+            "prepareQuery",
+            "queryFingerprint",
+            "resetPageOnFilterChange",
+            "sanitizeYearInput",
+            "selectLiterature",
+            "sortMark",
+            "sortNotes",
+            "sortValue",
+            "toggleSort",
+            "venueOptionsOf"
+          ],
+          "src/components/literature/pdfCell.ts": [
+            "PdfCellView",
+            "hasReadablePdf",
+            "pdfCellView"
+          ],
+          "src/components/literature/importInput.ts": [
+            "looksLikeArxivId"
+          ],
+          "src/components/literature/zoteroSyncFlow.ts": [
+            "PREVIEW_LIMIT",
+            "ZoteroSyncSource",
+            "applyAction",
+            "hasHiddenUpdates",
+            "previewUpdates",
+            "readAction",
+            "readSyncPlan"
+          ]
+        },
+        "baselineAt": "2026-10-19"
+      }
+    },
+    {
+      "id": "citation-copy",
+      "tier": 2,
+      "check": "exports",
+      "title": "引用复制与 Word RTF 域代码（GB/T 7714、APA、BibTeX）",
+      "files": [
+        "src/lib/copyCitation.ts",
+        "src/lib/rtfField.ts"
+      ],
+      "guards": [
+        "test:lit"
+      ],
+      "locked": {
+        "exports": {
+          "src/lib/copyCitation.ts": [
+            "copyCitationFor"
+          ],
+          "src/lib/rtfField.ts": [
+            "ClipboardParts",
+            "bibliographyRtfFromText",
+            "buildCitationFieldRtf",
+            "buildClipboardParts",
+            "rtfEscape",
+            "wrapRtfDocument",
+            "writeBibliographyClipboard",
+            "writeCitationClipboard"
+          ]
+        },
+        "baselineAt": "2026-10-19"
+      }
+    },
+    {
+      "id": "pdf-source",
+      "tier": 2,
+      "check": "exports",
+      "title": "PDF 来源优先级链与本地兜底匹配（localPdf → Zotero 多 key → 标题兜底）",
+      "files": [
+        "src/lib/pdfSource.ts",
+        "src/lib/localPdfFallback.ts"
+      ],
+      "guards": [
+        "test:lit-view",
+        "test:web"
+      ],
+      "locked": {
+        "exports": {
+          "src/lib/pdfSource.ts": [
+            "LoadedPdf",
+            "PdfSource",
+            "annotationStoreId",
+            "cachedPdfSource",
+            "externalPdfSource",
+            "loadPdfSource",
+            "loadPdfSourceCached",
+            "openPdfSourceExternally",
+            "pdfSourceKey",
+            "preferredPdfSource"
+          ],
+          "src/lib/localPdfFallback.ts": [
+            "LocalPdfMatch",
+            "clearLocalPdfMatch",
+            "ensureLocalPdfMatches",
+            "localPdfFallbackVersion",
+            "localPdfMatch",
+            "subscribeLocalPdfFallback"
+          ]
+        },
+        "baselineAt": "2026-10-19"
+      }
+    },
+    {
+      "id": "ai-chat",
+      "tier": 2,
+      "check": "exports",
+      "title": "AI 面板纯逻辑（上下文装配、历史截断、任务模板）",
+      "files": [
+        "src/lib/aiChat.ts",
+        "src/lib/aiPrompts.ts"
+      ],
+      "guards": [
+        "test:ai-chat"
+      ],
+      "locked": {
+        "exports": {
+          "src/lib/aiChat.ts": [
+            "AiChatMessage",
+            "AiProviderId",
+            "CHAT_SYSTEM_PROMPT",
+            "CONTEXT_SCOPE_LABEL",
+            "ContextScope",
+            "NoteContext",
+            "NoteContextOptions",
+            "PROVIDER_LABEL",
+            "noteContextFor",
+            "trimChatHistory",
+            "withNoteContext"
+          ],
+          "src/lib/aiPrompts.ts": [
+            "AiTask",
+            "SUMMARY_TAG_PREFIX",
+            "buildTask"
+          ]
+        },
+        "baselineAt": "2026-10-19"
+      }
+    },
+    {
+      "id": "capabilities",
+      "tier": 2,
+      "check": "exports",
+      "title": "能力检测与降级口径（桥检测、移动端降级决策）",
+      "files": [
+        "src/lib/env.ts",
+        "src/lib/capabilities.ts",
+        "src/lib/degrade.ts"
+      ],
+      "guards": [
+        "test:mobile"
+      ],
+      "locked": {
+        "exports": {
+          "src/lib/env.ts": [
+            "APP_NAME",
+            "APP_VERSION",
+            "BUILD_ENV",
+            "ENV_LABEL",
+            "ZOTERO_DB_KEY",
+            "isDevApp",
+            "readSetting",
+            "removeSetting",
+            "storageKey",
+            "writeSetting"
+          ],
+          "src/lib/capabilities.ts": [
+            "CapabilityEnv",
+            "CapabilityId",
+            "CapabilityReport",
+            "CapabilityScope",
+            "CapabilityState",
+            "capabilitiesFor",
+            "capability",
+            "capabilitySummary",
+            "currentCapabilities",
+            "isHostClient",
+            "isLoopbackHost",
+            "readCapabilityEnv",
+            "splitCapabilities"
+          ],
+          "src/lib/degrade.ts": [
+            "DegradeKind",
+            "degradedReason",
+            "toastDegraded"
+          ]
+        },
+        "baselineAt": "2026-10-19"
+      }
     }
   ],
   "history": [
@@ -768,6 +1097,20 @@
       "at": "2026-10-19",
       "units": [],
       "reason": "desktop-bridge AI 网关扩展 DeepSeek provider、多轮 messages 与 model 参数"
+    },
+    {
+      "at": "2026-10-19",
+      "units": [
+        "note-store",
+        "md-import",
+        "math-pipeline",
+        "lit-view-logic",
+        "citation-copy",
+        "pdf-source",
+        "ai-chat",
+        "capabilities"
+      ],
+      "reason": "新增 8 个契约冻结单元：note-store / md-import / math-pipeline / lit-view-logic / citation-copy / pdf-source / ai-chat / capabilities（首版发布后在真实库上稳定运行，导出形状已定）"
     }
   ]
 }

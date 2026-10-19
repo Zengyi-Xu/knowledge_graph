@@ -11,7 +11,8 @@ function check(label: string, fn: () => void) {
   console.log(`✓ ${label}`)
 }
 
-const fixture = fs.readFileSync(path.resolve('scripts/fixtures/latex-regression.md'), 'utf8')
+// 行尾归一：Windows 上 core.autocrlf 会把夹具签出成 CRLF，断言按 LF 写。
+const fixture = fs.readFileSync(path.resolve('scripts/fixtures/latex-regression.md'), 'utf8').replace(/\r\n/g, '\n')
 const prepared = prepareMathMarkdown(fixture)
 
 check('截图原文中的行内与块级公式全部被专业引擎接管', () => {

@@ -38,6 +38,14 @@
 | `vault-io` | 契约冻结 | `src/lib/vaultFs.ts`、`src/lib/vaultLoad.ts`、`src/lib/syncFile.ts` | vault 读写通道与同步文件封装 | `test:vault-e2e` |
 | `zotero-rules` | 契约冻结 | `src/lib/zoteroMeta.ts`、`src/lib/zoteroImport.ts`、`src/lib/zoteroSync.ts` | Zotero 分类/标签/去重/导入规则 | `test:zotero`、`test:zotero-import`、`test:zotero-e2e` |
 | `desktop-bridge` | 契约冻结 | `electron/*.cjs`、`src/types/desktop.d.ts` | 页面 ↔ 主进程的 27 个方法 + 24 个 IPC 通道 | 契约交叉校验（内置）、`test:vault-gate` |
+| `note-store` | 契约冻结 | `src/types/note.ts`、`src/lib/noteStore.ts` | 笔记数据模型（类型/元数据常量）与纯数据操作（缓存、合并、双链边） | `test:use-notes` |
+| `md-import` | 契约冻结 | `src/lib/mdImport.ts` | 外部 Markdown 导入解析（front matter 标量剥引号、CRLF/BOM） | `test:md-import` |
+| `math-pipeline` | 契约冻结 | `src/lib/mathMarkup.ts`、`src/lib/katexRuntime.ts` | 公式渲染管线（占位抽取 + KaTeX 运行时水合） | `test:math` |
+| `lit-view-logic` | 契约冻结 | `src/components/literature/` 的 5 个纯模块 | 文献表视图逻辑（分类树、筛选分页、PDF 徽标、导入输入、同步流程） | `test:lit-view`、`test:lit-dom` |
+| `citation-copy` | 契约冻结 | `src/lib/copyCitation.ts`、`src/lib/rtfField.ts` | 引用复制与 Word RTF 域代码 | `test:lit` |
+| `pdf-source` | 契约冻结 | `src/lib/pdfSource.ts`、`src/lib/localPdfFallback.ts` | PDF 来源优先级链与本地兜底匹配 | `test:lit-view`、`test:web` |
+| `ai-chat` | 契约冻结 | `src/lib/aiChat.ts`、`src/lib/aiPrompts.ts` | AI 面板纯逻辑（上下文装配、历史截断、任务模板） | `test:ai-chat` |
+| `capabilities` | 契约冻结 | `src/lib/env.ts`、`src/lib/capabilities.ts`、`src/lib/degrade.ts` | 能力检测与降级口径 | `test:mobile` |
 
 ## 各单元契约
 
@@ -127,6 +135,61 @@ splitRow(line: string): string[]
 改契约 = 同时动 `preload.cjs` + `desktop.d.ts`（+ 主进程 handler）+ `frozen:update`。
 主进程脚本里的其余实现（窗口管理、安全头、路径白名单）是黑箱：**排查问题时才读，功能开发只用上面的方法**。
 
+### note-store（契约冻结）
+
+契约 = `src/types/note.ts` 与 `src/lib/noteStore.ts` 的导出名：`Note` / `LiteratureMeta` / `NoteType` 等数据模型、
+`NOTE_TYPE_META` / `GRADE_META` 常量，以及纯数据操作（`readCachedNotes` / `createNotesFrom` / `patchNotes` /
+`mergeNotesByTitle` / `sanitizeIncomingNotes` / `noteEdges` 等）。注意：锁的是**导出名**，接口字段的增删不被锁，
+但数据模型字段变动必须同步 `vaultFormat` 的读写（字段 = 能力，见 vault-gate）。
+守护测试 `test:use-notes` 用真实临时 vault 驱动真实 hook，行为回归覆盖这些纯函数。
+
+### md-import（契约冻结）
+
+契约 = `src/lib/mdImport.ts` 的导出名 + 两条硬规则：**YAML 标量必须剥外层引号**
+（`title: "…"` / `tags: ["…"]`，否则引号会进正文、落盘后双重转义）；CRLF / BOM / 单引号 / 块状 tags 都要认。
+守护测试 `test:md-import`（8 项）。
+
+### math-pipeline（契约冻结）
+
+契约 = 两个模块的导出名：`prepareMathMarkdown` 把 `$…$` / `$$…$$` / `\(...\)` / 数学环境抽成
+`KGMATHPLACEHOLDER<n>END`（代码围栏与货币金额不误判、未闭合块不吞后文），
+`katexRuntime` 的 `hydrateMath` / `installKatexStyles` / `hydrateVditorMath` 负责在预览与编辑器里水合。
+消费方是 `PreviewContent.tsx` / `WysiwygEditor.tsx`（不在冻结里，动态 import 接入）。
+守护测试 `test:math`（7 项，真实截图回归 + KaTeX 全量渲染）。
+
+### lit-view-logic（契约冻结）
+
+契约 = `src/components/literature/` 下 5 个纯模块的导出名：`collectionTree`（建树与子树唯一篇数计数）、
+`literatureQuery`（筛选 → 排序 → 150 行分页）、`pdfCell`（PDF 徽标判定）、`importInput`（DOI/arXiv/Bib/RIS 输入识别）、
+`zoteroSyncFlow`（同步对话框流程）。**改规则改这里的纯模块，别把分支写回组件**——组件（`LiteratureTable.tsx` 等）
+不在冻结里。守护测试 `test:lit-view`（62 项纯逻辑 + SSR）与 `test:lit-dom`（45 项无头 Chrome 真实点击）。
+
+### citation-copy（契约冻结）
+
+契约 = `copyCitationFor`（GB/T 7714 / APA / BibTeX 三格式进剪贴板）与 `rtfField` 的 RTF 域代码函数
+（`buildCitationFieldRtf` / `bibliographyRtfFromText` / `buildClipboardParts` / `writeCitationClipboard` /
+`writeBibliographyClipboard`）：产物必须是 Word 可更新的真实域（`ADDIN ZOTERO_ITEM`，与 Zotero 兼容，
+Alt+F9 可见域代码）。守护测试 `test:lit` 的 H 组（8 项，含转义快照与多 key 选取）。
+
+### pdf-source（契约冻结）
+
+契约 = PDF 打开优先级链（`preferredPdfSource` / `externalPdfSource`）：`localPdf` → Zotero 多 key 回退 →
+`localPdfFallback` 按标题的内存兜底（并列不猜、一份 PDF 只归一篇、不落盘，「记到这篇笔记」才写 `localPdf`）；
+附件不算外部来源。另含字节缓存（`loadPdfSourceCached`）与标注仓库 id（`annotationStoreId`）。
+守护测试 `test:lit-view`（徽标与来源优先级）与 `test:web`（服务端 `--pdf-root` 授权与协议 URL）。
+
+### ai-chat（契约冻结）
+
+契约 = `aiChat.ts`（`noteContextFor` 上下文装配：不附 / 当前笔记 / 当前笔记+双链反链、60k 截断；
+`trimChatHistory` 只留最近 20 条）与 `aiPrompts.ts`（任务模板与 `汇总:` 标签前缀）。
+**自由提问只读**——这里没有任何写盘路径。守护测试 `test:ai-chat`（14 项）。
+
+### capabilities（契约冻结）
+
+契约 = `env.ts`（运行环境判定）、`capabilities.ts`（桥 / 触摸 / 存储能力检测）与 `degrade.ts`（降级决策）的
+导出名；降级口径见 [MOBILE_PHASE1_REPORT.md](MOBILE_PHASE1_REPORT.md)。守护测试 `test:mobile`
+（325 项，无头 Chrome 六档宽度 × 有桥/无桥）——较重，日常回归可只跑 `frozen:check`，改动本单元时才需要全量。
+
 ## 解冻流程
 
 1. 先确认真的必须改（顺手重构、格式化、"顺便优化"都不算）。
@@ -137,9 +200,11 @@ splitRow(line: string): string[]
 
 ## 不冻结的部分（边界）
 
-界面与交互（`App.tsx`、`useNotes.ts`、`GraphView.tsx`、`NoteEditor.tsx`、`NoteList.tsx`、`LiteratureView.tsx`、`PdfViewer.tsx`）、
-样式（`index.css`、`App.css`）、正在校准的模块（`literature.ts`、`attachments.ts`、`pdfAnchor.ts`、`pdfMatch.ts`、`aiOps.ts`、`rtfField.ts`）、
-`scripts/**` 与文档。原则：**改动频繁或还没定型的，不冻**——冻结只用来保护"已经不需要再看"的东西。
+界面与交互（`App.tsx`、`useNotes.ts`、`GraphView.tsx`、`NoteEditor.tsx`、`NoteList.tsx`、`LiteratureView.tsx`、`PdfViewer.tsx`、
+`src/components/literature/` 的组件与 `useLiteratureQuery.ts`）、样式（`index.css`、`App.css`）、
+正在校准的模块（`literature.ts`、`attachments.ts`、`pdfAnchor.ts`、`pdfMatch.ts`、`aiOps.ts`、`litCluster.ts`、`graphModel.ts`、
+`graphPhysics.ts`、`topicLinks.ts`、`titleClean.ts`、`pwa.ts`、`inlinePdfPanel.ts`）、`scripts/**` 与文档。
+原则：**改动频繁或还没定型的，不冻**——冻结只用来保护"已经不需要再看"的东西。
 
 ## 变更记录
 
@@ -157,3 +222,11 @@ splitRow(line: string): string[]
 - 2026-10-19：`desktop-bridge` 的 AI 网关扩展为双提供方（`kimi` / `deepseek`），
   `aiStatus` 改为接收 `{ provider, configPath? }`，`aiComplete` 增加 `messages`（多轮）
   与 `model` 参数；网页桥接同步。方法名与 IPC 通道名不变，网页端 56 项回归仍全绿。
+- 2026-10-19：**扩容到 18 个单元**：首版发布后在真实库上稳定运行的 8 组模块纳入契约冻结 ——
+  `note-store`（数据模型与纯数据操作）、`md-import`、`math-pipeline`、`lit-view-logic`、
+  `citation-copy`（rtfField 从「正在校准」毕业）、`pdf-source`、`ai-chat`、`capabilities`。
+  全部为 tier 2（锁导出名 + 守护测试），实现仍可改。新单元守护测试当日全绿：
+  test:md-import 8、test:math 7、test:ai-chat 14、test:lit 48、test:lit-view 62、test:lit-dom 45、
+  test:use-notes 10、test:web 56、test:mobile 325。
+  顺带修了 `test:math` 的行尾脆弱性：夹具在 `core.autocrlf=true` 的 Windows 签出成 CRLF 会误挂，
+  现在读入时先归一成 LF。
