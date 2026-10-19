@@ -18,7 +18,8 @@ import { FolderMoveDialog } from '@/components/FolderMoveDialog'
 import { DataSafetyStatus } from '@/components/DataSafetyStatus'
 import { BackupTransferMenu } from '@/components/BackupTransferMenu'
 import { NOTE_TYPE_META, GRADE_META } from '@/types/note'
-import type { NoteType, Grade, Note } from '@/types/note'
+import type { NoteType, Note } from '@/types/note'
+import { parseMdImport } from '@/lib/mdImport'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
@@ -83,27 +84,6 @@ function appendAiLog(entry: AiLogEntry) {
   } catch {
     /* 日志失败静默 */
   }
-}
-
-/** 解析要导入的 md：frontmatter 读 type / grade / tags / title，正文去掉 frontmatter */
-function parseMdImport(fileName: string, text: string) {
-  const fmMatch = text.match(/^---\n([\s\S]*?)\n---\n?/)
-  const get = (k: string) => fmMatch?.[1].match(new RegExp(`^${k}:\\s*(.+)$`, 'm'))?.[1]?.trim()
-  let type: NoteType = 'other'
-  let grade: Grade = ''
-  let tags: string[] = []
-  let content = text
-  if (fmMatch) {
-    content = text.slice(fmMatch[0].length)
-    const t = get('type')
-    if (t && t in NOTE_TYPE_META) type = t as NoteType
-    const g = get('grade')
-    if (g && g in GRADE_META) grade = g as Grade
-    const tg = get('tags')
-    if (tg) tags = tg.replace(/^\[|\]$/g, '').split(',').map((s) => s.trim()).filter(Boolean)
-  }
-  const title = get('title') ?? fileName.replace(/\.(md|markdown)$/i, '')
-  return { title, type, grade, tags, content: content.trim() }
 }
 
 export default function App() {

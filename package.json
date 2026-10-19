@@ -29,6 +29,7 @@
     "test:lit-dom": "node scripts/lit-view-dom-test.mjs",
     "test:vault-e2e": "node scripts/vault-e2e.mjs",
     "test:md": "node scripts/md-selftest.mjs",
+    "test:md-import": "esbuild scripts/md-import-selftest.ts --bundle --platform=node --format=cjs --target=node20 --alias:@=./src --outfile=.tmp-vault-test/md-import-selftest.cjs && node .tmp-vault-test/md-import-selftest.cjs",
     "test:md-render": "esbuild scripts/md-ssr-entry.tsx --bundle --platform=node --format=cjs --target=node20 --alias:@=./src --outfile=.tmp-md-visual/ssr.cjs && node .tmp-md-visual/ssr.cjs",
     "test:math": "esbuild scripts/math-render-selftest.ts --bundle --platform=node --format=cjs --target=node20 --alias:@=./src --outfile=.tmp-math-visual/selftest.cjs && node .tmp-math-visual/selftest.cjs",
     "visual:md": "node scripts/md-visual.mjs",

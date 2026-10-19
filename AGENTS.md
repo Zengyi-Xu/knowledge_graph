@@ -21,6 +21,8 @@
   **不要用 `manualChunks` 给懒加载 chunk 改名**：Rollup 会把它提升成入口的静态 import（index.html 出现 modulepreload，
   2.7MB 的 citation chunk 会在首屏就下载）。
 - 构建 / 回归：`npm run build`（tsc -b + vite build）、`npm run test:vault | test:vault-gate | test:use-notes | test:lit | test:web | test:zotero | test:zotero-import | test:zotero-e2e`
+- 导入 .md 的解析在 `src/lib/mdImport.ts`（`npm run test:md-import`，8 项）。**YAML 标量必须剥外层引号**（`title: "…"` / `tags: ["…"]`），
+  否则引号会被当成标题/标签正文、落盘后序列化成 `title: "\"…\""`；同时支持单引号、块状 tags、CRLF/BOM。
 - `npm run test:use-notes`（约 15s）：useNotes 的特征测试——真实临时 vault（`electron/vaultFs.cjs`）+ 极简 React 替身（`scripts/harness/react-shim.ts`）在 Node 里驱动真实 hook，锁住
   「装载完成前不写盘 / debounce / 加载期冲突暂停写盘 / 离线读取失败中止 / 未知字段保留 / 未纳管 md 不动 / 删除数 0 / 双链与图谱边」。
 - useNotes 已按关注点拆开（`NotesApi` 门面不变）：纯数据 `src/lib/noteStore.ts`；编排 `src/hooks/useVaultSession.ts`（账本 `useVaultLedger()` + 装载门禁 + 分批载入）、
