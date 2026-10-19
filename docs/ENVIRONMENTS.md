@@ -4,16 +4,16 @@
 
 ## 一、两条清晰的运行路径
 
-| | 开发版 | 正式版 |
+| | 开发版 | 正式发行版 |
 | --- | --- | --- |
-| 怎么起 | `npm run dev`（浏览器）、`npm run dev:desktop` | 双击 `release/v<版本>/` 里的免安装 exe，或安装版 |
-| 前端产物 | `dist-dev/` | `dist/` |
-| 构建命令 | `npm run build:dev`（`vite build --mode development`） | `npm run build`（`vite build`） |
+| 怎么起 | `npm run dev`；需要兼容验证时 `npm run desktop:dev` | 解压 `knowledge-graph-web-<版本>-windows-x64.zip` 后双击 `启动知识图谱.wsf`（无窗口；`启动知识图谱.cmd` 是窗口版） |
+| 前端产物 | Vite 开发服务；Electron 兼容验证使用 `dist-dev/` | `dist/`，由随包 Node 启动本地服务 |
+| 构建命令 | `npm run build:dev`（仅兼容验证） | `npm run build` 后 `npm run release:web` |
 | 构建期常量 | `__APP_ENV__ = 'development'` | `__APP_ENV__ = 'production'` |
 
 `vite.config.ts` 按 `mode` 决定 `build.outDir` 并把 `__APP_ENV__` / `__APP_VERSION__`
-通过 `define` 注入前端；`electron/main.cjs` 用 `app.isPackaged` 判断当前是开发版还是正式版，
-加载 `dist-dev/` 或 `dist/`。两条路径互不覆盖。
+通过 `define` 注入前端。冻结的 `electron/main.cjs` 仍能加载 `dist-dev/` 或 `dist/`，用于兼容和测试；
+当前发行流程不再调用 electron-builder，也不生成 EXE 或安装器。
 
 ## 二、数据隔离（关键）
 
@@ -24,15 +24,15 @@
 开发版：kg-dev-notes-v1 / kg-dev-vault-dir-v1 / kg-dev-graph-physics-v1 …
 ```
 
-再加上 Electron 的 `userData` 分开（`知识图谱-dev` vs `知识图谱`），开发版与正式版
-的 `localStorage` 属于两套完全独立的 Chromium profile：
+Electron 兼容测试的 `userData`（`知识图谱-dev`）与普通浏览器 profile 分开，因此其
+`localStorage` 也相互独立：
 
-- 开发版不会读到正式版的 vault 目录、同步文件路径、图谱参数；反之亦然。
+- 开发版不应读取正式 vault、同步文件路径或图谱参数。
 - 历史键（`kaust-knowledge-graph-*` 等旧命名）只在**正式版**里做一次前向迁移，
   开发版不会把它们搬进来（否则又把正式数据带进开发环境了）。
 
-> 仍然要注意：**vault 目录是共享的**。如果手工在开发版里选中了正式版正在用的笔记目录，
-> 两边都会写同一批 md。开发时建议选一个单独的测试目录。
+> 仍然要注意：**vault 目录不是靠 profile 隔离的**。如果开发时手工选中真实笔记目录，
+> 仍会写同一批 md。开发和测试必须使用单独的测试 vault。
 
 ## 三、开发版专属行为
 
@@ -41,7 +41,8 @@
 - DevTools 可用；正式版 `devTools: false`，且一旦被打开就立刻关闭。
 - 启动时在终端打印 `env=… userData=…`，方便确认当前跑的是哪一套。
 
-## 四、临时把正式版当开发版排查
+## 四、Electron 兼容层边界
 
-在地址栏路径后加 `?dev=1`（例如 `kg://desktop/?dev=1`）会切到开发版的键前缀。
-这只影响存储键，不改变 exe 是正式版的判断；排查完请关掉，避免设置分叉。
+`electron/**` 与 `src/types/desktop.d.ts` 是冻结单元。本地网页服务仍复用其中经过测试的文件、
+Zotero 和 AI 后端能力，因此暂不删除；它们不是新发行路线。若未来移动桥与网页桥完全替代这些
+契约，应按 `docs/FROZEN.md` 的解冻流程另行迁移，不能在发行清理中顺手重构。

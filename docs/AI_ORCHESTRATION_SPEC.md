@@ -38,15 +38,16 @@ collections: ["硅光/电光调制器", "可见光通信"]   # Zotero 分类路�
 
 ### 自动标签规则（确定性生成，不依赖模型）
 
-每篇文献自动打三组标签（已存在则不重复）：
+每篇文献自动打两组标签（已存在则不重复）：
 
 | 标签 | 例子 | 来源 |
 | --- | --- | --- |
-| `方向:<一级分类>` | `方向:硅光` | collections 路径第一段 |
 | `期刊:<venue>` | `期刊:Science` | LiteratureMeta.venue |
 | `年份:<year>` | `年份:2026` | LiteratureMeta.year |
 
-作者名不打标签（会爆炸）；方向标签超过 12 个一级分类时取前 12，其余归 `方向:其他`。
+分类不打标签：**分类树只存在 `literature.collections`**（完整路径）。旧版把树压平成
+`方向:<一级分类>` 标签，会与 `collections` 漂移（分类被清空后标签仍留着），现已废弃，
+同步/去重时一律清掉。作者名不打标签（会爆炸）。
 
 ### 与已有 2267 篇文献的去重合并
 
@@ -167,20 +168,41 @@ collections: ["硅光/电光调制器", "可见光通信"]   # Zotero 分类路�
 
 - 顶栏「AI 统筹」按钮 → 面板，内置任务模板：
   1. 同步 Zotero 分类（= A 的启动入口）
-  2. 整理文献标签/分类（全库或按 `方向:` 限定范围）
+  2. 整理文献标签/分类（全库或按一级分类限定范围）
   3. 生成方向汇总（选一级分类 → 产出「汇总」笔记：该方向文献清单、
      趋势、值得读 Top-N，互链 [[citekey标题]]）
   4. 图谱健康检查（孤儿文献、断链、疑似重复）
-- 每次运行记录日志（任务、模型、耗时、改动统计），存 `vault/sync/ai-log.json`。
+- **自由提问（2026-10-19 已实现）**：面板顶部有输入框，支持多轮对话；可选上下文
+  「不附笔记 / 当前笔记 / 当前笔记 + 关联（双链与反链，最多 8 篇，60k 字符截断）」。
+  回答用 Markdown 渲染，`[[标题]]` 可直接打开对应笔记。自由提问**只读**：不跑
+  operations、不写盘、不要求同步快照；要改笔记仍走任务模板或编辑器。
+- 每次运行任务记录日志（任务、模型、耗时、改动统计），存 `vault/sync/ai-log.json`。
+
+### 模型提供方（2026-10-19）
+
+网关在 `electron/aiGateway.cjs`，同时支持：
+
+- `kimi`：Kimi Code 的 anthropic-messages 网关，key 从 `~/.kimi/kimi-claw/openclaw.json`
+  的 `models.providers.kimi-coding` 只读提取。
+- `deepseek`：DeepSeek 官方 OpenAI 兼容接口（`https://api.deepseek.com/chat/completions`）。
+  key 优先级：环境变量 `DEEPSEEK_API_KEY` → `~/.zcode/v2/provider_config.json` 的
+  `deepseek` provider → `~/.dsh/.credentials.yaml`。模型默认取该 provider 的
+  `modelOrder[0]`（本机为 `deepseek-flash`），面板可切 `deepseek-flash` / `deepseek-v4-pro`。
+  可用 `DEEPSEEK_BASE_URL` / `DEEPSEEK_MODEL` / `DEEPSEEK_CONFIG` 覆盖。
+
+桌面端走 `ai:status` / `ai:complete` IPC，网页端走 `scripts/local-web.mjs` 的同一套
+`ai:*` 方法；两边都不接受调用方传任意 URL。网页服务重启后才会重新加载网关模块
+（Node require 缓存）。
 
 ### 安全边界（写死）
 
-- API key 只存在于本机：从 Kimi Code 配置只读提取、缓存进应用 userData，
+- API key 只存在于本机进程内：从 Kimi Code / ZCode / DSH 配置只读提取，
   **绝不写入仓库、日志、报错信息**（UI 上脱敏显示）。
 - AI 的产出只能走 operations JSON → 校验 → 确认 → `planVaultWrite`，
-  模型**永远没有直接文件写权限**。
+  模型**永远没有直接文件写权限**。自由提问不产生 operations，也不写盘。
 - 禁止 AI 触碰：`meta.json`、`attachments/` 二进制、未纳管 md、同步 JSON。
-- 每次 AI 运行前自动「保存到同步文件」做一次快照，失败则拒绝运行（可回滚）。
+- 每次 AI **任务**运行前自动「保存到同步文件」做一次快照，失败则拒绝运行（可回滚）；
+  自由提问不写盘，因此不做快照。
 
 ### 验收
 

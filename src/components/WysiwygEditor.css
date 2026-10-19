@@ -40,6 +40,8 @@
 .kg-vditor .vditor-wysiwyg .vditor-reset {
   max-width: 56em;
   margin: 0;
+  /* 注意：Vditor 会给可编辑根节点写内联 padding（实测 `padding: 10px 35px`），
+     这条声明的 40vh 底部留白平时被它盖掉；flow 档在文件末尾用 !important 加回来 */
   padding: 20px 16px 40vh 5px;
   font-size: 15px;
   line-height: 1.75;
@@ -77,8 +79,8 @@
   padding: 0 2px;
   cursor: pointer;
 }
-.kg-vditor .vditor-reset .kg-wiki[data-found='true'] { color: hsl(var(--primary)); }
-.kg-vditor .vditor-reset .kg-wiki[data-found='false'] { color: hsl(var(--muted-foreground)); }
+.kg-vditor .vditor-reset .kg-wiki[data-found='true'] { color: var(--md-link, #4f8cff) !important; }
+.kg-vditor .vditor-reset .kg-wiki[data-found='false'] { color: var(--md-muted, #6b7280) !important; }
 .kg-vditor .vditor-reset .kg-wiki[data-found='true']:hover { background-color: hsl(var(--primary) / 0.1); }
 .kg-vditor .vditor-reset .kg-wiki[data-found='false']:hover { background-color: hsl(var(--muted)); }
 .kg-vditor .vditor-reset .kg-wiki-bracket { font-size: 0; }
@@ -99,3 +101,40 @@
 .kg-vditor .vditor-wysiwyg > .vditor-reset > h4:hover:before { content: 'H4'; }
 .kg-vditor .vditor-wysiwyg > .vditor-reset > h5:hover:before { content: 'H5'; }
 .kg-vditor .vditor-wysiwyg > .vditor-reset > h6:hover:before { content: 'H6'; }
+
+/* ---------------------------------------------------------------- 流式布局（flow）
+ *
+ * 单栏「笔记」视图改用页面级滚动：头部、工具条、正文一起滚，正文不再自己滚。
+ * 这一档里 .vditor / .vditor-content / .vditor-wysiwyg 必须放弃「撑满容器」的高度与
+ * 自己的 overflow-y，否则它们会在页面里再造一个滚动区，正文又退回内部滚动。
+ * 故意放在文件末尾：要盖掉上面 `.kg-vditor …` 的 height: 100% 与 overflow-y: auto
+ * （同权重，靠次序取胜）。pre.vditor-reset 的底部留白由本档末尾那条 !important 负责。
+ */
+.kg-vditor-flow {
+  overflow: visible;
+}
+
+.kg-vditor-flow .vditor,
+.kg-vditor-flow .vditor-content,
+.kg-vditor-flow .vditor-wysiwyg,
+.kg-vditor-flow .vditor-wysiwyg pre.vditor-reset {
+  height: auto;
+  min-height: 0;
+  overflow: visible;
+}
+
+/* flow 档里正文铺满整列：Vditor 把可编辑根节点卡在 `max-width: 56em`（15px 字号 = 840px，
+   1440 窗口下这一列有 1156px，右侧白空三百多像素），并给它写内联 `padding: 10px 35px`。
+   max-width 靠同权重 + 次序盖掉；内联 padding 只能靠 !important。左右留白改成 16px：
+   与上面的标题栏 / 工具条（px-3 md:px-4）对齐，并列视图那一列本就窄，35px 两侧要吃掉近两成宽度。
+   底部 40vh 也要加回来 —— 内联 padding 把上面那条声明整条盖掉，少了它滚到底时最后一行会贴住
+   窗口下沿，打字时插入点顶在屏幕边缘（只加 bottom 不改 Vditor 的顶部 10px）。 */
+.kg-vditor-flow .vditor-wysiwyg .vditor-reset {
+  max-width: none;
+}
+
+.kg-vditor-flow .vditor-wysiwyg pre.vditor-reset {
+  padding-left: 16px !important;
+  padding-right: 16px !important;
+  padding-bottom: 40vh !important;
+}

@@ -361,5 +361,5 @@
 
 1. `npm run test:vault && npm run test:vault-e2e && npm run test:md && npm run test:lit`
    全绿；`npm run build && npm run lint` 干净。
-2. `npm run release:portable` 能打出免安装 exe 并写入 `release/` 版本目录。
+2. `npm run release:web` 能生成 Windows x64 免安装网页目录、ZIP 与校验值。
 3. 人工过一遍四 Phase 各自的「验收」清单。

@@ -12,6 +12,14 @@ const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
 const name = `knowledge-graph-web-${pkg.version}-windows-x64`
 const output = path.join(root, 'release', `web-v${pkg.version}`)
 const stage = path.join(output, name)
+// 重新打包同一版本（本地验收/返工）时用 --replace：把已有产物改名保留，绝不删除。
+const replace = args.includes('--replace')
+const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..+$/, '')
+const supersede = (target) => {
+  const archived = `${target}.superseded-${stamp}`
+  fs.renameSync(target, archived)
+  console.log(`已保留既有产物：${path.relative(root, archived)}`)
+}
 const node = path.resolve(option('--node', process.execPath))
 const nodeLicense = path.resolve(option('--node-license', path.join(root, '.tmp-release-tools', 'NODE-LICENSE')))
 const sha256 = (file) => createHash('sha256').update(fs.readFileSync(file)).digest('hex')
@@ -25,19 +33,26 @@ const copy = (source, destination) => {
 }
 fs.mkdirSync(output, { recursive: true })
 if (!args.includes('--zip-only')) {
-  if (fs.existsSync(stage)) throw new Error(`输出目录已存在：${stage}；为避免覆盖用户 data，请使用新的输出目录或版本号。`)
+  if (fs.existsSync(stage)) {
+    if (!replace) throw new Error(`输出目录已存在：${stage}；为避免覆盖用户 data，请改用新版本号，或用 --replace 把既有产物改名保留后重建。`)
+    supersede(stage)
+  }
   if (!fs.existsSync(path.join(root, 'dist', 'index.html'))) throw new Error('先运行 npm run build')
   const runtime = JSON.parse(execFileSync(node, ['-p', 'JSON.stringify({version:process.version,platform:process.platform,arch:process.arch})'], { encoding: 'utf8' }))
   if (runtime.platform !== 'win32' || runtime.arch !== 'x64') throw new Error('需要 Windows x64 Node 运行环境')
   if (!fs.existsSync(nodeLicense)) throw new Error('缺少对应 Node 版本的官方 LICENSE；请用 --node-license 指定')
   // dist can contain ignored local notes copied from public by Vite.
-  // Only ship the three application resource roots, never the whole dist tree.
-  for (const file of ['index.html', 'assets', 'vditor']) {
-    copy(path.join(root, 'dist', file), path.join(stage, 'dist', file))
+  // Only ship these application resources, never the whole dist tree.
+  // manifest/sw/icons 是 PWA 外壳（index.html 与 sw.js 都直接引用），缺一个就是 404。
+  for (const file of ['index.html', 'assets', 'vditor', 'manifest.webmanifest', 'sw.js', 'icons']) {
+    const source = path.join(root, 'dist', file)
+    if (!fs.existsSync(source)) throw new Error(`dist 缺少 ${file}；先运行 npm run build`)
+    copy(source, path.join(stage, 'dist', file))
   }
   copy(node, path.join(stage, 'runtime', 'node.exe'))
   copy(nodeLicense, path.join(stage, 'runtime', 'LICENSE'))
-  for (const file of ['local-web.mjs', 'local-bridge.js', 'start-portable-web.mjs']) {
+  // 服务端脚本要逐个列出（不是打包进来的）：新加模块时必须同步这里，否则包里的服务起不来
+  for (const file of ['local-web.mjs', 'local-bridge.js', 'start-portable-web.mjs', 'vault-write-guard.mjs', 'pdf-match.mjs']) {
     copy(path.join(root, 'scripts', file), path.join(stage, 'scripts', file))
   }
   await build({
@@ -50,10 +65,14 @@ if (!args.includes('--zip-only')) {
   const target = path.join(stage, 'node_modules', 'better-sqlite3')
   for (const file of ['lib', 'package.json', 'LICENSE']) copy(path.join(sqlite, file), path.join(target, file))
   copy(path.join(sqlite, 'prebuilds', 'win32-x64.node'), path.join(target, 'prebuilds', 'win32-x64.node'))
-  copy(path.join(root, 'build', 'web-portable', '启动知识图谱.cmd'), path.join(stage, '启动知识图谱.cmd'))
-  // Batch files must use Windows CRLF even when the source checkout uses LF.
-  const launcher = path.join(stage, '启动知识图谱.cmd')
-  fs.writeFileSync(launcher, fs.readFileSync(launcher, 'utf8').replace(/\r?\n/g, '\r\n'))
+  // 三个 Windows 启动器：.cmd 是窗口版（排查用），.wsf 是无窗口启动/停止（双击的默认入口）。
+  // 换行一律用 CRLF：.cmd 被 LF 截断过（echo 变 ho），.wsf 也跟 Windows 编辑器保持一致。
+  for (const launcher of ['启动知识图谱.cmd', '启动知识图谱.wsf', '停止知识图谱.wsf']) {
+    const source = path.join(root, 'build', 'web-portable', launcher)
+    const destination = path.join(stage, launcher)
+    copy(source, destination)
+    fs.writeFileSync(destination, fs.readFileSync(destination, 'utf8').replace(/\r?\n/g, '\r\n'))
+  }
   copy(path.join(root, 'build', 'web-portable', '配置.json'), path.join(stage, '配置.json'))
   copy(path.join(root, 'docs', 'WEB_PORTABLE.md'), path.join(stage, '使用说明.md'))
   copy(path.join(root, 'LICENSE'), path.join(stage, 'LICENSE'))
@@ -89,11 +108,13 @@ if (!args.includes('--stage-only')) {
     nodeVersion: execFileSync(path.join(stage, 'runtime', 'node.exe'), ['--version'], { encoding: 'utf8' }).trim(), files,
   }, null, 2) + '\n')
   const archive = path.join(output, `${name}.zip`)
-  if (fs.existsSync(archive)) throw new Error(`ZIP 已存在，拒绝追加或覆盖：${archive}`)
-  execFileSync(path.join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe'), [
-    '-NoProfile', '-NonInteractive', '-Command',
-    'Compress-Archive -LiteralPath $env:KG_ZIP_SOURCE -DestinationPath $env:KG_ZIP_DEST -CompressionLevel Optimal -ErrorAction Stop',
-  ], { cwd: output, stdio: 'inherit', env: { ...process.env, KG_ZIP_SOURCE: stage, KG_ZIP_DEST: archive } })
+  if (fs.existsSync(archive)) {
+    if (!replace) throw new Error(`ZIP 已存在，拒绝追加或覆盖：${archive}；重打包请加 --replace`)
+    supersede(archive)
+  }
+  const tar = path.join(process.env.SystemRoot, 'System32', 'tar.exe')
+  if (!fs.existsSync(tar)) throw new Error(`缺少 Windows 系统压缩工具：${tar}`)
+  execFileSync(tar, ['-a', '-c', '-f', archive, path.basename(stage)], { cwd: output, stdio: 'inherit' })
   const hash = sha256(archive)
   fs.writeFileSync(path.join(output, 'SHA256SUMS.txt'), `${hash}  ${path.basename(archive)}\n`)
   console.log(`ZIP：${archive}\n大小：${(fs.statSync(archive).size / 1024 / 1024).toFixed(1)} MiB\nSHA256：${hash}`)

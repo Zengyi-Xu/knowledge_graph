@@ -1,7 +1,13 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNotes } from '@/hooks/useNotes'
+import { useIsMobile } from '@/hooks/use-mobile'
+import { useCapabilities } from '@/hooks/useCapabilities'
 import { NoteList } from '@/components/NoteList'
-import { NoteEditor } from '@/components/NoteEditor'
+import { CapabilityBadge, CapabilityDialog } from '@/components/EnvironmentCapabilities'
+import { MobileTabBar, type MobileTab } from '@/components/MobileNav'
+import { toastDegraded } from '@/lib/degrade'
+import { preferredPdfSource } from '@/lib/pdfSource'
+import { setInlinePdfPanelSlot, useInlinePdfPanelOpen } from '@/lib/inlinePdfPanel'
 import type { Filters } from '@/components/GraphView'
 import { makeCitekey } from '@/lib/citekey'
 import { toLiteratureMeta } from '@/lib/literatureMeta'
@@ -9,26 +15,29 @@ import type { ImportedLit } from '@/lib/literature'
 import type { ZoteroSyncUpdate } from '@/lib/zoteroSync'
 import { ConflictDialog } from '@/components/ConflictDialog'
 import { FolderMoveDialog } from '@/components/FolderMoveDialog'
+import { DataSafetyStatus } from '@/components/DataSafetyStatus'
+import { BackupTransferMenu } from '@/components/BackupTransferMenu'
 import { NOTE_TYPE_META, GRADE_META } from '@/types/note'
 import type { NoteType, Grade, Note } from '@/types/note'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  ArrowLeft,
   Network,
   NotebookText,
-  Upload,
-  FileUp,
-  FolderSync,
-  FolderOpen,
-  HardDrive,
   Settings2,
-  Save,
   PanelLeft,
-  RefreshCw,
   Columns2,
   BookOpen,
-  Sparkles,
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import {
@@ -51,6 +60,9 @@ const GraphView = lazy(() => import('@/components/GraphView').then((m) => ({ def
 const LiteratureView = lazy(() => import('@/components/LiteratureView').then((m) => ({ default: m.LiteratureView })))
 const PdfReadingWorkspace = lazy(() => import('@/components/PdfReadingWorkspace').then((m) => ({ default: m.PdfReadingWorkspace })))
 const AiPanel = lazy(() => import('@/components/AiPanel').then((m) => ({ default: m.AiPanel })))
+// 笔记正文（预览 + 编辑）整条链都按需加载：Markdown 渲染、主题 CSS、md/tex 解析器、编辑器
+// 都跟着它走，入口 chunk 不再为「还没打开笔记」的首页付费（预算见 docs/BUNDLE_BUDGET.md）
+const NoteEditor = lazy(() => import('@/components/NoteEditor').then((m) => ({ default: m.NoteEditor })))
 
 type View = 'notes' | 'graph' | 'both' | 'literature'
 
@@ -73,6 +85,27 @@ function appendAiLog(entry: AiLogEntry) {
   }
 }
 
+/** 解析要导入的 md：frontmatter 读 type / grade / tags / title，正文去掉 frontmatter */
+function parseMdImport(fileName: string, text: string) {
+  const fmMatch = text.match(/^---\n([\s\S]*?)\n---\n?/)
+  const get = (k: string) => fmMatch?.[1].match(new RegExp(`^${k}:\\s*(.+)$`, 'm'))?.[1]?.trim()
+  let type: NoteType = 'other'
+  let grade: Grade = ''
+  let tags: string[] = []
+  let content = text
+  if (fmMatch) {
+    content = text.slice(fmMatch[0].length)
+    const t = get('type')
+    if (t && t in NOTE_TYPE_META) type = t as NoteType
+    const g = get('grade')
+    if (g && g in GRADE_META) grade = g as Grade
+    const tg = get('tags')
+    if (tg) tags = tg.replace(/^\[|\]$/g, '').split(',').map((s) => s.trim()).filter(Boolean)
+  }
+  const title = get('title') ?? fileName.replace(/\.(md|markdown)$/i, '')
+  return { title, type, grade, tags, content: content.trim() }
+}
+
 export default function App() {
   const api = useNotes()
   const { notes, hydrated, replaceAll, vault } = api
@@ -90,8 +123,6 @@ export default function App() {
   const [focusId, setFocusId] = useState<string | null>(null)
   const [listOpen, setListOpen] = useState(() => readSetting('list-open-v1') !== '0')
   const [filters, setFilters] = useState<Filters>({ types: new Set(), grades: new Set(), tags: new Set(), search: '' })
-  const fileRef = useRef<HTMLInputElement>(null)
-  const mdRef = useRef<HTMLInputElement>(null)
   const [syncPath, setSyncPath] = useState(() => readSetting(SYNC_PATH_KEY) ?? '')
   const [aiOpen, setAiOpen] = useState(false)
   const [aiTask, setAiTask] = useState<import('@/lib/aiPrompts').AiTask | null>(null)
@@ -102,9 +133,26 @@ export default function App() {
   const [conflict, setConflict] = useState<{ local: Note[]; remote: Note[] } | null>(null)
   /** 改类型（= 换文件夹）时的待确认迁移 */
   const [typeMove, setTypeMove] = useState<{ note: Note; to: NoteType; patch: Partial<Note> } | null>(null)
+  // ---- 移动端（<768px）：列表 ⇄ 详情分屏切换 + 底部导航 + 存储/能力面板 ----
+  // 桌面与平板沿用原有布局；这里的状态在 ≥768px 时不参与渲染。
+  const isMobile = useIsMobile()
+  const capabilities = useCapabilities()
+  const [mobilePane, setMobilePane] = useState<'list' | 'detail'>('list')
+  const [capabilityOpen, setCapabilityOpen] = useState(false)
+  const [storageOpen, setStorageOpen] = useState(false)
+  /** 详情页内嵌 PDF 面板是否展开（面板自己上报）：展开时图谱收窄，把一整列让给面板 */
+  const inlinePdfOpen = useInlinePdfPanelOpen()
 
   const active = notes.find((n) => n.id === activeId) ?? notes[0] ?? null
   const readingNote = notes.find((n) => n.id === readingNoteId) ?? null
+  /** 流式排版（flow）的滚动容器：单栏「笔记」与「并列」各有一个，同一时刻只挂载一个。
+   *  换笔记/换视图时滚动位置归零，否则新笔记一打开就是「标题和工具条已经被滚走」的样子 */
+  const noteScrollRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    noteScrollRef.current?.scrollTo({ top: 0 })
+  }, [active?.id, view])
+  /** 手机端没有「并列」栏位：并列视图按「笔记」渲染（切回宽屏仍保留并列） */
+  const effectiveView: View = isMobile && view === 'both' ? 'notes' : view
 
   // ---- 双向同步：基线 + 引用 ----
   const notesRef = useRef(notes)
@@ -161,9 +209,21 @@ export default function App() {
 
   const openNote = (id: string) => {
     setActiveId(id)
+    // 并列视图：任何入口打开的笔记都同步为图谱焦点（图谱节点单击在并列里也走这里）
+    if (view === 'both') setFocusId(id)
+    // 手机端：选中即进入详情页（详情页有返回按钮回到列表）
+    setMobilePane('detail')
     // 并列模式下只切换当前笔记，不离开并列布局
     setView((v) => (v === 'both' ? 'both' : 'notes'))
   }
+
+  // 并列视图下，当前打开的笔记始终是图谱焦点：补上新建 / 导入 / 切回并列等
+  // 直接改 activeId 的入口。图谱单栏单击节点也会把 activeId 设过来（侧栏高亮），
+  // 但它不切视图，所以这个 effect 只在并列里生效，不会把单栏「选中」变成「打开」。
+  useEffect(() => {
+    if (isMobile || view !== 'both') return
+    setFocusId(activeId)
+  }, [isMobile, view, activeId])
 
   const createNote = (title?: string) => {
     if (!hydrated) {
@@ -172,6 +232,7 @@ export default function App() {
     }
     const n = api.createNote(title ? { title, content: '' } : {})
     setActiveId(n.id)
+    setMobilePane('detail')
     setView((v) => (v === 'both' ? 'both' : 'notes'))
     return n
   }
@@ -281,7 +342,7 @@ export default function App() {
   const reloadFromJson = async () => {
     if (!requireFullLibrary()) return
     if (!isDesktop()) {
-      toast.info('浏览器版没有本地文件读取权限，请用「导入备份」选择 JSON 文件')
+      toast.warning('当前环境没有本地同步文件的读写通道（浏览器不能读任意绝对路径）\n请改用顶栏「导入备份」：走浏览器自带的文件选择器读取 JSON')
       return
     }
     let path = syncPath
@@ -307,35 +368,42 @@ export default function App() {
     }
   }
 
-  const importMd = async (file: File) => {
+  /** 批量导入 .md：每个文件建一篇笔记（frontmatter 里的 type / grade / tags / title 生效） */
+  const importMd = async (files: File[]) => {
     if (!hydrated) { toast.info('正在读取笔记目录，请稍后再导入'); return }
-    const text = await file.text()
-    const fmMatch = text.match(/^---\n([\s\S]*?)\n---\n?/)
-    const get = (k: string) => fmMatch?.[1].match(new RegExp(`^${k}:\\s*(.+)$`, 'm'))?.[1]?.trim()
-    let type: NoteType = 'other'
-    let grade: Grade = ''
-    let tags: string[] = []
-    let content = text
-    if (fmMatch) {
-      content = text.slice(fmMatch[0].length)
-      const t = get('type')
-      if (t && t in NOTE_TYPE_META) type = t as NoteType
-      const g = get('grade')
-      if (g && g in GRADE_META) grade = g as Grade
-      const tg = get('tags')
-      if (tg) tags = tg.replace(/^\[|\]$/g, '').split(',').map((s) => s.trim()).filter(Boolean)
+    const picked = files.filter((f) => /\.(md|markdown)$/i.test(f.name))
+    if (!picked.length) {
+      toast.error('请选择 .md 或 .markdown 文件')
+      return
     }
-    const title = get('title') ?? file.name.replace(/\.md$/i, '')
-    const n = api.createNote({ title, type, grade, tags, content: content.trim() })
-    setActiveId(n.id)
-    toast.success(`已导入「${title}」`)
+    const parsed = await Promise.all(
+      picked.map(async (file) => {
+        try {
+          return parseMdImport(file.name, await file.text())
+        } catch {
+          return null
+        }
+      }),
+    )
+    const partials = parsed.filter((p): p is ReturnType<typeof parseMdImport> => p !== null)
+    const failed = parsed.length - partials.length
+    if (!partials.length) {
+      toast.error(`导入失败：${failed} 个文件读不出内容`)
+      return
+    }
+    const created = api.createNotes(partials)
+    setActiveId(created[0].id)
+    const summary = created.length > 1 ? `已导入 ${created.length} 篇 Markdown` : `已导入「${created[0].title}」`
+    if (failed) toast.warning(`${summary}，另有 ${failed} 个文件读取失败`)
+    else toast.success(summary)
   }
 
   /** 选择/切换本地笔记目录（vault：每篇一个 .md + 一个 meta.json 索引） */
   const pickVault = async () => {
     if (!requireFullLibrary()) return
     if (!vaultSupported()) {
-      toast.info('浏览器版没有目录写入权限：请用桌面版，或继续使用浏览器本地存储')
+      // 明确降级：说清为什么、以及现在能做什么，不提示「成功」
+      toastDegraded('vaultDir', '无法选择本地笔记目录')
       return
     }
     const dir = await chooseVaultDir()
@@ -611,14 +679,23 @@ export default function App() {
     </div>
   )
 
-  const editorFor = (n: Note, split: boolean) => (
-    <NoteEditor
+  const editorFor = (n: Note, split: boolean, flow = false) => (
+    <Suspense
+      fallback={
+        <div className="flex h-full items-center justify-center text-sm text-muted-foreground" role="status">
+          正在打开笔记…
+        </div>
+      }
+    >
+      <NoteEditor
       key={n.id}
       note={n}
       allNotes={notes}
       splitView={split}
+      flow={flow}
+      readOnly={vault.gate.ids.has(n.id)}
       onChange={(p) => {
-        if (!hydrated) return
+        if (!hydrated || vault.gate.ids.has(n.id)) return
         // 改类型 = 换文件夹：先弹窗确认，确认后再连同文件一起迁移
         if (p.type && p.type !== n.type && api.vault.active) {
           setTypeMove({ note: n, to: p.type, patch: p })
@@ -627,12 +704,13 @@ export default function App() {
         api.updateNote(n.id, p)
       }}
       onDelete={() => {
-        if (!hydrated) return
+        if (!hydrated || vault.gate.ids.has(n.id)) return
         api.deleteNote(n.id)
         setActiveId(null)
       }}
       onOpenNote={openNote}
       onCreateNote={(t) => createNote(t)}
+      onReadPdf={openPdfReader}
       onAiUpdate={
         n.type === 'summary'
           ? () => {
@@ -641,16 +719,99 @@ export default function App() {
             }
           : undefined
       }
+      />
+    </Suspense>
+  )
+
+  /**
+   * 打开 PDF 阅读工作台前的能力闸门。
+   * localPdf 是「运行本机服务那台电脑上的绝对路径」，Zotero PDF 也要读那台机器的库：
+   * 不被支持时直接说清原因，而不是先进一个只会报错的界面。
+   */
+  const openPdfReader = (id: string) => {
+    const note = notes.find((n) => n.id === id)
+    const source = note ? preferredPdfSource(note) : null
+    if (!note || !source) {
+      toast.info('这篇文献没有可读取的本地 PDF')
+      return
+    }
+    const need = source.kind === 'zotero' ? 'zoteroSqlite' : source.kind === 'attachment' ? 'vaultAttachments' : 'localPdf'
+    if (!capabilities[need].supported) {
+      toastDegraded(need, '无法在软件内打开这份 PDF', 'error')
+      return
+    }
+    setReadingNoteId(id)
+  }
+
+  /** 同步状态栏：桌面显示在顶部，手机端放进底部「存储」面板 */
+  const syncStatusBar = (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b bg-muted/20 px-4 py-1.5 text-xs text-muted-foreground" data-testid="sync-status">
+      <Settings2 className="h-3.5 w-3.5" />
+      <span className="truncate" title={syncPath || '尚未选择同步文件'}>
+        {syncPath ? `同步文件：${syncPath}` : '尚未选择同步文件（点右边文件夹图标选一个）'}
+      </span>
+      {conflict && <span className="shrink-0 text-destructive">有冲突待处理</span>}
+      <label
+        className="ml-auto flex shrink-0 items-center gap-2"
+        title={
+          !syncPath
+            ? '请先点文件夹图标选择同步文件'
+            : autoSync
+              ? '开启中：本地改动会写回文件，文件被外部改动会拉进应用；关闭即切断同步'
+              : '开启后双向同步（可随时关闭以切断）'
+        }
+      >
+        <span>双向同步</span>
+        <Switch checked={autoSync} onCheckedChange={setAutoSync} disabled={!syncPath} aria-label="双向同步" />
+      </label>
+      {syncing && <span>处理中…</span>}
+      {!syncing && lastSyncAt && <span>已同步 {new Date(lastSyncAt).toLocaleTimeString()}</span>}
+    </div>
+  )
+
+  const vaultStatus = (
+    <DataSafetyStatus
+      variant={isMobile ? 'card' : 'bar'}
+      vault={vault}
+      hydrated={hydrated}
+      watchVault={api.watchVault}
+      onWatchVaultChange={api.setWatchVault}
+      onFlush={() => void api.flushVault()}
+      onChooseDir={() => void pickVault()}
+      onOpenDir={() => void openVaultDir(vault.dir).then((err) => err && toast.error(err))}
+      onResolveConflicts={(version) => api.resolveVaultConflicts(version)}
     />
   )
 
+  const graphView = (
+    <GraphView
+      notes={notes}
+      onOpenNote={openNote}
+      // 并列视图：图谱和正文同屏，单击节点就直接打开（右侧换正文、左侧列表高亮）
+      openOnClick={view === 'both'}
+      // 图谱单栏：单击只选中，但要同步侧栏高亮 —— 点哪篇，列表里就落在哪篇
+      onSelectNote={(id) => setActiveId(id)}
+      filters={filters}
+      focusId={focusId}
+      onFocusChange={setFocusId}
+      physics={physics}
+      onPhysicsChange={setPhysics}
+    />
+  )
+
+  const literatureView = (
+    <LiteratureView notes={notes} activeId={active?.id ?? null} onOpenNote={openNote} onReadPdf={openPdfReader} onImport={importLiterature} onApplySync={applyZoteroSync} />
+  )
+
   return (
-    <div className="flex h-screen flex-col bg-background text-foreground">
-      {/* 顶栏 */}
-      <header className="flex h-14 items-center gap-3 border-b px-4">
-        <Network className="h-5 w-5 text-primary" />
-        <h1 className="text-base font-bold">{APP_NAME}</h1>
-        <span className="text-xs text-muted-foreground">本地条目 · {notes.length} 个条目</span>
+    <div className="kg-shell flex flex-col bg-background text-foreground">
+      {/* 顶栏：手机端允许换行（图标 + 标题 + 能力徽标 + 版本 + 更多菜单），
+          桌面端（≥768px）保持原来的单行 56px 高度 */}
+      <header className="flex flex-wrap items-center gap-2 border-b px-3 py-2 md:min-h-14 md:gap-3 md:px-4">
+        <Network className="h-5 w-5 shrink-0 text-primary" />
+        <h1 className="shrink-0 text-base font-bold">{APP_NAME}</h1>
+        <span className="hidden shrink-0 text-xs text-muted-foreground lg:inline">本地条目 · {notes.length} 个条目</span>
+        <CapabilityBadge report={capabilities} onClick={() => setCapabilityOpen(true)} />
         <span
           className={
             isDevApp()
@@ -665,126 +826,24 @@ export default function App() {
         >
           {ENV_LABEL}
         </span>
-        <div className="ml-auto flex items-center gap-2">
-          <input ref={fileRef} type="file" accept=".json" className="hidden" onChange={(e) => e.target.files?.[0] && importJson(e.target.files[0])} />
-          <input ref={mdRef} type="file" accept=".md,.markdown" className="hidden" onChange={(e) => e.target.files?.[0] && importMd(e.target.files[0])} />
-          <Button variant="outline" size="sm" onClick={() => void syncNow()}>
-            <Save className="mr-1 h-3.5 w-3.5" /> 保存到同步文件
-          </Button>
-          <Button variant="outline" size="icon" title="选择同步文件" onClick={() => void chooseSyncFile()}>
-            <FolderSync className="h-4 w-4" />
-          </Button>
-          <Button variant="outline" size="sm" title="用同步文件（notes.json）覆盖本地笔记" onClick={() => void reloadFromJson()}>
-            <RefreshCw className="mr-1 h-3.5 w-3.5" /> 重新载入
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => fileRef.current?.click()}>
-            <Upload className="mr-1 h-3.5 w-3.5" /> 导入备份
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => mdRef.current?.click()}>
-            <FileUp className="mr-1 h-3.5 w-3.5" /> 导入 .md
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => { setAiTask(null); setAiOpen(true) }} title="调用本机 Kimi 模型网关，统筹整理笔记（改动需确认后落盘）">
-            <Sparkles className="mr-1 h-3.5 w-3.5 text-amber-500" /> AI 统筹
-          </Button>
-          <Button variant="outline" size="sm" onClick={exportJson}>导出备份</Button>
-        </div>
+        <BackupTransferMenu
+          onSaveToSyncFile={() => void syncNow()}
+          onChooseSyncFile={() => void chooseSyncFile()}
+          onReloadFromJson={() => void reloadFromJson()}
+          onImportJson={(file) => void importJson(file)}
+          onImportMd={(files) => void importMd(files)}
+          onOpenAi={() => { setAiTask(null); setAiOpen(true) }}
+          onExportJson={exportJson}
+        />
       </header>
 
-      {/* 本地存储状态栏：vault（md + meta.json） */}
-      <div className="flex items-center gap-3 border-b bg-muted/20 px-4 py-1.5 text-xs text-muted-foreground">
-        <HardDrive className="h-3.5 w-3.5" />
-        <span className="truncate" title={vault.dir || '尚未选择笔记目录'}>
-          {vault.active
-            ? `笔记目录：${vault.dir}（每篇一个 .md + meta.json 索引）`
-            : vault.dir
-              ? !hydrated ? `正在读取笔记目录：${vault.dir}` : `笔记目录不可用：${vault.dir} · 暂时用浏览器本地存储`
-              : vaultSupported()
-                ? isDevApp()
-                  ? '开发版：尚未选择笔记目录（与正式版隔离）· 当前用浏览器本地存储（localStorage）'
-                  : '尚未选择笔记目录 · 当前用浏览器本地存储（localStorage）'
-                : '浏览器版 · 笔记存在浏览器本地存储（localStorage）'}
-        </span>
-        {vault.loading && <span className="shrink-0" role="status">
-          {vault.loading.total ? `文献加载中 ${vault.loading.loaded}/${vault.loading.total}` : '检查笔记目录中…'}
-        </span>}
-        {vault.conflicts > 0 && <div className="flex shrink-0 items-center gap-2" role="alert">
-          <span>{vault.conflicts} 篇笔记存在文件冲突，写盘已暂停</span>
-          <Button size="sm" variant="outline" onClick={() => {
-            if (window.confirm('采用磁盘中的版本会替换这些笔记尚未保存的本地编辑。继续？')) api.resolveVaultConflicts('disk')
-          }}>采用磁盘版本</Button>
-          <Button size="sm" variant="outline" onClick={() => {
-            if (window.confirm('保留本地编辑会覆盖这些笔记在磁盘上的外部修改。继续？')) api.resolveVaultConflicts('local')
-          }}>保留本地编辑</Button>
-        </div>}
-        {vault.active && vault.saving && <span className="shrink-0">写入中…</span>}
-        {vault.active && !vault.saving && vault.savedAt && (
-          <span className="shrink-0">已写入 {new Date(vault.savedAt).toLocaleTimeString()}</span>
-        )}
-        {vault.externalAt && <span className="shrink-0">已跟随目录改动 {new Date(vault.externalAt).toLocaleTimeString()}</span>}
-        {vault.unmanaged > 0 && (
-          <span className="shrink-0" title="这些 md 不在 meta.json 索引里，本应用不会读取、修改或删除它们">
-            目录中另有 {vault.unmanaged} 个未纳管 md
-          </span>
-        )}
-        {vault.error && <span className="shrink-0 text-destructive">{vault.error}</span>}
-        <div className="ml-auto flex shrink-0 items-center gap-2">
-          <label
-            className="flex items-center gap-2"
-            title="开启后每 3 秒检查一次目录：在 Obsidian/编辑器里的改动会自动进到应用"
-          >
-            <span>跟随目录改动</span>
-            <Switch
-              checked={api.watchVault}
-              onCheckedChange={api.setWatchVault}
-              disabled={!vault.active}
-              aria-label="跟随目录改动"
-            />
-          </label>
-          <Button variant="outline" size="sm" disabled={!vault.active} onClick={() => void api.flushVault()}>
-            写入目录
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => void pickVault()}>
-            选择目录
-          </Button>
-          <Button
-            variant="outline"
-            size="icon"
-            title="在文件管理器里打开笔记目录"
-            disabled={!vault.active}
-            onClick={() => void openVaultDir(vault.dir).then((err) => err && toast.error(err))}
-          >
-            <FolderOpen className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
-
-      {/* 同步状态栏 */}
-      <div className="flex items-center gap-3 border-b bg-muted/20 px-4 py-1.5 text-xs text-muted-foreground">
-        <Settings2 className="h-3.5 w-3.5" />
-        <span className="truncate" title={syncPath || '尚未选择同步文件'}>
-          {syncPath ? `同步文件：${syncPath}` : '尚未选择同步文件（点右边文件夹图标选一个）'}
-        </span>
-        {conflict && <span className="shrink-0 text-destructive">有冲突待处理</span>}
-        <label
-          className="ml-auto flex shrink-0 items-center gap-2"
-          title={
-            !syncPath
-              ? '请先点文件夹图标选择同步文件'
-              : autoSync
-                ? '开启中：本地改动会写回文件，文件被外部改动会拉进应用；关闭即切断同步'
-                : '开启后双向同步（可随时关闭以切断）'
-          }
-        >
-          <span>双向同步</span>
-          <Switch checked={autoSync} onCheckedChange={setAutoSync} disabled={!syncPath} aria-label="双向同步" />
-        </label>
-        {syncing && <span>处理中…</span>}
-        {!syncing && lastSyncAt && <span>已同步 {new Date(lastSyncAt).toLocaleTimeString()}</span>}
-      </div>
+      {/* 本地存储 + 同步状态栏：桌面/平板显示在顶部；手机端收进底部「存储」面板 */}
+      {!isMobile && vaultStatus}
+      {!isMobile && syncStatusBar}
 
       <div className="flex min-h-0 flex-1">
-        {/* 左侧：笔记列表（可整栏折叠） */}
-        {listOpen && (
+        {/* 左侧：笔记列表（可整栏折叠）。手机端不渲染这一栏，改由「列表 ⇄ 详情」切换承担 */}
+        {!isMobile && listOpen && (
           <aside className="w-64 shrink-0 border-r bg-muted/30">
             <NoteList notes={notes} activeId={active?.id ?? null} onSelect={openNote} onCreate={() => createNote()} />
           </aside>
@@ -792,86 +851,113 @@ export default function App() {
 
         {/* 右侧主区 */}
         <main className="flex min-w-0 flex-1 flex-col">
-          <div className="flex items-center gap-3 border-b px-4 py-2">
+          {!isMobile && (
+          /* 顶部的视图切换条：压缩纵向留白（py-1 + h-8 列表），把版面让给正文 */
+          <div className="flex items-center gap-2 border-b px-3 py-1">
             <Button
               variant="ghost"
               size="icon"
+              className="h-7 w-7 shrink-0"
               title={listOpen ? '收起笔记列表' : '展开笔记列表'}
               onClick={() => setListOpen((v) => !v)}
             >
               <PanelLeft className="h-4 w-4" />
             </Button>
             <Tabs value={view} onValueChange={(v) => setView(v as View)}>
-              <TabsList>
-                <TabsTrigger value="notes">
-                  <NotebookText className="mr-1.5 h-4 w-4" /> 笔记
+              <TabsList className="h-8 gap-0.5 p-0.5">
+                <TabsTrigger className="h-7 gap-1 px-2 text-xs" value="notes">
+                  <NotebookText className="h-3.5 w-3.5" /> 笔记
                 </TabsTrigger>
-                <TabsTrigger value="graph">
-                  <Network className="mr-1.5 h-4 w-4" /> 图谱
+                <TabsTrigger className="h-7 gap-1 px-2 text-xs" value="graph">
+                  <Network className="h-3.5 w-3.5" /> 图谱
                 </TabsTrigger>
-                <TabsTrigger value="both">
-                  <Columns2 className="mr-1.5 h-4 w-4" /> 并列
+                <TabsTrigger className="h-7 gap-1 px-2 text-xs" value="both">
+                  <Columns2 className="h-3.5 w-3.5" /> 并列
                 </TabsTrigger>
-                <TabsTrigger value="literature">
-                  <BookOpen className="mr-1.5 h-4 w-4" /> 文献
+                <TabsTrigger className="h-7 gap-1 px-2 text-xs" value="literature">
+                  <BookOpen className="h-3.5 w-3.5" /> 文献
                 </TabsTrigger>
               </TabsList>
             </Tabs>
             {view !== 'notes' && (
               <span className="text-xs text-muted-foreground">
-                单击节点选中，再次单击打开笔记 · 右键聚焦/取消聚焦 · 拖动可移动节点
+                {view === 'both'
+                  ? '单击节点打开笔记 · 右键聚焦/取消聚焦 · 拖动可移动节点'
+                  : '单击节点选中，再次单击打开笔记 · 右键聚焦/取消聚焦 · 拖动可移动节点'}
               </span>
             )}
           </div>
+          )}
 
           <Suspense fallback={<div className="p-4 text-sm text-muted-foreground" role="status">正在打开视图…</div>}>
-          {view === 'notes' ? (
+          {isMobile ? (
+            effectiveView === 'notes' ? (
+              mobilePane === 'detail' && active && hydrated ? (
+                <div className="flex min-h-0 flex-1 flex-col" data-testid="mobile-detail-pane">
+                  {/* 返回列表：手机端「列表 ⇄ 详情」分屏切换的返回入口 */}
+                  <div className="flex items-center gap-2 border-b px-2 py-1">
+                    <Button variant="ghost" className="h-11 shrink-0 px-2" onClick={() => setMobilePane('list')} title="返回笔记列表">
+                      <ArrowLeft className="h-4 w-4" />
+                      <span className="ml-1 text-sm">列表</span>
+                    </Button>
+                    <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{active.title}</span>
+                  </div>
+                  <div className="min-h-0 flex-1">{editorFor(active, false)}</div>
+                </div>
+              ) : (
+                <div className="flex min-h-0 flex-1 flex-col" data-testid="mobile-list-pane">
+                  <NoteList notes={notes} activeId={active?.id ?? null} onSelect={openNote} onCreate={() => createNote()} />
+                </div>
+              )
+            ) : effectiveView === 'literature' ? (
+              literatureView
+            ) : (
+              <div className="flex min-h-0 flex-1 flex-col gap-2 p-2">
+                <div className="max-h-[38vh] min-h-0 shrink overflow-y-auto">{filterPanel}</div>
+                <p className="px-1 text-[11px] text-muted-foreground">单击节点选中，再次单击打开笔记 · 拖动可移动节点</p>
+                <div className="min-h-0 flex-1">{graphView}</div>
+              </div>
+            )
+          ) : view === 'notes' ? (
             active && hydrated ? (
-              <div className="min-h-0 flex-1">{editorFor(active, true)}</div>
+              /* 单栏「笔记」：整篇随这个容器滚（头部/工具条/正文一起滚），而不是正文自己滚 */
+              <div ref={noteScrollRef} className="min-h-0 flex-1 overflow-y-auto" data-testid="note-flow-scroll">
+                {editorFor(active, true, true)}
+              </div>
             ) : (
               <div className="flex flex-1 items-center justify-center text-muted-foreground">
                 <Button disabled={!hydrated} onClick={() => createNote()}>{hydrated ? '新建第一篇笔记' : '正在读取笔记目录…'}</Button>
               </div>
             )
           ) : view === 'literature' ? (
-            <LiteratureView notes={notes} onOpenNote={openNote} onReadPdf={setReadingNoteId} onImport={importLiterature} onApplySync={applyZoteroSync} />
+            literatureView
           ) : view === 'graph' ? (
             <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 xl:flex-row">
               {filterPanel}
-              <div className="min-w-0 flex-1">
-                <GraphView
-                  notes={notes}
-                  onOpenNote={openNote}
-                  filters={filters}
-                  focusId={focusId}
-                  onFocusChange={setFocusId}
-                  physics={physics}
-                  onPhysicsChange={setPhysics}
-                />
-              </div>
+              <div className="min-w-0 flex-1">{graphView}</div>
             </div>
           ) : (
+            /* 并列：内嵌 PDF 面板展开时图谱收窄，把右侧一整列让给面板
+               （面板由 LiteratureAttachments 通过 setInlinePdfPanelSlot portal 进来）
+               笔记列与单栏「笔记」用同一套流式排版：标题、工具条、正文一起在这张卡片里滚 */
             <div className="flex min-h-0 flex-1 gap-3 p-3">
-              <div className="min-w-0 flex-1">
-                <GraphView
-                  notes={notes}
-                  onOpenNote={openNote}
-                  filters={filters}
-                  focusId={focusId}
-                  onFocusChange={setFocusId}
-                  physics={physics}
-                  onPhysicsChange={setPhysics}
-                />
-              </div>
-              <div className="min-w-0 flex-1 overflow-hidden rounded-lg border bg-card">
+              {/* 三列都按比例分（图谱 26% / 详情+正文 34% / PDF 面板 40%）：
+                  不外溢，窗口变窄时一起缩，永远不会把中间那列挤没 */}
+              <div className={inlinePdfOpen ? 'min-w-0 basis-[26%] shrink-0' : 'min-w-0 flex-1'}>{graphView}</div>
+              <div ref={noteScrollRef} className="min-w-0 flex-1 overflow-y-auto rounded-lg border bg-card" data-testid="note-flow-scroll">
                 {active && hydrated ? (
-                  editorFor(active, false)
+                  editorFor(active, false, true)
                 ) : (
                   <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
                     从左侧列表选一篇笔记
                   </div>
                 )}
               </div>
+              {/* 面板挂载点：没展开就收成 0 宽（ref 仍挂着，展开时同一帧里出现） */}
+              <div
+                ref={setInlinePdfPanelSlot}
+                className={inlinePdfOpen ? 'min-h-0 basis-[40%] shrink-0 overflow-hidden rounded-lg border bg-background' : 'hidden'}
+              />
             </div>
           )}
           </Suspense>
@@ -910,6 +996,12 @@ export default function App() {
           setAiTask(null)
         }}
         notes={notes}
+        activeNote={active}
+        onOpenNote={(id) => {
+          setAiOpen(false)
+          setAiTask(null)
+          openNote(id)
+        }}
         ensureSnapshot={ensureAiSnapshot}
         onApply={applyAiOps}
         onGoLiterature={() => setView('literature')}
@@ -929,7 +1021,57 @@ export default function App() {
         </Suspense>
       )}
 
-      <Toaster position="bottom-right" richColors />
+      {/* 手机端底部主导航：与顶部 Tabs 同一套视图语义（并列栏位在手机端不存在） */}
+      {isMobile && (
+        <MobileTabBar
+          active={effectiveView === 'literature' ? 'literature' : effectiveView === 'graph' ? 'graph' : 'notes'}
+          onSelect={(tab: MobileTab) => {
+            if (tab === 'settings') {
+              setStorageOpen(true)
+              return
+            }
+            if (tab === 'notes' && effectiveView === 'notes') {
+              // 再点一次「笔记」= 从详情回到列表（等价于详情页的返回按钮）
+              setMobilePane('list')
+              return
+            }
+            setView(tab)
+          }}
+        />
+      )}
+
+      {/* 手机端：存储与同步（桌面端这两条状态栏直接显示在顶部） */}
+      {isMobile && (
+        <Dialog open={storageOpen} onOpenChange={(value) => !value && setStorageOpen(false)}>
+          <DialogContent className="max-h-[85vh] overflow-auto" data-testid="mobile-storage-dialog">
+            <DialogHeader>
+              <DialogTitle>存储与同步</DialogTitle>
+              <DialogDescription>
+                笔记保存在这台设备的浏览器本地存储里；本机目录、Zotero、本机 AI 等能力已按环境降级，明细见「环境能力」。
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2">
+              {vaultStatus}
+              {syncStatusBar}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setStorageOpen(false)}>关闭</Button>
+              <Button
+                onClick={() => {
+                  setStorageOpen(false)
+                  setCapabilityOpen(true)
+                }}
+              >
+                查看环境能力
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      <CapabilityDialog open={capabilityOpen} onClose={() => setCapabilityOpen(false)} report={capabilities} />
+
+      <Toaster position={isMobile ? 'top-center' : 'bottom-right'} richColors />
     </div>
   )
 }

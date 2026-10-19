@@ -200,7 +200,7 @@ try {
   check('匹配到的笔记：key 列表含重复条目（去重后再同步用）', classified.some((f) => litText(f).includes('zoteroKeys: ["KLASSIFY","DUPKEY01"]')))
   check('匹配到的笔记：key/PDF 状态更新', classified.some((f) => litText(f).includes('zoteroKey: "KLASSIFY"') && litText(f).includes('zoteroPdfCount: 1') && litText(f).includes('zoteroAvailablePdfCount: 1')))
   check('同 DOI 的另一篇笔记：附件与已有标签原样保留', matched.includes('"att-keep"') && matched.includes('我的标签'))
-  check('匹配到的笔记：补上「方向:硅光」「期刊:Nature Photonics」标签', classified.some((f) => litText(f).includes('方向:硅光') && litText(f).includes('期刊:Nature Photonics')))
+  check('匹配到的笔记：补「期刊:」标签、不写「方向:」标签', classified.some((f) => litText(f).includes('期刊:Nature Photonics')) && !classified.some((f) => litText(f).includes('方向:')))
   const metaAfter = JSON.parse(await fsp.readFile(path.join(vault, 'meta.json'), 'utf8'))
   check('meta.json 四条笔记齐全且路径带分区', metaAfter.notes.length === 4 && metaAfter.notes.every((n) => n.file.includes('/')))
   const litIds = metaAfter.notes.map((n) => n.id)

@@ -33,10 +33,11 @@
 | `editor-runtime` | 全冻结 | `public/vditor/**`（295） | Vditor 编辑器运行时资源 | — |
 | `md-parser` | 全冻结 | `src/lib/md.ts`、`src/lib/tex.ts` | Markdown / LaTeX 解析器 | `test:md` |
 | `md-render` | 全冻结 | `src/components/Markdown.tsx`、`src/lib/previewTheme.ts`、`src/markdown-base.css`、`src/themes/**` | 阅读面板渲染层与样式拼装 | `test:md-render` |
-| `vault-format` | 契约冻结 | `src/lib/vaultFormat.ts` | front matter 读写与写入计划 | `test:vault`、`test:vault-e2e` |
+| `vault-format` | 契约冻结 | `src/lib/vaultFormat.ts` | front matter 读写与写入计划 | `test:vault`、`test:vault-e2e`、`test:vault-gate` |
+| `vault-gate` | 契约冻结 | `src/lib/vaultGate.ts` | 写入门禁：声明判定、只读范围、未知字段保留、写盘计划过滤 | `test:vault-gate` |
 | `vault-io` | 契约冻结 | `src/lib/vaultFs.ts`、`src/lib/vaultLoad.ts`、`src/lib/syncFile.ts` | vault 读写通道与同步文件封装 | `test:vault-e2e` |
 | `zotero-rules` | 契约冻结 | `src/lib/zoteroMeta.ts`、`src/lib/zoteroImport.ts`、`src/lib/zoteroSync.ts` | Zotero 分类/标签/去重/导入规则 | `test:zotero`、`test:zotero-import`、`test:zotero-e2e` |
-| `desktop-bridge` | 契约冻结 | `electron/*.cjs`、`src/types/desktop.d.ts` | 页面 ↔ 主进程的 27 个方法 + 24 个 IPC 通道 | 契约交叉校验（内置） |
+| `desktop-bridge` | 契约冻结 | `electron/*.cjs`、`src/types/desktop.d.ts` | 页面 ↔ 主进程的 27 个方法 + 24 个 IPC 通道 | 契约交叉校验（内置）、`test:vault-gate` |
 
 ## 各单元契约
 
@@ -93,6 +94,16 @@ splitRow(line: string): string[]
 
 加字段：改读写两侧 → 跑 `npm run test:frozen` → `frozen:update` → 更新 VAULT_FORMAT.md 字段表 → 让用户强刷网页端。
 
+### vault-gate（契约冻结）
+
+契约 = `vaultGate.ts` 的导出名 + [VAULT_WRITE_GATE.md](VAULT_WRITE_GATE.md) 的判定规则：声明
+（`formatVersion` / `minimumWriterVersion` / `requiredCapabilities`）怎么读、什么情况下只读（单篇 / 整库），
+以及写盘计划必须满足的四条红线 —— **未知字段保留、删除数 0、未纳管 md 不动、索引读不到就中止**。
+守护测试 `test:vault-gate`（43 项，含 2026-10-13 事故的复现）。
+
+`vaultFormat` 的序列化与主进程 `writeVault` 都调它。**能力名 = front matter 字段名**，加字段就加能力
+（`CAPABILITY_FIELDS`），加能力的笔记才会被打上声明。
+
 ### vault-io（契约冻结）
 
 契约 = 三个模块的导出名（含 `LITERATURE_BATCH_SIZE = 64`、`VaultLoadGate`、`readVaultBatch`）。
@@ -105,6 +116,9 @@ splitRow(line: string): string[]
 界面「同步 Zotero 分类」、命令行 `zotero:sync`、命令行 `dedupe:vault` **共用这套规则，改一处必须三处一致**。
 典型公式：`coalesceZoteroItems` 归并 → `mergeLiterature`/`planZoteroImport` 产出计划 → 调用方应用。
 「去重后再次同步必须 0 新建」是硬门槛（`test:zotero-e2e` 第 4 步）。
+分类只由 `collections`（完整路径的树）承担；旧版压平写入的 `方向:<一级分类>` 标签已废弃
+（识别用 `isDirectionTag` / `DIRECTION_TAG_PREFIX`），同步与去重一律清掉、不再产出；全库一次性清理入口
+`npm run tags:strip-direction`（dry-run 默认，`--apply` 先逐文件备份）。
 
 ### desktop-bridge（契约冻结）
 
@@ -131,3 +145,15 @@ splitRow(line: string): string[]
 
 - 2026-10-14：首次建立基线，9 个单元（5 全冻结 + 4 契约冻结），校验与解冻流程就位。
 - 2026-10-14：desktop-bridge 增加只读 PDF 字节接口，供全屏阅读工作台读取 localPdf / Zotero PDF。
+- 2026-10-15：新增 `vault-gate` 单元；`vault-format` 增加写入门禁（声明字段、未知字段保留、只读笔记不写不删
+  不改名、meta 声明超限整库停写），`desktop-bridge` 的 `writeVault` 增加落盘前最后一道防线。设计与已知缺口见
+  [VAULT_WRITE_GATE.md](VAULT_WRITE_GATE.md)；打标策略 B（只有带能力数据的笔记才写声明，升级零重写）。
+- 2026-10-16：`zotero-rules` 新增导出 `DIRECTION_TAG_PREFIX` / `isDirectionTag`，并**废弃「方向:」标签**：
+  `tagsForZoteroItem` 只产出 `期刊:`/`年份:`，`mergeZoteroTags` 清掉全部 `方向:`（含历史「方向:未分类」占位），
+  `zotero:sync --prune` 同步收口。理由：分类树只该存在 `collections` 里，压平副本会漂移 —— 真实库实测
+  454 篇界面「未分类」却仍挂着 `方向:01_论文库`。全库一次性清理：`npm run tags:strip-direction`
+  （真实 vault 已跑：1775 篇 / 1948 条，逐文件备份 `.backups/direction-tags-20261016100738`）。
+  AI 面板的「方向」选项改从 `collections` 首段取，汇总笔记标签改用 `汇总:<一级分类>`。
+- 2026-10-19：`desktop-bridge` 的 AI 网关扩展为双提供方（`kimi` / `deepseek`），
+  `aiStatus` 改为接收 `{ provider, configPath? }`，`aiComplete` 增加 `messages`（多轮）
+  与 `model` 参数；网页桥接同步。方法名与 IPC 通道名不变，网页端 56 项回归仍全绿。

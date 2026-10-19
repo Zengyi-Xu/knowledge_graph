@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  知识图谱网页端 · 无窗口启动器
+
+  为什么要这个文件：双击 .cmd 时 Windows 一定会给它开一个控制台窗口，而且会一直留在桌面。
+  这里改用 Windows Script Host（wscript）以「隐藏窗口」方式运行同一个 启动网页端.cmd：
+  浏览器照常打开，桌面上不留命令窗口；输出写进 data\temp\web-server.log，起不来时弹框提示。
+
+  · 想看实时输出 / 排查问题：双击 启动网页端.cmd（窗口版，行为与以前一致）
+  · 关闭在后台运行的本地服务：双击 停止网页端.wsf
+  · 本文件是 UTF-8 的 .wsf（XML 声明指定编码），不要改存成 GBK/UTF-16，也不要加 BOM。
+-->
+<job>
+<script language="VBScript">
+<![CDATA[
+Dim fso, shell, root, target, logDir, logFile, marker, redirect, index, args, command, output
+
+Set fso = CreateObject("Scripting.FileSystemObject")
+Set shell = CreateObject("WScript.Shell")
+
+root = fso.GetParentFolderName(WScript.ScriptFullName)
+target = fso.BuildPath(root, "启动网页端.cmd")
+logDir = fso.BuildPath(root, "data\temp")
+logFile = fso.BuildPath(logDir, "web-server.log")
+
+' 日志目录（网页端自身的 TEMP 也在这里），日志过大就丢掉重来
+If Not fso.FolderExists(fso.BuildPath(root, "data")) Then fso.CreateFolder fso.BuildPath(root, "data")
+If Not fso.FolderExists(logDir) Then fso.CreateFolder logDir
+If fso.FileExists(logFile) Then
+  If fso.GetFile(logFile).Size > 262144 Then fso.DeleteFile logFile, True
+End If
+
+args = ""
+For index = 0 To WScript.Arguments.Count - 1
+  args = args & " " & Chr(34) & WScript.Arguments(index) & Chr(34)
+Next
+
+' 已经有一个无窗口服务在跑时，日志正被它独占（cmd 的 >> 不允许第二个写入者）。
+' 这时不再转发输出，直接再跑一次 .cmd：它会发现端口是自己占的，打开已有服务的页面后退出。
+If CanAppend(logFile) Then
+  ' 写一条纯 ASCII 分隔线，稍后只看这条线之后的内容，避免被上一次的日志骗到
+  marker = "=== kg-launch " & Stamp(Now) & " ==="
+  WriteMarker logFile, marker
+  redirect = " >> " & Chr(34) & logFile & Chr(34) & " 2>&1"
+Else
+  marker = ""
+  redirect = " > nul 2>&1"
+End If
+
+' 窗口样式 0 = 隐藏；等 .cmd 退出（服务停止）才返回。stdin 接 nul，避免 .cmd 里的 pause 静默挂住。
+shell.CurrentDirectory = root
+command = "cmd.exe /d /c call " & Chr(34) & target & Chr(34) & args & redirect & " < nul"
+shell.Run command, 0, True
+
+If Len(marker) > 0 Then
+  output = SectionAfter(logFile, marker)
+  If InStr(output, "127.0.0.1:") = 0 Then
+    MsgBox "知识图谱网页端没有成功启动。" & vbCrLf & vbCrLf & Tail(output, 15) & vbCrLf & _
+      "完整日志：" & logFile & vbCrLf & _
+      "也可以双击 启动网页端.cmd 在命令窗口里看实时输出。", 16, "知识图谱网页端"
+  End If
+End If
+
+' 能否往这份日志追加内容：运行中的无窗口服务会让 cmd 的 >> 独占它
+Function CanAppend(file)
+  Dim handle
+  CanAppend = False
+  On Error Resume Next
+  Set handle = fso.OpenTextFile(file, 8, True, 0)
+  If Err.Number = 0 Then
+    handle.Close
+    CanAppend = True
+  Else
+    Err.Clear
+  End If
+  On Error GoTo 0
+End Function
+
+' 用 ForAppending + ASCII 追加：分隔线全是 ASCII，混进 UTF-8 日志里也不会破坏编码
+Sub WriteMarker(file, text)
+  Dim handle
+  On Error Resume Next
+  Set handle = fso.OpenTextFile(file, 8, True, 0)
+  handle.WriteLine text
+  handle.Close
+  On Error GoTo 0
+End Sub
+
+' 时间戳按固定格式拼，避免不同区域设置里出现非 ASCII 字符
+Function Stamp(moment)
+  Stamp = Year(moment) & "-" & Pad(Month(moment)) & "-" & Pad(Day(moment)) & " " & _
+    Pad(Hour(moment)) & ":" & Pad(Minute(moment)) & ":" & Pad(Second(moment))
+End Function
+
+Function Pad(number)
+  Pad = Right("0" & number, 2)
+End Function
+
+' 读取日志里最后一条分隔线之后的内容；读取失败（极少见）时退化为读取全文
+Function SectionAfter(file, text)
+  Dim content, position
+  SectionAfter = ""
+  If Not fso.FileExists(file) Then Exit Function
+  content = ReadUtf8(file)
+  position = InStrRev(content, text)
+  If position > 0 Then content = Mid(content, position)
+  SectionAfter = content
+End Function
+
+Function ReadUtf8(file)
+  Dim stream, text
+  ReadUtf8 = ""
+  On Error Resume Next
+  Set stream = CreateObject("ADODB.Stream")
+  stream.Type = 2
+  stream.Charset = "UTF-8"
+  stream.Open
+  stream.LoadFromFile file
+  text = stream.ReadText(-1)
+  stream.Close
+  If Err.Number = 0 Then
+    ReadUtf8 = text
+  Else
+    Err.Clear
+    Set stream = Nothing
+    Set stream = CreateObject("Scripting.FileSystemObject").OpenTextFile(file, 1, False)
+    text = stream.ReadAll
+    stream.Close
+    ReadUtf8 = text
+  End If
+  On Error GoTo 0
+End Function
+
+' 取末尾若干行非空输出，供提示框显示
+Function Tail(text, count)
+  Dim lines, first, index, result
+  lines = Split(Replace(Replace(text, vbCrLf, vbLf), vbCr, vbLf), vbLf)
+  first = UBound(lines) - count + 1
+  If first < 0 Then first = 0
+  result = ""
+  For index = first To UBound(lines)
+    If Len(Trim(lines(index))) > 0 Then result = result & Trim(lines(index)) & vbCrLf
+  Next
+  Tail = result
+End Function
+]]>
+</script>
+</job>

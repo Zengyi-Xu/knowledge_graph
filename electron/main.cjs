@@ -306,25 +306,31 @@ function registerZoteroHandlers() {
 
 /**
  * AI 网关通道：状态查询（脱敏）与非流式补全。
- * 渲染端只能传 prompt/system/maxTokens，端点与 key 全部由主进程从
- * Kimi Code 配置里读，调用方无法指定任意 URL。
+ * 渲染端只能指定 provider（kimi/deepseek）、prompt/messages/system/model/maxTokens；
+ * 端点和 key 全部由主进程从本机配置里读，调用方无法指定任意 URL。
  */
 function registerAiHandlers() {
   ipcMain.handle('ai:status', async (_event, payload) => {
-    const configPath =
-      payload && typeof payload.configPath === 'string' && payload.configPath
-        ? payload.configPath
-        : undefined
-    return aiStatus(configPath)
+    return aiStatus({
+      provider: payload && payload.provider === 'deepseek' ? 'deepseek' : 'kimi',
+      configPath:
+        payload && typeof payload.configPath === 'string' && payload.configPath
+          ? payload.configPath
+          : undefined,
+    })
   })
 
   ipcMain.handle('ai:complete', async (_event, payload) => {
-    if (!payload || typeof payload !== 'object' || typeof payload.prompt !== 'string') {
+    const messages = Array.isArray(payload?.messages) ? payload.messages : undefined
+    if (!payload || typeof payload !== 'object' || (typeof payload.prompt !== 'string' && !messages?.length)) {
       throw new Error('Invalid ai payload')
     }
     return aiComplete({
-      prompt: payload.prompt,
+      provider: payload.provider === 'deepseek' ? 'deepseek' : 'kimi',
+      prompt: typeof payload.prompt === 'string' ? payload.prompt : undefined,
+      messages,
       system: typeof payload.system === 'string' ? payload.system : undefined,
+      model: typeof payload.model === 'string' ? payload.model : undefined,
       maxTokens: typeof payload.maxTokens === 'number' ? payload.maxTokens : undefined,
       configPath:
         typeof payload.configPath === 'string' && payload.configPath

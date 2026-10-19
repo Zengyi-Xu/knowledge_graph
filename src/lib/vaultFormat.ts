@@ -10,6 +10,7 @@
  */
 import type { Grade, LiteratureMeta, Note, NoteType } from '@/types/note'
 import { GRADE_META, NOTE_TYPE_META, uid } from '@/types/note'
+import { WRITER_FORMAT_VERSION, checkWriteGate, declarationLines, mergeFrontMatter, readDeclaration, readMetaDeclaration } from '@/lib/vaultGate'
 
 /** meta.json 的格式标记与版本 */
 export const VAULT_FORMAT = 'kaust-kg-vault'
@@ -31,6 +32,8 @@ export interface VaultIndexEntry {
 export interface VaultIndex {
   format: string
   version: number
+  /** 写入方声明的磁盘格式代次（门禁用；老 meta 视为 1，见 docs/VAULT_WRITE_GATE.md） */
+  formatVersion: number
   notes: VaultIndexEntry[]
 }
 
@@ -192,6 +195,8 @@ export function toMarkdown(note: Note): string {
     `id: ${JSON.stringify(note.id)}`,
     `title: ${JSON.stringify(note.title)}`,
     `type: ${note.type}`,
+    // 门禁声明：只有带能力数据的笔记才有这几行（策略 B，普通笔记逐字节不变）
+    ...declarationLines(note),
   ]
   if (note.grade) fm.push(`grade: ${note.grade}`)
   // 文献元数据：空数组/空串也写出来，字段稳定存在，解析端简单
@@ -407,6 +412,7 @@ export function parseMeta(text: string): VaultIndex | null {
     return {
       format: VAULT_FORMAT,
       version: typeof raw.version === 'number' ? raw.version : VAULT_VERSION,
+      formatVersion: typeof raw.formatVersion === 'number' ? raw.formatVersion : 1,
       notes,
     }
   } catch {
@@ -418,6 +424,7 @@ export function buildMeta(notes: Note[], names: Map<string, string>): string {
   const index: VaultIndex = {
     format: VAULT_FORMAT,
     version: VAULT_VERSION,
+    formatVersion: WRITER_FORMAT_VERSION,
     notes: notes.map((n) => ({
       id: n.id,
       file: names.get(n.id) ?? relPathFor(n),
@@ -492,8 +499,31 @@ export function assignFileNames(
 // -------------------------------------------------------------- 写盘计划
 
 /**
+ * meta.json 只重新生成固定字段；上一次 meta 里的未知顶层键原样带回（别家 / 未来版本写的不能丢）。
+ */
+function mergeMetaExtras(meta: string, lastMeta: string): string {
+  let prev: Record<string, unknown> | null = null
+  try {
+    const parsed = JSON.parse(lastMeta) as unknown
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) prev = parsed as Record<string, unknown>
+  } catch {
+    prev = null
+  }
+  if (!prev) return meta
+  const next = JSON.parse(meta) as Record<string, unknown>
+  const extras: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(prev)) if (!(key in next)) extras[key] = value
+  if (Object.keys(extras).length === 0) return meta
+  return JSON.stringify({ ...next, ...extras }, null, 2) + '\n'
+}
+
+/**
  * 比对内存状态与磁盘账本，算出这次要写哪些 md、删哪些、meta 是否要更新。
  * deletes 只会包含 meta.json 索引里登记过的文件。
+ *
+ * 门禁（docs/VAULT_WRITE_GATE.md）：
+ * - 每篇回写前先把磁盘原文里「本写入方不认识」的 front matter 字段合并回去，不认识的不许覆盖；
+ * - 磁盘上声明了更高格式 / 更高要求的笔记一律只读：不写、不删、不改名，meta 继续指向它现在那个文件。
  */
 export function planVaultWrite(
   notes: Note[],
@@ -503,23 +533,44 @@ export function planVaultWrite(
   lastMeta: string,
 ): VaultWritePlan {
   const names = assignFileNames(notes, index, diskMdNames)
+  const indexById = new Map((index ?? []).map((e) => [e.id, e]))
+
+  // 整库门禁：meta.json 自己的声明超出本客户端 → 什么都不写（连索引都不重建）
+  if (!checkWriteGate(readMetaDeclaration(lastMeta)).writable) {
+    const frozen = new Map<string, string>()
+    for (const n of notes) frozen.set(n.id, indexById.get(n.id)?.file ?? relPathFor(n))
+    return { writes: [], deletes: [], index: index ?? [], meta: lastMeta, metaSkipped: true, names: frozen }
+  }
 
   const writes: VaultWritePlan['writes'] = []
+  const readOnly = new Set<string>()
   for (const n of notes) {
     const file = names.get(n.id) ?? relPathFor(n)
-    const text = toMarkdown(n)
     const prev = written.get(n.id)
+    if (prev && !checkWriteGate(readDeclaration(prev.text)).writable) {
+      readOnly.add(n.id)
+      continue
+    }
+    const text = prev ? mergeFrontMatter(prev.text, toMarkdown(n)) : toMarkdown(n)
     if (!prev || prev.file !== file || prev.text !== text) writes.push({ id: n.id, file, text })
+  }
+
+  // 只读笔记连文件名都不动：否则 meta 会指向一个我们没敢落盘的路径
+  const effectiveNames = new Map(names)
+  for (const id of readOnly) {
+    const entry = indexById.get(id)
+    if (entry) effectiveNames.set(id, entry.file)
   }
 
   const liveIds = new Set(notes.map((n) => n.id))
   const writtenFiles = new Set(writes.map((w) => pathKey(w.file)))
   // 仍然被某篇存活笔记占用的路径（不区分大小写）绝不能删：Windows 上 'A.md' 与 'a.md' 是同一个文件
-  const keptFiles = new Set([...names.values()].map(pathKey))
+  const keptFiles = new Set([...effectiveNames.values()].map(pathKey))
   const deletes = new Set<string>()
   for (const e of index ?? []) {
+    if (readOnly.has(e.id)) continue
     if (!liveIds.has(e.id)) deletes.add(e.file)
-    else if (names.get(e.id) !== e.file) deletes.add(e.file)
+    else if (effectiveNames.get(e.id) !== e.file) deletes.add(e.file)
   }
   // 改名互换等场景：新名字已经写过了，或者该路径还被别的笔记用着，就不能再删
   for (const f of [...deletes]) {
@@ -527,10 +578,10 @@ export function planVaultWrite(
     if (writtenFiles.has(key) || keptFiles.has(key)) deletes.delete(f)
   }
 
-  const meta = buildMeta(notes, names)
+  const meta = mergeMetaExtras(buildMeta(notes, effectiveNames), lastMeta)
   const index2: VaultIndexEntry[] = notes.map((n) => ({
     id: n.id,
-    file: names.get(n.id) ?? relPathFor(n),
+    file: effectiveNames.get(n.id) ?? relPathFor(n),
     title: n.title,
   }))
 
@@ -540,6 +591,6 @@ export function planVaultWrite(
     index: index2,
     meta,
     metaSkipped: meta === lastMeta,
-    names,
+    names: effectiveNames,
   }
 }

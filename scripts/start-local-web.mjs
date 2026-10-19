@@ -7,10 +7,29 @@ import { fileURLToPath } from 'node:url'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const bibliotx = 'D:\\BaiduSyncdisk\\Bibliotx'
 const firstExisting = (paths) => paths.find((file) => fs.existsSync(file)) || ''
+
+/** Zotero 自己在用的数据库位置：读 profile 的 prefs.js 里的 extensions.zotero.dataDir */
+function zoteroDataDir() {
+  const profiles = path.join(process.env.APPDATA || '', 'Zotero', 'Zotero', 'Profiles')
+  let names = []
+  try { names = fs.readdirSync(profiles) } catch { return '' }
+  for (const name of names) {
+    let text = ''
+    try { text = fs.readFileSync(path.join(profiles, name, 'prefs.js'), 'utf8') } catch { continue }
+    const match = text.match(/"extensions\.zotero\.dataDir",\s*"([^"]+)"/)
+    if (match) return match[1].replace(/\\\\/g, '\\')
+  }
+  return ''
+}
+
 const vault = process.env.KG_VAULT_DIR || firstExisting([
   path.join(bibliotx, 'Vault'), path.join(os.homedir(), 'Documents', '知识图谱'),
 ])
+// Zotero 正在用的库优先（否则会读到 Baidu 同步盘里的旧副本，新条目的 PDF 认不出来）
+const dataDir = zoteroDataDir()
 const zotero = process.env.KG_ZOTERO_DB || firstExisting([
+  dataDir ? path.join(dataDir, 'zotero.sqlite') : '',
+  path.join(os.homedir(), 'Zotero', 'zotero.sqlite'),
   path.join(bibliotx, 'Zotero', 'zotero.sqlite'),
   path.join(process.env.APPDATA || '', 'Zotero', 'Zotero', 'zotero.sqlite'),
 ])

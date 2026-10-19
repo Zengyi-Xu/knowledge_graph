@@ -1,0 +1,142 @@
+{
+  "generatedAt": "2026-10-19T18:21:58.562Z",
+  "origin": "http://127.0.0.1:59846",
+  "results": [
+    {
+      "scenario": "home",
+      "label": "首页（默认并列视图：图谱 + 笔记预览）",
+      "bytes": 64,
+      "gzip": 79,
+      "chunks": [
+        "assets/GraphView-BGFQa_Ie.js",
+        "assets/Markdown-D23h036N.js",
+        "assets/NoteEditor-BLGnDAYT.js",
+        "assets/PreviewContent-Csnf946F.js",
+        "assets/chevron-left-C5cikVw2.js",
+        "assets/clipboard-copy-COYH8SXQ.js",
+        "assets/index-AWrmueX-.js",
+        "assets/index-BdQq_4o_.js",
+        "assets/select-DVKVm5YD.js",
+        "assets/sliders-horizontal-D6Z-oyW2.js",
+        "assets/textarea-CnOeCPUU.js"
+      ],
+      "workers": []
+    },
+    {
+      "scenario": "literature",
+      "label": "文献列表",
+      "bytes": 64,
+      "gzip": 79,
+      "chunks": [
+        "assets/GraphView-BGFQa_Ie.js",
+        "assets/LiteratureView-CN6YQwZi.js",
+        "assets/Markdown-D23h036N.js",
+        "assets/NoteEditor-BLGnDAYT.js",
+        "assets/PreviewContent-Csnf946F.js",
+        "assets/chevron-left-C5cikVw2.js",
+        "assets/clipboard-copy-COYH8SXQ.js",
+        "assets/copyCitation-Da9XZ5bK.js",
+        "assets/index-AWrmueX-.js",
+        "assets/index-BdQq_4o_.js",
+        "assets/literature-C6KU_d_r.js",
+        "assets/rtfField-oV_N-xn5.js",
+        "assets/select-DVKVm5YD.js",
+        "assets/sliders-horizontal-D6Z-oyW2.js",
+        "assets/textarea-CnOeCPUU.js"
+      ],
+      "workers": []
+    },
+    {
+      "scenario": "preview",
+      "label": "预览（阅读态：笔记区停在预览页签）",
+      "bytes": 64,
+      "gzip": 79,
+      "chunks": [
+        "assets/GraphView-BGFQa_Ie.js",
+        "assets/Markdown-D23h036N.js",
+        "assets/NoteEditor-BLGnDAYT.js",
+        "assets/PreviewContent-Csnf946F.js",
+        "assets/chevron-left-C5cikVw2.js",
+        "assets/clipboard-copy-COYH8SXQ.js",
+        "assets/index-AWrmueX-.js",
+        "assets/index-BdQq_4o_.js",
+        "assets/select-DVKVm5YD.js",
+        "assets/sliders-horizontal-D6Z-oyW2.js",
+        "assets/textarea-CnOeCPUU.js"
+      ],
+      "workers": []
+    },
+    {
+      "scenario": "edit",
+      "label": "编辑（所见即所得：Vditor 随正文加载）",
+      "bytes": 64,
+      "gzip": 79,
+      "chunks": [
+        "assets/GraphView-BGFQa_Ie.js",
+        "assets/Markdown-D23h036N.js",
+        "assets/NoteEditor-BLGnDAYT.js",
+        "assets/PreviewContent-Csnf946F.js",
+        "assets/WysiwygEditor-CMPiLAWI.js",
+        "assets/chevron-left-C5cikVw2.js",
+        "assets/clipboard-copy-COYH8SXQ.js",
+        "assets/index-AWrmueX-.js",
+        "assets/index-BdQq_4o_.js",
+        "assets/select-DVKVm5YD.js",
+        "assets/sliders-horizontal-D6Z-oyW2.js",
+        "assets/textarea-CnOeCPUU.js"
+      ],
+      "workers": []
+    },
+    {
+      "scenario": "graph",
+      "label": "图谱",
+      "bytes": 64,
+      "gzip": 79,
+      "chunks": [
+        "assets/GraphView-BGFQa_Ie.js",
+        "assets/Markdown-D23h036N.js",
+        "assets/NoteEditor-BLGnDAYT.js",
+        "assets/PreviewContent-Csnf946F.js",
+        "assets/chevron-left-C5cikVw2.js",
+        "assets/clipboard-copy-COYH8SXQ.js",
+        "assets/index-AWrmueX-.js",
+        "assets/index-BdQq_4o_.js",
+        "assets/select-DVKVm5YD.js",
+        "assets/sliders-horizontal-D6Z-oyW2.js",
+        "assets/textarea-CnOeCPUU.js"
+      ],
+      "workers": []
+    },
+    {
+      "scenario": "pdf",
+      "label": "PDF（文献表 → PDF 徽标 → 全屏阅读）",
+      "bytes": 1700874,
+      "gzip": 507656,
+      "chunks": [
+        "assets/GraphView-BGFQa_Ie.js",
+        "assets/LiteratureView-CN6YQwZi.js",
+        "assets/Markdown-D23h036N.js",
+        "assets/NoteEditor-BLGnDAYT.js",
+        "assets/PdfReadingWorkspace-uqhMaaBL.js",
+        "assets/PdfViewer-FugSgyyn.js",
+        "assets/PreviewContent-Csnf946F.js",
+        "assets/chevron-left-C5cikVw2.js",
+        "assets/clipboard-copy-COYH8SXQ.js",
+        "assets/copyCitation-Da9XZ5bK.js",
+        "assets/index-AWrmueX-.js",
+        "assets/index-BdQq_4o_.js",
+        "assets/literature-C6KU_d_r.js",
+        "assets/pdf.worker.min-BH63Q58_.js",
+        "assets/pdf.worker.min-CjEcRF4W.mjs",
+        "assets/react-resizable-panels-C8v_vnSf.js",
+        "assets/rtfField-oV_N-xn5.js",
+        "assets/select-DVKVm5YD.js",
+        "assets/sliders-horizontal-D6Z-oyW2.js",
+        "assets/textarea-CnOeCPUU.js"
+      ],
+      "workers": [
+        "assets/pdf.worker.min-CjEcRF4W.mjs"
+      ]
+    }
+  ]
+}

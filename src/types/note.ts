@@ -85,7 +85,7 @@ export function uid(): string {
 
 /** 从 markdown 内容中提取 [[wikilink]] */
 export function extractLinks(content: string): string[] {
-  const re = /\[\[([^\[\]|]+)(?:\|[^\[\]]*)?\]\]/g
+  const re = /\[\[([^[\]|]+)(?:\|[^[\]]*)?\]\]/g
   const out: string[] = []
   let m: RegExpExecArray | null
   while ((m = re.exec(content)) !== null) {

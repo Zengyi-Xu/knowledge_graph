@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { buildAnchor, locateAnchor, type TextAnchor } from '@/lib/pdfAnchor'
 import type { PdfAnnotation } from '@/lib/attachments'
+import './pdfTextLayer.css'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
 
@@ -24,6 +25,8 @@ interface TextItemLike {
 
 /** 高亮色板（黄/绿/蓝/红/紫） */
 const HIGHLIGHT_COLORS = ['#ffd54a', '#a8e6a3', '#90caf9', '#ef9a9a', '#ce93d8']
+/** 划词预览：浅莫兰迪蓝，避免原生选区那种高饱和深蓝。 */
+const SELECTION_PREVIEW_COLOR = '#c3d0d7'
 
 export interface NewAnnotation {
   page: number
@@ -81,7 +84,41 @@ function rectsForRange(textLayer: HTMLElement, start: number, end: number): Rect
       /* 个别 span 结构异常就跳过这一段 */
     }
   }
-  return rects
+  // getClientRects() 返回的是字形级矩形。不同 span/字形之间通常会有极小的
+  // 浮点误差缝隙，逐个绘制时就会把高亮切断。按行合并相邻矩形，并只做
+  // 亚像素级的边缘补偿；真正的换行仍保持为独立矩形。
+  const lines: Rect[][] = []
+  for (const rect of rects) {
+    const line = lines.find((items) => {
+      const sample = items[0]
+      const tolerance = Math.max(1, Math.min(sample.height, rect.height) * 0.35)
+      return Math.abs(sample.top + sample.height / 2 - (rect.top + rect.height / 2)) <= tolerance
+    })
+    if (line) line.push(rect)
+    else lines.push([rect])
+  }
+
+  return lines.flatMap((line) => {
+    line.sort((a, b) => a.left - b.left)
+    const merged: Rect[] = []
+    for (const rect of line) {
+      const previous = merged[merged.length - 1]
+      // 同一行属于同一个连续选区时，把字间空格也纳入高亮；空格没有
+      // glyph rect，按间隙阈值合并会留下截图中那种竖直白缝。
+      if (previous) {
+        const right = Math.max(previous.left + previous.width, rect.left + rect.width)
+        previous.left = Math.min(previous.left, rect.left)
+        previous.width = right - previous.left
+        previous.top = Math.min(previous.top, rect.top)
+        previous.height = Math.max(previous.top + previous.height, rect.top + rect.height) - previous.top
+      } else {
+        // 上下各外扩 1px，让相邻文本行轻微重叠；PDF 的行框常有约 1px
+        // 浮点间隙，不补偿就会出现贯穿整行的白色横缝。
+        merged.push({ ...rect, left: rect.left - 0.75, width: rect.width + 1.5, top: rect.top - 1, height: rect.height + 2 })
+      }
+    }
+    return merged
+  })
 }
 
 /** 把 DOM Selection 换算成 textLayer 内的字符区间；不在 textLayer 内返回 null */
@@ -132,7 +169,22 @@ export function PdfViewer({
   const [pageText, setPageText] = useState('')
   const [highlights, setHighlights] = useState<{ id: string; color: string; rects: Rect[]; missing?: boolean }[]>([])
   const [searchRects, setSearchRects] = useState<Rect[]>([])
+  const [selectionRects, setSelectionRects] = useState<Rect[]>([])
   const [focusedId, setFocusedId] = useState<string | null>(null)
+  const [prevFocusId, setPrevFocusId] = useState<string | null>(null)
+
+  // 外部把 focusAnnotationId 从 null 切到某个标注时，跳页并高亮该标注（render 期调整，避免 effect 里的同步 setState）
+  // 先把 undefined 归一成 null：否则「没传这个 prop」时 undefined !== null 恒成立，渲染期 setState 会死循环
+  // （React 「Too many re-renders」→ 整页白屏；详情页右侧面板就是这么炸的）
+  const focusId = focusAnnotationId ?? null
+  if (focusId !== prevFocusId) {
+    setPrevFocusId(focusId)
+    const annotation = focusId ? annotations.find((item) => item.id === focusId) : undefined
+    if (annotation) {
+      setPageNum(annotation.page)
+      setFocusedId(focusId)
+    }
+  }
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -144,13 +196,13 @@ export function PdfViewer({
   // ---- 加载文档 ----
   useEffect(() => {
     let cancelled = false
-    const task = pdfjsLib.getDocument({ data })
+    // pdf.js 会把 data 的 buffer 转移给 worker（调用后原 Uint8Array 失效）：
+    // 来源字节可能来自 pdfSource.ts 的会话缓存，这里必须传副本，否则第二次打开同一份 PDF 就是空的
+    const task = pdfjsLib.getDocument({ data: new Uint8Array(data) })
     task.promise
       .then((d) => {
-        if (cancelled) {
-          void (d as unknown as { destroy: () => Promise<void> }).destroy()
-          return
-        }
+        // 已取消时文档由下面的 cleanup（task.destroy）负责销毁：pdf.js 6 的 PDFDocumentProxy 没有 destroy
+        if (cancelled) return
         docRef.current = d
         setDoc(d)
         setNumPages(d.numPages)
@@ -180,7 +232,9 @@ export function PdfViewer({
       const fitScale = containerW / base.width
       const scale = scaleMode === 'fit' ? fitScale : (scaleMode / 100) * 0.75
       const dpr = window.devicePixelRatio || 1
+      // canvas 后备分辨率按 DPR 放大；textLayer 要的是 CSS 尺寸的 viewport（pdf.js 内部再乘 DPR）
       const viewport = page.getViewport({ scale: scale * dpr })
+      const cssViewport = dpr === 1 ? viewport : page.getViewport({ scale })
 
       const canvas = canvasRef.current
       const layer = layerRef.current
@@ -188,11 +242,12 @@ export function PdfViewer({
       if (!canvas || !layer || !holder) return
       canvas.width = Math.floor(viewport.width)
       canvas.height = Math.floor(viewport.height)
-      canvas.style.width = `${Math.floor(viewport.width / dpr)}px`
-      canvas.style.height = `${Math.floor(viewport.height / dpr)}px`
+      canvas.style.width = `${Math.floor(cssViewport.width)}px`
+      canvas.style.height = `${Math.floor(cssViewport.height)}px`
       holder.style.width = canvas.style.width
       holder.style.height = canvas.style.height
-      layer.style.setProperty('--scale-factor', String(scale * dpr))
+      // pdf.js 6 读的是 --total-scale-factor，值必须是 CSS 缩放比（--font-height 是无缩放值）
+      layer.style.setProperty('--total-scale-factor', String(cssViewport.scale))
 
       const ctx = canvas.getContext('2d')
       if (!ctx) return
@@ -209,7 +264,7 @@ export function PdfViewer({
       const textLayer = new pdfjsLib.TextLayer({
         textContentSource: page.streamTextContent(),
         container: layer,
-        viewport,
+        viewport: cssViewport,
       })
       await textLayer.render()
     }
@@ -285,18 +340,24 @@ export function PdfViewer({
       const range = selectionRange(layer, pageTextRef.current)
       if (!range) {
         setPalette(null)
+        setSelectionRects([])
         return
       }
       const anchor = buildAnchor(pageTextRef.current, range.start, range.end)
+      const previewRects = rectsForRange(layer, range.start, range.end)
       const sel = window.getSelection()
       const rect = sel && sel.rangeCount > 0 ? sel.getRangeAt(0).getBoundingClientRect() : null
       const origin = layer.getBoundingClientRect()
       setActive(null)
+      setSelectionRects(previewRects)
       setPalette({
         x: (rect ? rect.left - origin.left + rect.width / 2 : 0),
         y: (rect ? rect.top - origin.top : 0),
         anchor,
       })
+      // PDF.js 把一行拆成大量带 transform 的 span；浏览器原生选区会在
+      // span/空格边界显示深浅条纹。锚点取完后清掉原生选区，改画连续预览。
+      sel?.removeAllRanges()
     }, 0)
   }, [])
 
@@ -305,6 +366,7 @@ export function PdfViewer({
     onAddAnnotation({ page: pageNum, anchor: palette.anchor, color })
     window.getSelection()?.removeAllRanges()
     setPalette(null)
+    setSelectionRects([])
   }
 
   const linkSelection = () => {
@@ -312,23 +374,21 @@ export function PdfViewer({
     onLinkSelection({ page: pageNum, anchor: palette.anchor, color: HIGHLIGHT_COLORS[0] })
     window.getSelection()?.removeAllRanges()
     setPalette(null)
+    setSelectionRects([])
   }
 
   useEffect(() => {
-    if (!focusAnnotationId) return
-    const annotation = annotations.find((item) => item.id === focusAnnotationId)
-    if (!annotation) return
-    setPageNum(annotation.page)
-    setFocusedId(annotation.id)
+    if (!focusedId) return
     const timer = window.setTimeout(() => setFocusedId(null), 1800)
     return () => window.clearTimeout(timer)
-  }, [focusAnnotationId, annotations])
+  }, [focusedId])
 
   const gotoPage = (n: number) => {
     if (n >= 1 && n <= numPages) {
       setPageNum(n)
       setMatchIdx(0)
       setPalette(null)
+      setSelectionRects([])
       setActive(null)
     }
   }
@@ -413,7 +473,7 @@ export function PdfViewer({
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto bg-muted/40 p-4">
         <div ref={pageRef} className="relative mx-auto bg-white shadow" onMouseUp={handleMouseUp}>
           <canvas ref={canvasRef} className="block" />
-          <div ref={layerRef} className="absolute inset-0 overflow-hidden" />
+          <div ref={layerRef} className="textLayer absolute inset-0 overflow-hidden" />
 
           {/* 搜索匹配 */}
           {searchRects.map((r, i) => (
@@ -424,12 +484,23 @@ export function PdfViewer({
             />
           ))}
 
-          {/* 标注高亮 */}
+          {/* 鼠标松开后的连续选区预览：替代 PDF.js 碎片 span 产生的原生蓝色条纹。 */}
+          {selectionRects.map((r, i) => (
+            <div
+              key={`selection-${i}`}
+              className="pointer-events-none absolute mix-blend-multiply"
+              style={{ left: r.left, top: r.top, width: r.width, height: r.height, background: SELECTION_PREVIEW_COLOR }}
+            />
+          ))}
+
+          {/* 标注高亮：色块一律 multiply 混合，像荧光笔垫在文字下面 ——
+              白底染成高亮色、黑字仍是黑字。半透明色块直接盖在文字上会把正文冲淡成灰，
+              看着像没渲染清楚，所以这里不能再用 opacity。 */}
           {highlights.map((h) =>
             h.missing ? null : h.rects.map((r, i) => (
               <div
                 key={`${h.id}-${i}`}
-                className={`absolute cursor-pointer opacity-60 hover:opacity-80 ${focusedId === h.id ? 'ring-2 ring-primary opacity-90' : ''}`}
+                className={`absolute cursor-pointer mix-blend-multiply ${focusedId === h.id ? 'ring-2 ring-primary' : ''}`}
                 style={{ left: r.left, top: r.top, width: r.width, height: r.height, background: h.color }}
                 onClick={(e) => {
                   const layer = layerRef.current
@@ -438,6 +509,7 @@ export function PdfViewer({
                   const a = annotations.find((x) => x.id === h.id)
                   if (!a) return
                   setPalette(null)
+                  setSelectionRects([])
                   setActive({ x: e.clientX - origin.left, y: e.clientY - origin.top, annotation: a })
                 }}
               />

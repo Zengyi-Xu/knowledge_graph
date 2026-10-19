@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  知识图谱网页端 · 停止后台服务
+
+  双击 启动网页端.wsf 起的服务没有窗口可关，用这个文件停止它；窗口版（启动网页端.cmd）起的服务也能这样停。
+  做法：在 Win32_Process 里找命令行含 local-web.mjs 的 node.exe，逐个结束。
+-->
+<job>
+<script language="VBScript">
+<![CDATA[
+Dim wmi, processes, item, stopped, quiet
+
+quiet = False
+If WScript.Arguments.Count > 0 Then
+  If WScript.Arguments(0) = "--quiet" Then quiet = True
+End If
+
+stopped = 0
+On Error Resume Next
+Set wmi = GetObject("winmgmts:\\.\root\cimv2")
+Set processes = wmi.ExecQuery("Select ProcessId, CommandLine from Win32_Process Where Name='node.exe'")
+For Each item In processes
+  If Not IsNull(item.CommandLine) Then
+    If InStr(item.CommandLine, "local-web.mjs") > 0 Then
+      item.Terminate
+      If Err.Number = 0 Then
+        stopped = stopped + 1
+      Else
+        Err.Clear
+      End If
+    End If
+  End If
+Next
+On Error GoTo 0
+
+' --quiet 供脚本/自动化调用：只结束进程，不弹提示框
+If Not quiet Then
+  If stopped > 0 Then
+    MsgBox "已停止知识图谱本地服务（" & stopped & " 个进程）。", 64, "知识图谱网页端"
+  Else
+    MsgBox "知识图谱本地服务当前没有在运行。", 64, "知识图谱网页端"
+  End If
+End If
+]]>
+</script>
+</job>

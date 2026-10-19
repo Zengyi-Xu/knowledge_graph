@@ -77,9 +77,11 @@
       const result = await call('file:read-pdf', { path: filePath })
       return { ...result, data: fromBase64(result.data) }
     },
+    // 没有 localPdf / Zotero PDF 的文献：在授权目录里按标题兜底找一份本地 PDF（只提名，不写盘）
+    matchLocalPdf: (titles) => call('pdf:match-titles', { titles }),
     // 在 Zotero 里定位条目（zotero:// 协议）
     selectZoteroItem: (zoteroKey) => call('zotero:select-item', { zoteroKey }),
-    aiStatus: (configPath) => call('ai:status', { configPath }),
+    aiStatus: (request) => call('ai:status', request ?? {}),
     aiComplete: (payload) => call('ai:complete', payload),
     // 浏览器写不了 text/rtf；由本机服务代写剪贴板，Word 才能拿到真域
     writeClipboardRtf: (rtf, text) => call('clipboard:write-rtf', { rtf, text }),

@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ci:
+    # 项目以 Windows 为开发/测试环境；test:frozen 里的 test:vault-e2e 启动本机 Electron（electron.exe），
+    # 在 Linux 上无法运行，故 CI 使用 Windows runner。
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Frozen units check
+        run: npm run frozen:check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check
+        run: npx tsc -b
+
+      - name: Frozen guard tests
+        run: npm run test:frozen
+
+      - name: Build
+        run: npm run build

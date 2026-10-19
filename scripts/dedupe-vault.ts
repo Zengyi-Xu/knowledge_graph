@@ -20,7 +20,7 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
-import { UNCLASSIFIED, UNCLASSIFIED_TAG, mergeCollections } from '@/lib/zoteroMeta'
+import { UNCLASSIFIED, isDirectionTag, mergeCollections } from '@/lib/zoteroMeta'
 
 const args = process.argv.slice(2)
 const argValue = (name: string): string | undefined => {
@@ -207,7 +207,7 @@ const plans = groups.map((group) => {
   const keeper = sorted[0]
   const losers = sorted.slice(1)
   const collections = mergeCollections(group.flatMap((n) => n.collections), [])
-  const tags = unique(group.flatMap((n) => n.tags)).filter((tag) => tag !== UNCLASSIFIED_TAG)
+  const tags = unique(group.flatMap((n) => n.tags)).filter((tag) => !isDirectionTag(tag))
   const attachments = unique(group.flatMap((n) => n.attachments))
   const allKeys = unique(group.flatMap((n) => [...n.keys, ...(n.key ? [n.key] : [])]))
   const pdfCarrier = sorted.find((n) => (n.pdfsAvailable ?? 0) > 0)
@@ -244,7 +244,7 @@ const placeholderFixes = fixPlaceholders
       .map((n) => ({
         note: n,
         collections: mergeCollections(n.collections, []),
-        tags: n.tags.filter((tag) => tag !== UNCLASSIFIED_TAG),
+        tags: n.tags.filter((tag) => !isDirectionTag(tag)),
       }))
       .filter((entry) => entry.collections.join('\u0000') !== entry.note.collections.join('\u0000') || entry.tags.join('\u0000') !== entry.note.tags.join('\u0000'))
   : []

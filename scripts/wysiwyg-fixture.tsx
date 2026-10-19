@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { NoteEditor } from '../src/components/NoteEditor'
 import type { Note } from '../src/types/note'
 
-const sample = '# 中文标题\n\n**粗体** *斜体* ~~删除线~~ `行内代码`\n\n- [ ] 待办任务\n- [x] 已完成\n\n> 引用文本\n\n| A | B |\n| --- | --- |\n| 文本 | 123 |\n\n```ts\nconst value = "[[保留]]"\n\n// 空行保留\n```\n\n---\n\n[[已有笔记]] [[尚未存在]]\n\n[外部链接](https://example.com) ![小图](/tiny.svg)\n'
+const sample = '# 中文标题\n\n**粗体** *斜体* ~~删除线~~ `行内代码`\n\n行内公式 $E=mc^2$；数字起始 $10\\log_{10}(64)=18$ dB。\n\n$$\n\\mathrm{TBP}_{\\mathrm{eff}}=T\\,B_{\\mathrm{det}}\n$$\n\n- [ ] 待办任务\n- [x] 已完成\n\n> 引用文本\n\n| A | B |\n| --- | --- |\n| 文本 | 123 |\n\n```ts\nconst value = "[[保留]]"\n\n// 空行保留\n```\n\n---\n\n[[已有笔记]] [[尚未存在]]\n\n[外部链接](https://example.com) ![小图](/tiny.svg)\n'
 const base = { id: 'self', title: '编辑器验收', content: sample, type: 'other', grade: '', tags: [], createdAt: 1, updatedAt: 1 } as Note
 const notes = [
   base,

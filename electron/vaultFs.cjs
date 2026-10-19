@@ -163,8 +163,53 @@ async function readVaultFiles(dir, names) {
 }
 
 /**
+ * 写入方画像（门禁最后一道防线，见 docs/VAULT_WRITE_GATE.md）：
+ * 只允许覆盖声明不超过这些值的文件；必须与 src/lib/vaultGate.ts 的 WRITER_* 保持一致。
+ */
+const WRITER_FORMAT_VERSION = 2
+const WRITER_VERSION = 2
+const WRITER_CAPABILITIES = ['zoterokeys', 'localpdf']
+
+/** 读一篇 md 声明的格式与能力要求；认不出来的一律当作「更高版本」 */
+function readGateDeclaration(text) {
+  let formatVersion = 1
+  let minimumWriterVersion = 0
+  const capabilities = []
+  const block = /^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(text.replace(/\r\n/g, '\n'))
+  if (!block) return { formatVersion, minimumWriterVersion, capabilities }
+  const unquote = (raw) => raw.trim().replace(/^["']|["']$/g, '')
+  for (const line of block[1].split('\n')) {
+    const field = /^([A-Za-z0-9_-]+)\s*:\s*(.*)$/.exec(line)
+    if (!field) continue
+    const key = field[1].toLowerCase()
+    const raw = field[2]
+    if (key === 'formatversion' || key === 'minimumwriterversion') {
+      const value = /^\d+$/.test(unquote(raw)) ? Number(unquote(raw)) : Number.POSITIVE_INFINITY
+      const safe = value >= 1 ? value : Number.POSITIVE_INFINITY
+      if (key === 'formatversion') formatVersion = Math.max(formatVersion, safe)
+      else minimumWriterVersion = Math.max(minimumWriterVersion, safe)
+    } else if (key === 'requiredcapabilities') {
+      for (const cap of unquote(raw).replace(/^\[|\]$/g, '').split(',').map(unquote).filter(Boolean)) {
+        capabilities.push(cap.toLowerCase())
+      }
+    }
+  }
+  return { formatVersion, minimumWriterVersion, capabilities }
+}
+
+/** 这个文件能不能被本写入方覆盖；读不到 / 认不出来一律拒绝 */
+function gateAllowsWrite(text) {
+  if (typeof text !== 'string') return false
+  const decl = readGateDeclaration(text)
+  if (decl.formatVersion > WRITER_FORMAT_VERSION) return false
+  if (decl.minimumWriterVersion > WRITER_VERSION) return false
+  return decl.capabilities.every((cap) => WRITER_CAPABILITIES.includes(cap))
+}
+
+/**
  * 批量写盘：先写 md（原子替换），再删旧文件，最后写 meta.json。
  * 顺序保证：即使中途失败，meta 也不会指向尚未落盘的笔记。
+ * 每个 md 落盘前再查一次门禁：磁盘上那份文件声明了更高格式 / 本写入方没有的能力就整批拒绝。
  */
 async function writeVault(dir, payload) {
   const abs = path.resolve(dir)
@@ -177,7 +222,15 @@ async function writeVault(dir, payload) {
   let written = 0
   for (const w of writes) {
     if (!w || typeof w.file !== 'string' || typeof w.text !== 'string') throw new Error('非法的写入项')
-    await writeFileAtomic(abs, normalizeRel(w.file), w.text)
+    const rel = normalizeRel(w.file)
+    const existing = await fs.readFile(resolveInside(abs, rel), 'utf8').catch((error) => {
+      if (error && error.code === 'ENOENT') return null
+      throw error
+    })
+    if (existing !== null && !gateAllowsWrite(existing)) {
+      throw new Error(`拒绝覆盖 ${rel}：它声明的磁盘格式或字段能力超出本写入方（docs/VAULT_WRITE_GATE.md）`)
+    }
+    await writeFileAtomic(abs, rel, w.text)
     written++
   }
 

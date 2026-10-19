@@ -24,9 +24,13 @@
    `.md-footnote`、`.md-toc`、`.mathjax-block`），让 `src/themes` 里的 Typora 主题能直接命中。
 4. **解析器重写**：`src/lib/md.ts` 从"常见语法子集"扩到 Typora 覆盖的范围（见下表），
    并按 CommonMark 的思路处理列表项缩进、松紧列表、引用惰性续行、引用式链接、脚注定义。
-5. **数学**：`src/lib/tex.ts` 解析 LaTeX 子集（上下标、\frac、\sqrt、希腊字母、常用运算符、
-   重音符、\text）。遇到不支持的命令（矩阵环境、& 、\ 换行等）**整体退回显示源码**，
-   不会渲染出错乱的公式。
+5. **数学**：阅读面板在冻结解析器之前由 `src/lib/mathMarkup.ts` 抽取公式，再按需加载 KaTeX 0.19 渲染；
+   输出同时包含视觉 HTML 与无障碍 MathML。支持行内 `$…$` / `\(…\)`、块级 `$$…$$` / `\[…\]`、
+   矩阵、分段函数、多行对齐、求和积分、字体与重音等常用 LaTeX / MathType 导出语法。代码围栏、行内代码、
+   货币金额不会被误判；无公式的页面不下载 KaTeX。所见即所得编辑器同样走内置 KaTeX：Vditor 自带的公式渲染器
+   要从 CDN 取脚本，离线会失败，`WysiwygEditor` 在每次 DOM 重排后由 `hydrateVditorMath` 接管可见层
+   （隐藏源码保持原样，序列化/撤销仍归 Vditor）。旧的 `src/lib/tex.ts` 子集仍作为冻结解析器契约保留，
+   但阅读面板中的公式正常情况下不会再走它的源码降级路径。
 
 ## 支持的语法
 
@@ -54,9 +58,10 @@
 - **软换行渲染成换行**：CommonMark 把段落内的单换行当空格，本应用保留为换行，
   一是贴近 Typora 编辑器里 Shift+Enter 的显示，二是能保住既有笔记"一行一句"的排版。
 - **`1、项目`**（中文顿号）也当作有序列表标记。
-- **数学**不是 MathJax/KaTeX：只做有限子集的 HTML 排版（分式、根号、上下标、希腊字母），
-  复杂公式会退回显示 LaTeX 源码，而不是渲染错误的结果。
-- **不支持**：mermaid/流程图等图表围栏（按普通代码块显示）、矩阵/多行公式环境、
+- **公式输入仍使用标准分隔符**：行内写 `$…$` 或 `\(…\)`，独立公式写 `$$…$$` 或 `\[…\]`。
+  MathType / Word 导出的 `equation`、`align`、`gather` 等环境会在渲染时安全归一化，不改写磁盘正文；
+  单独一整行、含明显运算结构的裸 LaTeX 也会兼容识别。
+- **不支持**：mermaid/流程图等图表围栏（按普通代码块显示）、完整 LaTeX 文档级命令（导言区、宏包加载）、
   HTML 标签的属性白名单之外的内容（如 `<video controls>` 的 controls 会被去掉）、
   多行链接标题定义。
 - 极端嵌套的强调分隔符（例如 `**a**b**c**`）按简化规则处理，可能和 CommonMark 的
@@ -67,7 +72,9 @@
 ```bash
 npm run test:md          # 解析器 / 渲染结构单测（136 项，含 41 篇真实笔记冒烟测试）
 npm run test:md-render   # 真实 React 组件服务端渲染的断言（列表、表格、上下标、任务列表等）
+npm run test:math        # 公式抽取、代码/货币防误判、KaTeX HTML+MathML 输出
 npm run visual:md        # 视觉检查：生成页面 + 无头 Chrome 截图 + computedStyle 自检
+npm run visual:math      # 真实 PreviewContent + Shadow DOM + KaTeX，桌面/390px 窄栏截图与溢出自检
 ```
 
 `npm run visual:md` 的产物在 `.tmp-md-visual/`（已被 .gitignore 忽略）：
@@ -92,3 +99,5 @@ npm run visual:md        # 视觉检查：生成页面 + 无头 Chrome 截图 + 
 | `src/markdown-base.css` | 阅读面板的 Markdown 基础排版 |
 | `src/lib/previewTheme.ts` | Shadow DOM 的 CSS 拼装（基础排版 + 主题 + 手机覆盖） |
 | `src/components/PreviewContent.tsx` | 挂载 Shadow DOM，注入 Tailwind 与上面的 CSS |
+| `src/lib/mathMarkup.ts` | 在冻结 Markdown 解析器外抽取公式、保护代码与货币文本 |
+| `src/lib/katexRuntime.ts` | 按需加载 KaTeX、注入 Shadow DOM 样式并输出 HTML + MathML |

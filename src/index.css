@@ -101,3 +101,19 @@
     line-height: 1.35;
   }
 }
+
+/* ------------------------------------------------------------------ 外壳尺寸
+ *
+ * 手机浏览器的地址栏会伸缩：100vh 在移动端等于「地址栏收起时」的高度，
+ * 用它会挡住底部导航。100dvh 跟随可视视口（不支持的浏览器自动退回 100vh）。
+ * 桌面端两者相等，行为不变。
+ */
+.kg-shell {
+  height: 100vh;
+  height: 100dvh;
+}
+
+/* 底部导航给 iPhone 的 Home 指示条留出空间（viewport-fit=cover 配合使用） */
+.kg-safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}

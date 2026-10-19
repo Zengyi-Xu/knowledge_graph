@@ -26,6 +26,8 @@ interface Props {
   onCreateNote: (title: string) => void
   theme: PreviewTheme
   customCss: string
+  /** true：编辑器随内容长高、滚动交给外层容器（单栏「笔记」视图的流式布局） */
+  flow?: boolean
 }
 
 const WIKI_ICON =
@@ -149,7 +151,7 @@ function decorateWikilinks(root: HTMLElement, notes: Note[]) {
 
 /** Word/OneNote 式所见即所得：正文始终可直接输入，格式随打随排版。
  * Markdown 字符串进 / 字符串出，不经 DOM 反序列化；与经典模式共用同一存储管道。 */
-export default function WysiwygEditor({ value, onChange, onOpenNote, onCreateNote, noteId, notes, theme, customCss }: Props) {
+export default function WysiwygEditor({ value, onChange, onOpenNote, onCreateNote, noteId, notes, theme, customCss, flow = false }: Props) {
   const hostRef = useRef<HTMLDivElement>(null)
   const vditorRef = useRef<Vditor | null>(null)
   const [ready, setReady] = useState(false)
@@ -162,7 +164,13 @@ export default function WysiwygEditor({ value, onChange, onOpenNote, onCreateNot
 
   const decorate = () => {
     const root = hostRef.current?.querySelector('.vditor-wysiwyg')
-    if (root) decorateWikilinks(root as HTMLElement, navRef.current.notes)
+    if (!root) return
+    decorateWikilinks(root as HTMLElement, navRef.current.notes)
+    if (root.querySelector('.vditor-wysiwyg__block[data-type^="math-"]')) {
+      void import('@/lib/katexRuntime').then(({ hydrateVditorMath }) => {
+        if (hostRef.current?.contains(root)) hydrateVditorMath(root as HTMLElement)
+      })
+    }
   }
 
   useEffect(() => {
@@ -182,7 +190,12 @@ export default function WysiwygEditor({ value, onChange, onOpenNote, onCreateNot
       theme: document.documentElement.classList.contains('dark') ? 'dark' : 'classic',
       cache: { enable: false },
       // 关掉 Vditor 自带的「内容列居中」排版（它会把工具栏推到中间），改由 CSS 做 Word 式左对齐
-      preview: { maxWidth: 10000 },
+      preview: {
+        maxWidth: 10000,
+        // 允许 `$10\\log…$` 这类以数字开头的行内公式；渲染由本应用内置的
+        // KaTeX 完成，不依赖 Vditor 的外部 CDN 脚本。
+        math: { engine: 'KaTeX', inlineDigit: true },
+      },
       toolbar: [...TOOLBAR_BASE.slice(0, 12), wikiItem, ...TOOLBAR_BASE.slice(12)],
       link: {
         // 外部链接交给系统浏览器；编辑区内不做应用内跳转
@@ -269,7 +282,9 @@ export default function WysiwygEditor({ value, onChange, onOpenNote, onCreateNot
     else create(title)
   }
 
-  return <div className="flex min-h-0 flex-1 flex-col" data-testid="wysiwyg-editor">
-    <div ref={hostRef} className="kg-vditor min-h-0 flex-1" onClick={handleHostClick} />
-  </div>
+  return (
+    <div className={flow ? 'flex flex-col' : 'flex min-h-0 flex-1 flex-col'} data-testid="wysiwyg-editor">
+      <div ref={hostRef} className={flow ? 'kg-vditor kg-vditor-flow' : 'kg-vditor min-h-0 flex-1'} onClick={handleHostClick} />
+    </div>
+  )
 }

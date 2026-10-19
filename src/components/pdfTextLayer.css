@@ -1,0 +1,46 @@
+/**
+ * PDF.js textLayer 的最小样式（按 pdfjs-dist 6.4 的 web/pdf_viewer.css 摘录，只保留定位与划选需要的部分）。
+ *
+ * 契约（少了任何一条，整页文字会以普通文本流叠在 canvas 上，看着就是「重影」）：
+ * - 容器必须带 textLayer 类（pdf.js 的 TextLayer 只往容器里塞 span，不自己加类）；
+ * - span 绝对定位、颜色透明 —— 文字只用来划选，看得见的是 canvas 画的那一层；
+ * - 字号 = --total-scale-factor × 每段的 --font-height（--font-height 是无缩放值，
+ *   所以 --total-scale-factor 必须等于当前的 CSS 缩放比，即传给 TextLayer 的 viewport.scale）。
+ *   注意 pdf.js 6 用的是 --total-scale-factor，旧版的 --scale-factor 已经不再被读取。
+ */
+.textLayer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  text-align: initial;
+  line-height: 1;
+  letter-spacing: normal;
+  word-spacing: normal;
+  -webkit-text-size-adjust: none;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  caret-color: CanvasText;
+  z-index: 0;
+}
+
+.textLayer :is(span, br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+  user-select: text;
+}
+
+.textLayer > :not(.markedContent) {
+  --font-height: 0;
+  --scale-x: 1;
+  --rotate: 0deg;
+  font-size: calc(var(--total-scale-factor) * var(--font-height));
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x));
+}
+
+.textLayer .markedContent {
+  display: contents;
+}

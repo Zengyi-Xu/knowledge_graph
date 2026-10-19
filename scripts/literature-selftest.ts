@@ -12,6 +12,7 @@ import {
   buildBibtex,
   formatBibliography,
   formatCitation,
+  formatCitationMarker,
   importFromArxiv,
   importFromDoi,
   litToCSL,
@@ -118,20 +119,20 @@ async function main() {
   })
 
   console.log('\nB. 引文格式化（内嵌样式，离线）')
-  await check('GB/T 7714 单条引文带 [1] 编号与题名', () => {
-    const out = formatCitation(litToCSL(litNote()), 'gb')
+  await check('GB/T 7714 单条引文带 [1] 编号与题名', async () => {
+    const out = await formatCitation(litToCSL(litNote()), 'gb')
     assert.ok(out.startsWith('[1]'), `实际：${out}`)
     assert.ok(out.includes('Silicon photonics for quantum computing'))
     assert.ok(out.includes('Nature Photonics'))
   })
-  await check('APA 单条引文含作者与年份', () => {
-    const out = formatCitation(litToCSL(litNote()), 'apa')
+  await check('APA 单条引文含作者与年份', async () => {
+    const out = await formatCitation(litToCSL(litNote()), 'apa')
     assert.ok(out.includes('Zhang'))
     assert.ok(out.includes('(2024)'))
     assert.ok(out.includes('Nature Photonics'))
   })
-  await check('多条文献表逐条编号', () => {
-    const out = formatBibliography([litToCSL(litNote()), litToCSL({ ...litNote(), id: 'n2', title: 'Another paper', literature: { ...litNote().literature!, citekey: 'li2023another', year: 2023 } })], 'gb')
+  await check('多条文献表逐条编号', async () => {
+    const out = await formatBibliography([litToCSL(litNote()), litToCSL({ ...litNote(), id: 'n2', title: 'Another paper', literature: { ...litNote().literature!, citekey: 'li2023another', year: 2023 } })], 'gb')
     const lines = out.split('\n').filter(Boolean)
     assert.equal(lines.length, 2)
     assert.ok(lines[0].startsWith('[1]'))
@@ -165,8 +166,8 @@ async function main() {
     '@article{li2023another, title={Another paper}, author={Li, Si}, year={2023}}',
     '@misc{wang2022misc, title={A misc entry}, author={Wang, Wu}, year={2022}, howpublished={arXiv}}',
   ].join('\n\n')
-  await check('三条 BibTeX 逐条解析', () => {
-    const all = parseCitationText(threeBib)
+  await check('三条 BibTeX 逐条解析', async () => {
+    const all = await parseCitationText(threeBib)
     assert.equal(all.length, 3)
     assert.equal(all[0].title, 'Silicon photonics')
     assert.deepEqual(all[0].authors, ['Zhang, San', 'Li, Si'])
@@ -174,9 +175,9 @@ async function main() {
     assert.equal(all[0].year, 2024)
     assert.equal(all[2].title, 'A misc entry')
   })
-  await check('RIS 导入', () => {
+  await check('RIS 导入', async () => {
     const ris = 'TY  - JOUR\nTI  - Silicon photonics\nAU  - Zhang, San\nAU  - Li, Si\nPY  - 2024\nJO  - Nature Photonics\nER  - '
-    const all = parseCitationText(ris)
+    const all = await parseCitationText(ris)
     assert.equal(all.length, 1)
     assert.equal(all[0].title, 'Silicon photonics')
     assert.equal(all[0].year, 2024)
@@ -275,9 +276,9 @@ async function main() {
   })
 
   console.log('\nG. citekey 与导入联用（撞名自动追加）')
-  await check('三条 BibTeX 生成互不冲突的 citekey', () => {
+  await check('三条 BibTeX 生成互不冲突的 citekey', async () => {
     const existing = new Set<string>()
-    const keys = parseCitationText(threeBib).map((l) => {
+    const keys = (await parseCitationText(threeBib)).map((l) => {
       const k = makeCitekey({ authors: l.authors, year: l.year }, l.title, existing)
       existing.add(k)
       return k
@@ -289,7 +290,7 @@ async function main() {
   })
 
   console.log('\nH. RTF 域代码（Word 真域，兼容 Zotero）')
-  const { buildCitationFieldRtf, buildBibliographyRtf, buildClipboardParts, rtfEscape } = await import('@/lib/rtfField')
+  const { buildCitationFieldRtf, bibliographyRtfFromText, buildClipboardParts, rtfEscape } = await import('@/lib/rtfField')
   const rtfItem = litToCSL(litNote())
   const rtfItem2 = litToCSL({ ...litNote(), id: 'n2', title: 'Another paper', literature: { ...litNote().literature!, citekey: 'li2023another', year: 2023 } })
   await check('rtfEscape：反斜杠/花括号/非 ASCII 按 RTF 规则转义', () => {
@@ -306,8 +307,8 @@ async function main() {
     const body = rtf.slice(start, end).replace(/\\(.)/gs, '$1') // \{ → {、\} → }、\\ → \
     return JSON.parse(body)
   }
-  await check('域指令含合法 JSON（citationItems/properties/schema）', () => {
-    const rtf = buildCitationFieldRtf([rtfItem], 'apa')
+  await check('域指令含合法 JSON（citationItems/properties/schema）', async () => {
+    const rtf = buildCitationFieldRtf([rtfItem], 'apa', await formatCitationMarker([rtfItem], 'apa'))
     // 指令不能带花括号：{\*\fldinst{ … }} 在 Word 里会退化成字面文本（2026-10-13 实测）
     assert.ok(rtf.startsWith('{\\field{\\*\\fldinst ADDIN ZOTERO_ITEM CSL_CITATION '), rtf.slice(0, 80))
     assert.ok(!rtf.includes('\\fldinst{'), 'fldinst 指令不得用花括号包裹')
@@ -322,43 +323,45 @@ async function main() {
     assert.equal(payload.schema, 'https://github.com/citation-style-language/schema/raw/master/csl-citation.json')
     assert.ok(rtf.includes('{\\fldrslt (Zhang & Li, 2024)}}'))
   })
-  await check('GB 数字标记在 fldrslt 里用上标', () => {
-    const rtf = buildCitationFieldRtf([rtfItem], 'gb')
+  await check('GB 数字标记在 fldrslt 里用上标', async () => {
+    const rtf = buildCitationFieldRtf([rtfItem], 'gb', await formatCitationMarker([rtfItem], 'gb'))
     assert.ok(rtf.includes('{\\super [1]}}'), rtf)
   })
-  await check('多条拼接：citationItems 按序排列', () => {
-    const rtf = buildCitationFieldRtf([rtfItem, rtfItem2], 'gb')
+  await check('多条拼接：citationItems 按序排列', async () => {
+    const rtf = buildCitationFieldRtf([rtfItem, rtfItem2], 'gb', await formatCitationMarker([rtfItem, rtfItem2], 'gb'))
     const payload = extractPayload(rtf)
     assert.deepEqual(payload.citationItems.map((c: { id: string }) => c.id), ['zhang2024silicon', 'li2023another'])
   })
-  await check('已同步条目优先用真实 Zotero key，私有辅助字段不写入 itemData', () => {
-    const rtf = buildCitationFieldRtf([litToCSL(litNote({ zoteroKey: 'Q4DVYK39' }))], 'gb')
+  await check('已同步条目优先用真实 Zotero key，私有辅助字段不写入 itemData', async () => {
+    const csl = [litToCSL(litNote({ zoteroKey: 'Q4DVYK39' }))]
+    const rtf = buildCitationFieldRtf(csl, 'gb', await formatCitationMarker(csl, 'gb'))
     const payload = extractPayload(rtf)
     assert.equal(payload.citationItems[0].id, 'Q4DVYK39')
     assert.equal(payload.citationItems[0].itemData.id, 'Q4DVYK39')
     assert.equal(payload.citationItems[0].itemData._zoteroKey, undefined)
   })
-  await check('特殊字符快照：中文标题与非 ASCII 作者正确转义', () => {
+  await check('特殊字符快照：中文标题与非 ASCII 作者正确转义', async () => {
     const zhNote = {
       ...litNote(),
       title: '硅光集成 综述',
       literature: { ...litNote().literature!, authors: ['张三', 'Li, Si'] },
     }
-    const rtf = buildCitationFieldRtf([litToCSL(zhNote)], 'gb')
+    const csl = [litToCSL(zhNote)]
+    const rtf = buildCitationFieldRtf(csl, 'gb', await formatCitationMarker(csl, 'gb'))
     assert.ok(rtf.includes('\\u30789?\\u20809?')) // 硅光
     assert.ok(rtf.includes('\\u24352?')) // 张
   })
-  await check('参考文献表 RTF：每条一段，GB 自带 [1] [2] 编号', () => {
-    const rtf = buildBibliographyRtf([rtfItem, rtfItem2], 'gb')
+  await check('参考文献表 RTF：每条一段，GB 自带 [1] [2] 编号', async () => {
+    const rtf = bibliographyRtfFromText(await formatBibliography([rtfItem, rtfItem2], 'gb'))
     assert.ok(rtf.includes('\\par'))
     assert.ok(rtf.includes('[1]'))
     assert.ok(rtf.includes('[2]'))
   })
-  await check('buildClipboardParts：citation 给域代码+标记，bibliography 给文献表', () => {
-    const c = buildClipboardParts([rtfItem], 'apa', 'citation')
+  await check('buildClipboardParts：citation 给域代码+标记，bibliography 给文献表', async () => {
+    const c = await buildClipboardParts([rtfItem], 'apa', 'citation')
     assert.ok(c.rtf.includes('ADDIN ZOTERO_ITEM CSL_CITATION'))
     assert.equal(c.plain, '(Zhang & Li, 2024)')
-    const b = buildClipboardParts([rtfItem], 'apa', 'bibliography')
+    const b = await buildClipboardParts([rtfItem], 'apa', 'bibliography')
     assert.ok(!b.rtf.includes('ZOTERO_ITEM'))
     assert.ok(b.plain.includes('Zhang'))
   })
@@ -411,7 +414,7 @@ async function main() {
     assert.equal(plan.matchedCount, 1)
     assert.equal(plan.unmatchedZotero.length, 0)
   })
-  await check('自动标签：方向首段 / 期刊 / 年份，且不重复已有标签', () => {
+  await check('自动标签：期刊 / 年份，且不重复已有标签；旧「方向:」标签被清掉', () => {
     const note = litNote()
     const withTags: Note = { ...note, tags: ['方向:硅光', '期刊:Nature Photonics'] }
     const plan = planZoteroSync(
@@ -419,8 +422,10 @@ async function main() {
       [withTags],
     )
     assert.deepEqual(plan.updates[0].tagsToAdd, ['年份:2024'])
+    // 旧版把分类压平写进「方向:」标签：分类现在只由 collections 承担，这些标签同步时清掉
+    assert.deepEqual(plan.updates[0].tagsToRemove, ['方向:硅光'])
     const fresh = planZoteroSync([zItem({ zoteroKey: 'DDDD0004', title: note.title, venue: 'Nature Photonics', year: 2024, collectionPaths: ['硅光/调制器'] })], [note])
-    assert.deepEqual(fresh.updates[0].tagsToAdd.sort(), ['期刊:Nature Photonics', '年份:2024', '方向:硅光'].sort())
+    assert.deepEqual(fresh.updates[0].tagsToAdd.sort(), ['期刊:Nature Photonics', '年份:2024'].sort())
   })
   await check('Zotero 里没有分类 → collections 为空（界面动态显示「未分类」），不写占位', () => {
     const note = litNote({ doi: '' })
@@ -452,7 +457,7 @@ async function main() {
     const base = litNote({ collections: ['硅光/调制器'] })
     const note: Note = {
       ...base,
-      tags: ['方向:硅光', '期刊:Nature Photonics', '年份:2024'],
+      tags: ['期刊:Nature Photonics', '年份:2024'],
       literature: { ...base.literature!, zoteroKey: 'GGGG0007', zoteroKeys: ['GGGG0007'], zoteroPdfCount: 1, zoteroAvailablePdfCount: 1 },
     }
     const same = zItem({ zoteroKey: 'GGGG0007', title: note.title, venue: 'Nature Photonics', year: 2024, collectionPaths: ['硅光/调制器'], pdfCount: 1, availablePdfCount: 1 })

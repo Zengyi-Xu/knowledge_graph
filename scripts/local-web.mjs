@@ -8,12 +8,19 @@ import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
 
+import { describeBlockedWrites, findBlockedWrites, findMetaLoss } from './vault-write-guard.mjs'
+import { matchLocalPdfTitles } from './pdf-match.mjs'
+
 const require = createRequire(import.meta.url)
 const vaultFs = require('../electron/vaultFs.cjs')
 const attachmentFs = require('../electron/attachmentFs.cjs')
 const zoteroFs = require('../electron/zoteroFs.cjs')
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.json': 'application/json', '.mjs': 'text/javascript' }
+// 版本号只从 package.json 读一次，打印在启动横幅里（避免 .cmd 里再硬编码一份，写死了就会过期）
+const { version } = (() => {
+  try { return JSON.parse(fsSync.readFileSync(path.join(root, 'package.json'), 'utf8')) } catch { return { version: '?' } }
+})()
+const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf', '.json': 'application/json', '.mjs': 'text/javascript', '.webmanifest': 'application/manifest+json; charset=utf-8' }
 const canonical = (p) => process.platform === 'win32' ? path.resolve(p).toLowerCase() : path.resolve(p)
 const MAX_INLINE_PDF_BYTES = 150 * 1024 * 1024
 
@@ -128,6 +135,35 @@ export async function createLocalServer({ port = 4173, vault = '', zoteroDb = ''
     if (stat.size > MAX_INLINE_PDF_BYTES) throw new Error('PDF 超过 150 MB，请改用系统阅读器打开')
     return { data: (await fs.readFile(filePath)).toString('base64'), name: path.basename(filePath), path: filePath }
   }
+
+  // ---- 本地 PDF 兜底：把缺 PDF 的文献标题与授权目录里的文件名做保守匹配 ----------
+  /** 写入计划里的 md 项（只有 file/text 都合法的才参与门禁判断） */
+  const planWrites = (plan) => (Array.isArray(plan?.writes) ? plan.writes : [])
+  /** 读笔记库里的一个 md 原文（不存在返回 null；其它错误抛给调用方） */
+  const readVaultFile = async (dir, rel) => {
+    const target = vaultFs.resolveInside(path.resolve(dir), vaultFs.normalizeRel(rel))
+    return fs.readFile(target, 'utf8').catch((error) => { if (error?.code === 'ENOENT') return null; throw error })
+  }
+  /** 授权 PDF 目录里的文件清单（递归）：缓存 5 分钟，避免每次开文献列表都扫盘 */
+  const pdfIndexCache = { at: 0, files: [] }
+  const listPdfRootFiles = async () => {
+    if (Date.now() - pdfIndexCache.at < 5 * 60 * 1000) return pdfIndexCache.files
+    const files = []
+    const walk = async (dir, depth) => {
+      if (depth > 8) return
+      let entries = []
+      try { entries = await fs.readdir(dir, { withFileTypes: true }) } catch { return }
+      for (const entry of entries) {
+        const full = path.join(dir, entry.name)
+        if (entry.isDirectory()) await walk(full, depth + 1)
+        else if (entry.isFile() && full.toLowerCase().endsWith('.pdf')) files.push(full)
+      }
+    }
+    for (const dir of allowedPdfRoots) await walk(dir, 0)
+    pdfIndexCache.at = Date.now()
+    pdfIndexCache.files = files
+    return files
+  }
   async function dispatch(method, p) {
     switch (method) {
       case 'vault:authorize': {
@@ -138,7 +174,18 @@ export async function createLocalServer({ port = 4173, vault = '', zoteroDb = ''
       }
       case 'vault:list': return vaultFs.listVault(assertVault(p.dir))
       case 'vault:read-files': return vaultFs.readVaultFiles(assertVault(p.dir), p.names)
-      case 'vault:write': return serial(assertVault(p.dir), () => vaultFs.writeVault(p.dir, p.plan))
+      case 'vault:write': return serial(assertVault(p.dir), async () => {
+        // 最后一道门禁：磁盘声明了 requiredCapabilities 的笔记，新文本必须还带着这些字段。
+        // 旧页面/旧构建不会这么干，于是它们改不动这个库（2026-10-16 的事故见 scripts/vault-write-guard.mjs）。
+        const blocked = await findBlockedWrites(planWrites(p.plan), (rel) => readVaultFile(p.dir, rel))
+        if (blocked.length) throw new Error(describeBlockedWrites(blocked))
+        if (typeof p.plan?.meta === 'string') {
+          const diskMeta = await fs.readFile(path.join(path.resolve(p.dir), vaultFs.META_NAME), 'utf8').catch(() => null)
+          const metaLost = findMetaLoss(diskMeta, p.plan.meta)
+          if (metaLost.length) throw new Error(`拒绝写入索引 meta.json：${metaLost.join('、')} —— 写入方大概是旧版本，请强刷页面（Ctrl+F5）`)
+        }
+        return vaultFs.writeVault(p.dir, p.plan)
+      })
       case 'vault:open-dir': {
         const dir = assertVault(p.dir)
         if (process.platform === 'win32') spawn('explorer.exe', [dir], { windowsHide: true, detached: true, stdio: 'ignore' }).unref()
@@ -177,6 +224,14 @@ export async function createLocalServer({ port = 4173, vault = '', zoteroDb = ''
         return { path: target, error: null }
       }
       case 'file:read-pdf': return readPdfPayload(assertLocalPdf(p.path))
+      case 'pdf:match-titles': {
+        // 只读兜底：标题 → 授权目录里的 PDF。命中只是「提名」，不写任何文件。
+        const titles = (Array.isArray(p.titles) ? p.titles : [])
+          .filter((item) => item && typeof item.id === 'string' && typeof item.title === 'string')
+          .slice(0, 2000)
+        if (!titles.length) return { matches: {}, stats: { titles: 0, files: 0, compared: 0, matched: 0 } }
+        return matchLocalPdfTitles(titles, await listPdfRootFiles())
+      }
       case 'zotero:select-item': {
         // 在 Zotero 里定位条目；只接受 8 位条目 key，URL 由服务端拼
         const key = typeof p.zoteroKey === 'string' ? p.zoteroKey : ''
@@ -206,7 +261,7 @@ export async function createLocalServer({ port = 4173, vault = '', zoteroDb = ''
         const extraKeys = Array.isArray(p.zoteroKeys) ? p.zoteroKeys.filter((k) => typeof k === 'string') : []
         return readPdfPayload(zoteroFs.resolveZoteroPdf(zoteroDbPath, p.zoteroKey, extraKeys))
       }
-      case 'ai:status': return require('../electron/aiGateway.cjs').aiStatus(p.configPath)
+      case 'ai:status': return require('../electron/aiGateway.cjs').aiStatus(p)
       case 'ai:complete': return require('../electron/aiGateway.cjs').aiComplete(p)
       case 'clipboard:write-rtf': return writeClipboardRtf(p.rtf, p.text)
       default: throw new Error('不支持的本地操作')
@@ -262,7 +317,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     // 允许打开笔记 localPdf 字段记录的 PDF：除笔记库外，还可显式授权若干 PDF 根目录
     const pdfRoots = optionAll('--pdf-root')
     const local = await createLocalServer({ port: Number(option('--port', '4173')), vault: configured, zoteroDb: configuredZotero, pdfRoots, dist: path.resolve(option('--dist', path.join(root, 'dist'))) })
-    console.log(`知识图谱本地网页端：${local.origin}`)
+    console.log(`知识图谱 v${version} 本地网页端：${local.origin}`)
     console.log(configured ? `笔记库：${configured}` : '在网页内选择已有笔记目录；目录与类型分区会保留。')
     console.log(configuredZotero ? `Zotero 数据库（只读）：${configuredZotero}` : '未配置 Zotero 数据库：点文献表的 PDF 徽标打开本地 PDF 需用 --zotero-db 指定 zotero.sqlite。')
     if (pdfRoots.length) console.log(`已授权的 PDF 目录：${pdfRoots.join('；')}`)

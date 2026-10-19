@@ -19,7 +19,7 @@ await new Promise((resolve, reject) => tw.on('exit', (code) => code === 0 ? reso
 await esbuild.build({ entryPoints: ['scripts/wysiwyg-fixture.tsx'], bundle: true, outfile: path.join(out, 'app.js'), format: 'iife', platform: 'browser', jsx: 'automatic', alias: { '@': path.join(root, 'src') }, define: { __APP_ENV__: '"development"', __APP_VERSION__: '"editor-test"' }, plugins: [{ name: 'inline-css', setup(build) {
   build.onResolve({ filter: /\?url$/ }, ({ path: file }) => ({ path: file, namespace: 'asset-url' }))
   build.onLoad({ filter: /.*/, namespace: 'asset-url' }, () => ({ contents: 'export default "/unused-pdf-worker.mjs"', loader: 'js' }))
-  build.onResolve({ filter: /\?inline$/ }, ({ path: file, resolveDir }) => ({ path: file.startsWith('@/') ? path.join(root, 'src', file.slice(2, -7)) : file.startsWith('vditor/') ? path.join(root, 'node_modules', file.slice(0, -7)) : path.resolve(resolveDir, file.slice(0, -7)), namespace: 'inline-css' }))
+  build.onResolve({ filter: /\?inline$/ }, ({ path: file, resolveDir }) => ({ path: file.startsWith('@/') ? path.join(root, 'src', file.slice(2, -7)) : /^(vditor|katex)\//.test(file) ? path.join(root, 'node_modules', file.slice(0, -7)) : path.resolve(resolveDir, file.slice(0, -7)), namespace: 'inline-css' }))
   build.onLoad({ filter: /.*/, namespace: 'inline-css' }, async ({ path: file }) => ({ contents: `export default ${JSON.stringify(await fs.readFile((file.endsWith('index.css') && !file.includes('node_modules')) ? path.join(out, 'app.css') : file, 'utf8'))}`, loader: 'js' }))
 } }] })
 const html = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/app.css"></head><body style="margin:0"><div id="root" style="height:100vh"></div><script>localStorage.removeItem("kg-dev-editor-mode-v1")</script><script src="/app.js"></script></body></html>'
@@ -33,7 +33,8 @@ const server = http.createServer(async (req, res) => {
 })
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
 const url = `http://127.0.0.1:${server.address().port}`
-const browser = spawn(executable, ['--headless=new', '--no-sandbox', '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--remote-debugging-port=9335', `--user-data-dir=${path.join(out, 'profile')}`, url], { windowsHide: true, stdio: 'ignore' })
+const profile = await fs.mkdtemp(path.join(out, 'profile-'))
+const browser = spawn(executable, ['--headless=new', '--no-sandbox', '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--remote-debugging-port=9335', `--user-data-dir=${profile}`, url], { windowsHide: true, stdio: 'ignore' })
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 let ws
 let closeBrowser
@@ -59,6 +60,31 @@ try {
   check('默认所见即所得模式', await wait(`${ed} && ${content}`))
   check('Vditor 就绪并完成首渲染', await wait(`${content}?.querySelector('h1')`))
   check('载入内容逐字保真', await evaluate('fixture.note.content === fixture.sample'))
+  // 本脚本只服务 public/vditor/（没有 dist/js/katex/*），Vditor 自带的 CDN 渲染器在这里必然失败，
+  // 公式仍能渲染就证明走的是应用内置的 katexRuntime，而不是联网/外部脚本。
+  check('块公式与行内公式均由内置 KaTeX 渲染', await wait(`${content}.querySelectorAll('.katex').length >= 3`))
+  check('数字起始的行内公式可识别', await evaluate(`[...${content}.querySelectorAll('[data-type="math-inline"] code')].some(e => e.textContent.includes('10\\\\log'))`))
+  check('公式可见层不再显示 LaTeX 源码', await evaluate(`(() => {
+    const previews = [...${content}.querySelectorAll('.vditor-wysiwyg__preview .language-math')]
+    return previews.length >= 3 && previews.every(e => e.querySelector('.katex') &&
+      [...e.childNodes].every(n => n.nodeType !== Node.TEXT_NODE || !n.textContent.trim()))
+  })()`))
+  check('公式隐藏源码保持原样供编辑与序列化', await evaluate(`${content}.querySelector('code[data-type="math-block"]')?.textContent.includes('\\\\mathrm{TBP}')`))
+  // 新输入的公式也要走内置渲染（首屏已有的公式只覆盖「初次加载」这条路径）。
+  await act(`${content}.querySelector('.vditor-reset').click()`)
+  for (let i = 0; i < 2; i++) {
+    await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
+    await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
+  }
+  await send('Input.insertText', { text: '新输入 $\\alpha+\\beta$ 结束' })
+  check('输入行内公式后即时渲染', await wait(`(() => {
+    const blocks = [...${content}.querySelectorAll('.vditor-wysiwyg__block[data-type="math-inline"]')]
+    const block = blocks.find((item) => item.querySelector('code[data-type="math-inline"]')?.textContent.includes('\\\\alpha+\\\\beta'))
+    return Boolean(block?.querySelector('.vditor-wysiwyg__preview .language-math .katex'))
+  })()`))
+  const storedFormula = await wait(`fixture.note.content.includes('$\\\\alpha+\\\\beta$')`)
+  if (!storedFormula) console.log('  存储末尾:', await evaluate(`JSON.stringify(fixture.note.content.slice(-200))`))
+  check('输入的公式源码进入正文存储', storedFormula)
   check('标题/粗斜删除线/任务列表/引用/表格/代码/分割线/链接图片渲染', await evaluate(`(() => { const c=${content}; return ['h1','strong','em','s','input[type=checkbox]','blockquote','table','pre code','hr','a','img'].every(q=>c.querySelector(q)) })()`))
   check('双链按字面文本保留', await evaluate(`${content}.textContent.includes('[[已有笔记]]')`))
   check('双链渲染为样式化标记', await wait(`${content}.querySelectorAll('.kg-wiki').length >= 2`))
@@ -68,14 +94,20 @@ try {
     return w?.dataset.title === '已有笔记' && w?.dataset.found === 'true' &&
       getComputedStyle(bracket).fontSize === '0px' && w.textContent.startsWith('[[')
   })()`))
-  check('不存在的双链显示问号且配色区分', await evaluate(`(() => {
+  const wikiVisual = await evaluate(`(() => {
     const miss = [...${content}.querySelectorAll('.kg-wiki')].find(w => w.dataset.found === 'false')
     const hit = [...${content}.querySelectorAll('.kg-wiki')].find(w => w.dataset.found === 'true')
-    if (!miss || !hit) return false
+    if (!miss || !hit) return { ok: false, reason: 'missing link decoration' }
     const color = (el) => getComputedStyle(el).color
-    return miss.querySelector('.kg-wiki-missing')?.textContent === '?' &&
-      !hit.querySelector('.kg-wiki-missing') && color(miss) !== color(hit)
-  })()`))
+    return {
+      ok: miss.querySelector('.kg-wiki-missing')?.textContent === '?' &&
+        !hit.querySelector('.kg-wiki-missing') && color(miss) !== color(hit),
+      missText: miss.textContent, hitText: hit.textContent,
+      missColor: color(miss), hitColor: color(hit),
+    }
+  })()`)
+  check('不存在的双链显示问号且配色区分', wikiVisual?.ok)
+  if (!wikiVisual?.ok) console.log('  双链诊断:', JSON.stringify(wikiVisual))
   await act(`${content}.querySelector('.kg-wiki').click()`)
   check('双链点击跳转已有笔记', await evaluate(`fixture.events.includes('open:existing')`))
   await act(`${content}.querySelectorAll('.kg-wiki')[1].click()`)
@@ -97,6 +129,20 @@ try {
   check('双链工具栏插入模板', await wait(`fixture.note.content.includes('[[笔记标题]]')`))
   await act('fixture.remount()')
   check('组件重载后仍是所见即所得且内容不重写', await wait(`${content}?.textContent.includes('外部同步更新')`))
+  // 语法错误不能进入「渲染 → 写回纯文本 → MutationObserver 再次触发渲染」的循环。
+  await act(String.raw`fixture.setContent('坏公式 $\\notacommand{x}$')`)
+  const errorPreview = `[...${content}.querySelectorAll('.vditor-wysiwyg__block[data-type="math-inline"]')].find((item) => item.querySelector('code[data-type="math-inline"]')?.textContent.includes('notacommand'))?.querySelector('.vditor-wysiwyg__preview .language-math')`
+  check('无法解析的公式保留源码并标记错误', await wait(`(() => { const p=${errorPreview}; return p?.dataset.mathError === 'true' && p.textContent.includes('notacommand') })()`))
+  await delay(300)
+  const errorMutations = await evaluate(`new Promise((resolve) => {
+    const target = ${content}
+    let count = 0
+    const observer = new MutationObserver((records) => { count += records.length })
+    observer.observe(target, { childList: true, subtree: true, characterData: true })
+    setTimeout(() => { observer.disconnect(); resolve(count) }, 600)
+  })`)
+  if (errorMutations >= 40) console.log('  错误回退期间的 DOM 变更次数:', errorMutations)
+  check('错误回退不会反复重写 DOM', errorMutations < 40)
   // 标签自动补全：候选、沿用已有拼写、大小写归一
   const tagInput = 'document.querySelector("[aria-label=添加标签]")'
   const tagList = 'document.querySelector("[role=listbox][aria-label=已有标签]")'
@@ -121,4 +167,4 @@ try {
   await fs.writeFile(path.join(out, 'results.json'), JSON.stringify(results, null, 2))
   if (results.some((r) => !r.ok)) throw new Error('WYSIWYG browser checks failed')
   console.log(`\n${results.length} browser checks passed; screenshot: ${path.join(out, 'mobile.png')}`)
-} finally { await closeBrowser?.().catch(() => {}); ws?.close(); browser.kill(); server.close() }
+} finally { await closeBrowser?.().catch(() => {}); ws?.close(); browser.kill(); server.close(); await fs.rm(profile, { recursive: true, force: true }).catch(() => {}) }

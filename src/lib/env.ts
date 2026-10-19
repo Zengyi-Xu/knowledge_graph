@@ -52,6 +52,9 @@ export function storageKey(base: string): string {
   return isDevApp() ? `kg-dev-${base}` : `kg-${base}`
 }
 
+/** Zotero 数据库路径设置键（桌面版可改；本地网页端由服务端启动参数固定） */
+export const ZOTERO_DB_KEY = 'zotero-db-v1'
+
 /** 旧版键名（KAUST 命名）→ 仅正式版做一次前向迁移，开发版保持独立 */
 const LEGACY_KEYS: Record<string, string[]> = {
   'notes-v1': ['kaust-knowledge-graph-notes-v1'],

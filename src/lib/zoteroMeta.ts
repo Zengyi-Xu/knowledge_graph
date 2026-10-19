@@ -2,12 +2,20 @@
 /**
  * Zotero 条目 → 笔记字段的公共规则（纯函数，批量导入脚本与 UI 增量同步共用）。
  * 「未分类」只在界面按“没有真实分类”动态显示，不写成永久分类或标签。
+ * 分类只存在 `collections`（完整路径的树）里；旧版把树压平写进 `方向:` 标签，现已废弃、同步时清理。
  */
 import type { ZoteroItem } from './zoteroSync'
 
 /** 兼容旧数据时需要清理的历史占位分类 */
 export const UNCLASSIFIED = '未分类'
-export const UNCLASSIFIED_TAG = `方向:${UNCLASSIFIED}`
+/** 旧版「方向:<一级分类>」标签前缀：分类树的压平副本，已废弃（分类只由 `collections` 承担） */
+export const DIRECTION_TAG_PREFIX = '方向:'
+export const UNCLASSIFIED_TAG = `${DIRECTION_TAG_PREFIX}${UNCLASSIFIED}`
+
+/** 是否为旧版「方向:」标签（压平副本，同步时一律清掉，避免与 `collections` 漂移） */
+export function isDirectionTag(tag: string): boolean {
+  return tag.startsWith(DIRECTION_TAG_PREFIX)
+}
 
 /** 合并分类：已有分类 ∪ Zotero 分类，排序去重。
  * 历史占位值「未分类」会被清理；没有真实分类时返回空数组，由界面动态显示。
@@ -31,23 +39,20 @@ export function realCollectionsOf(collections: string[] | undefined): string[] {
 }
 
 /**
- * 为一条 Zotero 条目生成应补的标签（不含「笔记已有标签」的过滤）：
- * `方向:<一级分类>`、`期刊:<venue>`、`年份:<year>`。
+ * 为一条 Zotero 条目生成应补的标签（不含「笔记已有标签」的过滤）：`期刊:<venue>`、`年份:<year>`。
+ *
+ * 不再产出「方向:」标签：分类树由 `collections` 单独承担，标签里不留压平副本。
  */
 export function tagsForZoteroItem(item: Pick<ZoteroItem, 'collectionPaths' | 'venue' | 'year'>): string[] {
   const tags = new Set<string>()
-  for (const path of item.collectionPaths) {
-    const first = path.split('/')[0].trim()
-    if (first) tags.add(`方向:${first}`)
-  }
   if (item.venue.trim()) tags.add(`期刊:${item.venue.trim()}`)
   if (item.year != null) tags.add(`年份:${item.year}`)
   return [...tags]
 }
 
-/** 合并 Zotero 派生标签，同时清掉旧版写入的「方向:未分类」占位标签。 */
+/** 合并 Zotero 派生标签，同时清掉旧版写入的「方向:」标签（含「方向:未分类」占位）。 */
 export function mergeZoteroTags(existing: string[], item: Pick<ZoteroItem, 'collectionPaths' | 'venue' | 'year'>): string[] {
-  return [...new Set([...existing.filter((tag) => tag !== UNCLASSIFIED_TAG), ...tagsForZoteroItem(item)])]
+  return [...new Set([...existing.filter((tag) => !isDirectionTag(tag)), ...tagsForZoteroItem(item)])]
 }
 
 export interface CoalescedZoteroItem extends ZoteroItem {

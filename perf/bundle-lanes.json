@@ -1,0 +1,115 @@
+{
+  "generatedAt": "2026-10-19T18:21:40.104Z",
+  "entry": "assets/index-AWrmueX-.js",
+  "workerAssets": [
+    "assets/pdf.worker.min-CjEcRF4W.mjs",
+    "assets/pdf.worker.min-BH63Q58_.js"
+  ],
+  "scenarios": {
+    "home": [
+      "assets/index-AWrmueX-.js"
+    ],
+    "literature": [
+      "assets/index-AWrmueX-.js",
+      "assets/LiteratureView-CN6YQwZi.js",
+      "assets/select-DVKVm5YD.js",
+      "assets/literature-C6KU_d_r.js",
+      "assets/rtfField-oV_N-xn5.js",
+      "assets/textarea-CnOeCPUU.js",
+      "assets/copyCitation-Da9XZ5bK.js",
+      "assets/sliders-horizontal-D6Z-oyW2.js",
+      "assets/clipboard-copy-COYH8SXQ.js",
+      "assets/index-BdQq_4o_.js"
+    ],
+    "preview": [
+      "assets/index-AWrmueX-.js",
+      "assets/PreviewContent-Csnf946F.js",
+      "assets/Markdown-D23h036N.js",
+      "assets/NoteEditor-BLGnDAYT.js",
+      "assets/select-DVKVm5YD.js",
+      "assets/textarea-CnOeCPUU.js",
+      "assets/clipboard-copy-COYH8SXQ.js",
+      "assets/index-BdQq_4o_.js"
+    ],
+    "edit": [
+      "assets/index-AWrmueX-.js",
+      "assets/WysiwygEditor-CMPiLAWI.js",
+      "assets/PreviewContent-Csnf946F.js",
+      "assets/Markdown-D23h036N.js",
+      "assets/NoteEditor-BLGnDAYT.js",
+      "assets/select-DVKVm5YD.js",
+      "assets/textarea-CnOeCPUU.js",
+      "assets/clipboard-copy-COYH8SXQ.js",
+      "assets/index-BdQq_4o_.js"
+    ],
+    "graph": [
+      "assets/index-AWrmueX-.js",
+      "assets/GraphView-BGFQa_Ie.js",
+      "assets/sliders-horizontal-D6Z-oyW2.js",
+      "assets/chevron-left-C5cikVw2.js",
+      "assets/index-BdQq_4o_.js"
+    ],
+    "pdf": [
+      "assets/index-AWrmueX-.js",
+      "assets/pdf.worker.min-BH63Q58_.js",
+      "assets/PreviewContent-Csnf946F.js",
+      "assets/Markdown-D23h036N.js",
+      "assets/react-resizable-panels-C8v_vnSf.js",
+      "assets/NoteEditor-BLGnDAYT.js",
+      "assets/select-DVKVm5YD.js",
+      "assets/PdfViewer-FugSgyyn.js",
+      "assets/PdfReadingWorkspace-uqhMaaBL.js",
+      "assets/textarea-CnOeCPUU.js",
+      "assets/clipboard-copy-COYH8SXQ.js",
+      "assets/chevron-left-C5cikVw2.js",
+      "assets/index-BdQq_4o_.js"
+    ],
+    "citation": [
+      "assets/index-OjRAbB0X.js",
+      "assets/index-AWrmueX-.js",
+      "assets/PreviewContent-Csnf946F.js",
+      "assets/styles-B6Bpj9wP.js",
+      "assets/LiteratureView-CN6YQwZi.js",
+      "assets/Markdown-D23h036N.js",
+      "assets/NoteEditor-BLGnDAYT.js",
+      "assets/select-DVKVm5YD.js",
+      "assets/literature-C6KU_d_r.js",
+      "assets/rtfField-oV_N-xn5.js",
+      "assets/textarea-CnOeCPUU.js",
+      "assets/copyCitation-Da9XZ5bK.js",
+      "assets/sliders-horizontal-D6Z-oyW2.js",
+      "assets/clipboard-copy-COYH8SXQ.js",
+      "assets/index-BdQq_4o_.js"
+    ]
+  },
+  "units": {
+    "PdfViewer + pdf.worker": {
+      "files": [
+        "assets/PdfReadingWorkspace-uqhMaaBL.js",
+        "assets/PdfViewer-FugSgyyn.js",
+        "assets/LiteratureAttachments-DtseIkOo.js",
+        "assets/pdf.worker.min-BH63Q58_.js"
+      ],
+      "allowed": [
+        "pdf"
+      ]
+    },
+    "编辑器 Vditor": {
+      "files": [
+        "assets/WysiwygEditor-CMPiLAWI.js"
+      ],
+      "allowed": [
+        "edit"
+      ]
+    },
+    "citation-js + CSL 样式": {
+      "files": [
+        "assets/index-OjRAbB0X.js",
+        "assets/styles-B6Bpj9wP.js"
+      ],
+      "allowed": [
+        "citation"
+      ]
+    }
+  }
+}

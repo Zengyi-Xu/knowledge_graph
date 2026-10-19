@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { NOTE_TYPE_META, GRADE_META } from '@/types/note'
 import type { Note, NoteType, Grade, LiteratureMeta } from '@/types/note'
 import { emptyLiterature } from '@/types/note'
@@ -28,6 +28,7 @@ import { Trash2, Download, Check, Upload, Palette, MoreVertical, RefreshCw, Penc
 import { toast } from 'sonner'
 import { readSetting, writeSetting } from '@/lib/env'
 import { attachmentsSupported, openPdfExternal } from '@/lib/attachments'
+import { useInlinePdfPanelOpen } from '@/lib/inlinePdfPanel'
 
 const THEME_KEY = 'preview-theme-v1'
 const CUSTOM_THEME_KEY = 'custom-preview-theme-v1'
@@ -61,11 +62,30 @@ interface Props {
   onCreateNote: (title: string) => void
   /** 汇总笔记专属：「AI 更新」入口（未提供则不显示提示条） */
   onAiUpdate?: () => void
+  /** 文献笔记专属：PDF 全屏阅读入口（与文献表 PDF 徽标同一个函数）；未提供则不显示该按钮 */
+  onReadPdf?: (id: string) => void
   /** true：左源码右渲染同时显示；false：保留「预览/编辑」切换 */
   splitView?: boolean
+  /** 写入门禁拦下的笔记：只能看，不能改（改动不会落盘，见 docs/VAULT_WRITE_GATE.md） */
+  readOnly?: boolean
+  /** true：头部/工具条/正文跟随外层容器一起滚动（正文不再自己滚），
+   *  由调用方提供滚动容器（单栏「笔记」视图）。默认 false = 保持整屏高度、正文内部滚动 */
+  flow?: boolean
 }
 
-export function NoteEditor({ note, allNotes, onChange, onDelete, onOpenNote, onCreateNote, onAiUpdate, splitView = false }: Props) {
+export function NoteEditor({
+  note,
+  allNotes,
+  onChange,
+  onDelete,
+  onOpenNote,
+  onCreateNote,
+  onAiUpdate,
+  onReadPdf,
+  splitView = false,
+  readOnly = false,
+  flow = false,
+}: Props) {
   const [tagInput, setTagInput] = useState('')
   const [tagSuggestIndex, setTagSuggestIndex] = useState(0)
   const [tagSuggestDismissed, setTagSuggestDismissed] = useState(false)
@@ -82,6 +102,26 @@ export function NoteEditor({ note, allNotes, onChange, onDelete, onOpenNote, onC
   const cssRef = useRef<HTMLInputElement>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
   const [saved, setSaved] = useState(false)
+  /** 内嵌 PDF 面板展开了：详情信息与正文各占半列，别让正文被挤成一行（见 src/lib/inlinePdfPanel.ts） */
+  const pdfPanelOpen = useInlinePdfPanelOpen()
+
+  /** 流式布局（flow）下正文改用页面级滚动：textarea 不会自己长高，按内容高度顶开，
+   *  底部留白留在自己身上（40vh），滚到底时最后一行不会贴住屏幕下沿 */
+  const autoGrow = () => {
+    const ta = taRef.current
+    if (!ta) return
+    ta.style.height = 'auto'
+    ta.style.height = `${ta.scrollHeight}px`
+  }
+
+  // 切笔记 / 切预览编辑 / 窗口改宽窄都会重新折行：同步一次高度（flow 之外是空操作）
+  useEffect(() => {
+    if (!flow) return
+    autoGrow()
+    const onResize = () => autoGrow()
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [flow, note.id, note.content, tab, editorMode, readOnly, splitView])
 
   const selectTheme = (value: PreviewTheme) => {
     setTheme(value)
@@ -230,7 +270,11 @@ export function NoteEditor({ note, allNotes, onChange, onDelete, onOpenNote, onC
           markSaved()
         }}
         placeholder={'用 Markdown 记录，用 [[笔记标题]] 建立关联，用 #标签 标记主题。\n\n## 小节标题\n- 列表项\n- [ ] 待办项\n**重点**、*斜体*、`代码`、~~删除线~~\n> 引用\n\n| 表头 | 表头 |\n|:---|---:|\n| 单元格 | 单元格 |\n\n[链接](https://example.com)\n```\n代码块\n```'}
-        className="h-full resize-none rounded-none border-0 p-3 font-mono text-base focus-visible:ring-0 md:p-4 md:text-sm"
+        className={
+          flow
+            ? 'resize-none rounded-none border-0 p-3 pb-[40vh] font-mono text-base focus-visible:ring-0 md:p-4 md:pb-[40vh] md:text-sm'
+            : 'h-full resize-none rounded-none border-0 p-3 font-mono text-base focus-visible:ring-0 md:p-4 md:text-sm'
+        }
       />
       {linkSuggest && linkCandidates.length > 0 && (
         <div className="absolute left-2 right-2 top-2 z-10 max-h-60 overflow-y-auto rounded-md border bg-popover shadow-md md:left-4 md:right-auto md:top-4 md:w-64">
@@ -257,6 +301,7 @@ export function NoteEditor({ note, allNotes, onChange, onDelete, onOpenNote, onC
       onCreateNote={onCreateNote}
       theme={theme}
       customCss={customTheme?.css ?? ''}
+      flow={flow}
     />
   )
 
@@ -314,51 +359,67 @@ export function NoteEditor({ note, allNotes, onChange, onDelete, onOpenNote, onC
 
   // 编辑区：分栏（源码 | 渲染）或 预览/编辑切换
   const editorArea = editorMode === 'wysiwyg' ? (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className={flow ? 'flex flex-col' : 'flex min-h-0 flex-1 flex-col'}>
       <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2 md:px-4">
         <span className="text-xs text-muted-foreground">正文即打即排版，与 Word 一致；Markdown 自动保存</span>
         {themeControls}
       </div>
       <Suspense fallback={<div className="p-4 text-sm text-muted-foreground" role="status">正在加载编辑器…</div>}>
-        <WysiwygEditor key={note.id} value={note.content} noteId={note.id} notes={allNotes}
+        <WysiwygEditor key={note.id} value={note.content} noteId={note.id} notes={allNotes} flow={flow}
           onChange={(content) => { onChange({ content }); markSaved() }}
           onOpenNote={onOpenNote} onCreateNote={onCreateNote} theme={theme} customCss={customTheme?.css ?? ''} />
       </Suspense>
     </div>
   ) : splitView ? (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className={flow ? 'flex flex-col' : 'flex min-h-0 flex-1 flex-col'}>
       <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2 md:px-4">
         <span className="text-xs text-muted-foreground">左：Markdown 源码 · 右：渲染结果</span>
         {themeControls}
       </div>
-      <div className="flex min-h-0 flex-1">
-        <div className="relative min-h-0 w-1/2 border-r">{editorBody}</div>
-        <div className="min-h-0 w-1/2 overflow-hidden">{previewBody}</div>
+      <div className={flow ? 'flex' : 'flex min-h-0 flex-1'}>
+        <div className={flow ? 'relative w-1/2 border-r' : 'relative min-h-0 w-1/2 border-r'}>{editorBody}</div>
+        <div className={flow ? 'w-1/2' : 'min-h-0 w-1/2 overflow-hidden'}>{previewBody}</div>
       </div>
     </div>
   ) : (
-    <Tabs value={tab} onValueChange={(v) => setTab(v as 'edit' | 'preview')} className="flex min-h-0 flex-1 flex-col">
+    <Tabs
+      value={readOnly ? 'preview' : tab}
+      onValueChange={(v) => setTab(v as 'edit' | 'preview')}
+      className={flow ? 'flex flex-col' : 'flex min-h-0 flex-1 flex-col'}
+    >
       <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2 md:px-4">
         <TabsList>
           <TabsTrigger value="preview">预览</TabsTrigger>
-          <TabsTrigger value="edit">编辑</TabsTrigger>
+          <TabsTrigger value="edit" disabled={readOnly}>编辑</TabsTrigger>
         </TabsList>
         {themeControls}
       </div>
-      <div className="relative min-h-0 flex-1">
-        {tab === 'edit' ? editorBody : previewBody}
+      <div className={flow ? 'relative' : 'relative min-h-0 flex-1'}>
+        {readOnly || tab === 'preview' ? previewBody : editorBody}
       </div>
     </Tabs>
   )
 
   return (
-    <div className="flex h-full flex-col">
-      {/* 头部：标题与元信息 */}
-      <div className="space-y-3 border-b p-3 md:p-4">
+    <div className={flow ? 'flex min-h-full flex-col' : 'flex h-full min-h-0 flex-col'}>
+      {/* 头部：标题与元信息。面板展开时和「文献信息」各占 1/4 列（正文 1/2）。
+          必须写成固定高度的 1/4（不是 basis-0 + grow）：那两个量块会被浏览器按
+          「内容自动最小高度」卡住，正文实测只剩 45%（见 AGENTS.md 第 11 条） */}
+      <div
+        className={`space-y-3 border-b p-3 md:p-4 ${
+          !flow && pdfPanelOpen ? 'h-1/4 min-h-0 shrink-0 overflow-y-auto overflow-x-hidden' : ''
+        }`}
+      >
+        {readOnly && (
+          <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700" role="status">
+            写入门禁：这篇笔记由更新版本的客户端写入（或要求本客户端没有的能力），只读打开 —— 改动不会落盘，也不会被删除。
+          </div>
+        )}
         <div className="flex flex-col gap-2 md:flex-row md:items-start">
           <Input
             value={note.title}
             onChange={(e) => onChange({ title: e.target.value })}
+            readOnly={readOnly}
             placeholder="笔记标题"
             className="h-11 min-w-0 flex-1 text-base font-semibold md:h-10 md:text-lg"
           />
@@ -387,7 +448,7 @@ export function NoteEditor({ note, allNotes, onChange, onDelete, onOpenNote, onC
                   导入 Typora CSS 主题
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem className="min-h-11" variant="destructive" onSelect={() => confirmDelete()}>
+                <DropdownMenuItem className="min-h-11" variant="destructive" onSelect={() => confirmDelete()} disabled={readOnly}>
                   <Trash2 className="mr-2 h-4 w-4" />
                   删除笔记
                 </DropdownMenuItem>
@@ -398,7 +459,7 @@ export function NoteEditor({ note, allNotes, onChange, onDelete, onOpenNote, onC
             <Button variant="outline" size="icon" onClick={exportMd} title="导出为 Obsidian 兼容的 .md 文件">
               <Download className="h-4 w-4" />
             </Button>
-            <Button variant="outline" size="icon" onClick={confirmDelete} title="删除笔记">
+            <Button variant="outline" size="icon" onClick={confirmDelete} title="删除笔记" disabled={readOnly}>
               <Trash2 className="h-4 w-4 text-destructive" />
             </Button>
           </div>
@@ -547,17 +608,22 @@ export function NoteEditor({ note, allNotes, onChange, onDelete, onOpenNote, onC
         </div>
       </div>
 
-      {/* 文献元数据编辑区：仅文献类型显示 */}
+      {/* 文献元数据编辑区：仅文献类型显示。面板展开时它和头部各占 1/4 列（流式布局不参与分列） */}
       {note.type === 'literature' && (
-        <LiteratureFields note={note} allNotes={allNotes} onChange={onChange} />
+        <div className={!flow && pdfPanelOpen ? 'h-1/4 min-h-0 shrink-0 overflow-y-auto overflow-x-hidden' : 'contents'}>
+          <LiteratureFields note={note} allNotes={allNotes} onChange={onChange} />
+        </div>
       )}
 
-      {/* 编辑区；文献笔记外包一层附件工作区（附件工具条 + 可拖拽 PDF 面板） */}
+      {/* 编辑区；文献笔记外包一层附件工作区（附件工具条 + PDF 面板）。
+          面板展开时正文拿半列（剩下的 1/4+1/4 归详情信息） */}
       {note.type === 'literature' ? (
         <Suspense fallback={editorArea}>
-          <LiteratureAttachments note={note} onChange={onChange}>
-            {editorArea}
-          </LiteratureAttachments>
+          <div className={!flow && pdfPanelOpen ? 'flex h-1/2 min-h-0 shrink-0 flex-col' : 'contents'}>
+            <LiteratureAttachments note={note} onChange={onChange} onFullscreenRead={onReadPdf}>
+              {editorArea}
+            </LiteratureAttachments>
+          </div>
         </Suspense>
       ) : (
         editorArea

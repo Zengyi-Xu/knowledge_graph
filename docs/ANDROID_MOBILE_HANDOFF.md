@@ -6,7 +6,7 @@
 
 ## 1. 目标与范围
 
-在现有 React + TypeScript + Vite 笔记软件基础上适配手机，后续使用 Capacitor 打包安卓 APK。Windows 继续使用 Electron，尽量共用界面与 Markdown 渲染逻辑。
+在现有 React + TypeScript + Vite 笔记软件基础上适配手机，后续使用 Capacitor 打包安卓 APK。Windows 发行以免安装本地网页包为主，Electron 只保留兼容层；两端尽量共用界面与 Markdown 渲染逻辑。
 
 本轮交给 DeepSeek 的工作只包含手机展示层适配，不包含安卓外壳、数据迁移、同步协议或发布。
 
@@ -37,7 +37,7 @@
 | `src/components/Markdown.tsx`、`src/lib/md.ts` | Markdown 解析与渲染 | 本轮不修改 |
 | `src/hooks/useNotes.ts`、`src/types/note.ts` | 活动笔记、持久化与数据结构 | 本轮不修改 |
 | `src/lib/syncFile.ts`、`src/types/desktop.d.ts` | 桌面同步桥接 | 本轮不修改 |
-| `electron/` | Windows 桌面外壳 | 本轮不修改 |
+| `electron/` | 冻结的桌面兼容层，也是本地网页桥复用的后端能力 | 本轮不修改 |
 | `public/notes.json`及其他实际笔记文件 | 个人数据 | 不修改，不复制到测试夹具，不提交 |
 | `release/`、`dist/`、`node_modules/` | 构建产物与依赖 | 不手工修改，不提交 |
 | `package.json`、`package-lock.json` | 依赖、版本和构建配置 | 本轮不修改，新增依赖先说明理由 |

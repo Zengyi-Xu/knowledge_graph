@@ -92,6 +92,56 @@ try {
   await fs.writeFile(path.join(vault, 'foreign.md'), 'untouched')
   await call('vault:write', { dir: vault, plan: { writes: [{ file: '学习/测试.md', text: text + '\n更新' }], deletes: [], meta: null } })
   check('增量写盘保留未纳管文件', await fs.readFile(path.join(vault, 'foreign.md'), 'utf8') === 'untouched')
+
+  // ---- 服务端写入门禁：盘上声明 requiredCapabilities 的笔记，新文本必须还带着这些字段 ----
+  {
+    const guardedFile = '文献/带能力的文献.md'
+    const guarded = '---\nformat: kaust-kg-note\nid: "zotero-abc"\ntitle: "带能力的文献"\ntype: literature\nformatVersion: 2\nminimumWriterVersion: 2\nrequiredCapabilities: ["zoteroKeys"]\nauthors: []\nvenue: ""\nyear: ""\ndoi: ""\ncitekey: "abc2020"\nattachments: []\ncollections: []\nzoteroKey: "ABC12345"\nzoteroKeys: ["ABC12345"]\nlocalPdf: "D:/lib/a.pdf"\ntags: []\ncreated: 2026-10-15T00:00:00.000Z\nupdated: 2026-10-15T00:00:00.000Z\n---\n\n正文\n'
+    const readGuarded = () => fs.readFile(path.join(vault, '文献', '带能力的文献.md'), 'utf8')
+    const writeback = (text) => request('vault:write', { dir: vault, plan: { writes: [{ file: guardedFile, text }], deletes: [], meta: null } })
+    await call('vault:write', { dir: vault, plan: { writes: [{ file: guardedFile, text: guarded }], deletes: [], meta: null } })
+
+    const stripped = guarded.replace(/^(formatVersion|minimumWriterVersion|requiredCapabilities|zoteroKey|zoteroKeys|localPdf):.*\n/gm, '')
+    const rejected = await writeback(stripped)
+    const rejectedBody = await rejected.json()
+    check('旧客户端抹掉 zoteroKeys/localPdf/声明 → 拒绝写入并说明原因', rejected.status === 400 && /拒绝写入/.test(rejectedBody.error))
+    check('被拒绝的笔记在磁盘上保持原样', (await readGuarded()) === guarded)
+    check('只丢声明行也拒（不然这篇下一轮就没人保护）', (await writeback(guarded.replace(/^requiredCapabilities:.*\n/gm, ''))).status === 400)
+    check('字段被清空成空数组同样算丢', (await writeback(guarded.replace('zoteroKeys: ["ABC12345"]', 'zoteroKeys: []'))).status === 400)
+    const keepFields = guarded.replace('正文', '正文改了')
+    const allowed = await call('vault:write', { dir: vault, plan: { writes: [{ file: guardedFile, text: keepFields }], deletes: [], meta: null } })
+    check('保留全部声明字段的正常改写放行', allowed.written === 1 && (await readGuarded()).includes('正文改了'))
+    const plain = '---\nformat: kaust-kg-note\nid: "plain"\ntitle: "普通笔记"\ntype: other\ntags: []\ncreated: 2026-10-15T00:00:00.000Z\nupdated: 2026-10-15T00:00:00.000Z\n---\n\n正文\n'
+    await call('vault:write', { dir: vault, plan: { writes: [{ file: 'Inbox/普通.md', text: plain }], deletes: [], meta: null } })
+    const plainEdited = await request('vault:write', { dir: vault, plan: { writes: [{ file: 'Inbox/普通.md', text: plain.replace('正文', '改了') }], deletes: [], meta: null } })
+    check('没有能力声明的普通笔记不受门禁影响', plainEdited.status === 200)
+
+    // meta.json 同一类保护：不能悄悄丢掉声明过的东西
+    const metaWithDecl = JSON.stringify({ format: 'kaust-kg-vault', version: 1, formatVersion: 2, custom: 'x', notes: [] })
+    await call('vault:write', { dir: vault, plan: { writes: [], deletes: [], meta: metaWithDecl } })
+    const metaDowngraded = await request('vault:write', { dir: vault, plan: { writes: [], deletes: [], meta: JSON.stringify({ format: 'kaust-kg-vault', version: 1, notes: [] }) } })
+    check('索引 meta.json 丢掉 formatVersion / 自定义字段 → 拒绝', metaDowngraded.status === 400 && /meta\./.test((await metaDowngraded.json()).error))
+    check('被拒绝后 meta.json 未被改写', (await fs.readFile(path.join(vault, 'meta.json'), 'utf8')) === metaWithDecl)
+    const metaKept = await request('vault:write', { dir: vault, plan: { writes: [], deletes: [], meta: JSON.stringify({ format: 'kaust-kg-vault', version: 1, formatVersion: 2, custom: 'x', notes: [{ id: 'a', file: '学习/测试.md', title: 't' }] }) } })
+    check('保留声明的索引正常写入', metaKept.status === 200)
+  }
+
+  // ---- 本地 PDF 兜底：按标题在授权目录里匹配（只提名，不写盘） ----
+  {
+    const pdfRoot = path.join(dir, 'pdfs')
+    await fs.mkdir(path.join(pdfRoot, 'Journal'), { recursive: true })
+    await fs.writeFile(path.join(pdfRoot, 'Journal', '2.6_GHz_high-speed_visible_light_communication_of_450_nm_GaN_laser_diode_by_direct_modulation.pdf'), '%PDF-1.4 a')
+    await fs.writeFile(path.join(pdfRoot, 'Journal', 'Cold atoms in optical lattices revisited.pdf'), '%PDF-1.4 b')
+    const local5 = await createLocalServer({ port: 0, dist, vault, pdfRoots: [pdfRoot] })
+    try {
+      const response = await fetch(local5.origin + '/api/local', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-KG-Token': local5.token }, body: JSON.stringify({ method: 'pdf:match-titles', payload: { titles: [{ id: 'hit', title: '2.6 GHz high-speed visible light communication of 450 nm GaN laser diode by direct modulation' }, { id: 'miss', title: 'A completely different subject entirely about economics' }] } }) })
+      const { result } = await response.json()
+      check('按标题在 --pdf-root 目录里匹配到本地 PDF', response.status === 200 && result.matches.hit?.path.endsWith('450_nm_GaN_laser_diode_by_direct_modulation.pdf'))
+      check('匹配不到的标题不给假结果', result.matches.miss === undefined && result.stats.matched === 1)
+      check('匹配只提名、不建文件', !(await fs.readdir(path.join(vault, '文献'))).some((f) => f.includes('2.6 GHz')))
+    } finally { await local5.close() }
+  }
+
   const filePath = path.join(vault, 'sync', 'notes.json')
   await call('sync:write-file', { filePath, contents: '[]' })
   check('同步文件仍在本地 vault/sync 分区', (await call('sync:read-file', { filePath })).content === '[]')

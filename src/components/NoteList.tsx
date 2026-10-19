@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { NOTE_TYPE_META, GRADE_META } from '@/types/note'
 import type { Note } from '@/types/note'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { ChevronDown, ChevronRight, FolderOpen, Plus, Search } from 'lucide-react'
+import { ChevronDown, ChevronRight, Plus, Search } from 'lucide-react'
 import { readSetting, writeSetting } from '@/lib/env'
 
 interface Props {
@@ -14,75 +14,21 @@ interface Props {
 }
 
 const COLLAPSE_KEY = 'collapsed-types-v1'
-/** 文献分类树的展开状态（默认折叠，避免 2000+ 条目一屏刷出） */
-const LIT_EXPAND_KEY = 'expanded-lit-collections-v1'
-const UNCATEGORIZED = '未分类'
 
-/** Zotero 分类树：collections 是 "父/子/…" 路径；一篇文献可属于多个分类 */
-interface LitTree {
-  name: string
-  children: Map<string, LitTree>
-  notes: Note[]
-  /** 子树内唯一笔记数（同一篇出现在多个子分类时只算一次） */
-  count: number
-}
-
-function buildLitTree(items: Note[]): LitTree {
-  const root: LitTree = { name: '', children: new Map(), notes: [], count: 0 }
-  const insert = (paths: string[], note: Note) => {
-    const seen = new Set<string>()
-    for (const raw of paths) {
-      const segs = raw.split('/').map((s) => s.trim()).filter(Boolean)
-      const key = segs.join('/') || UNCATEGORIZED
-      if (seen.has(key)) continue
-      seen.add(key)
-      let node = root
-      for (const seg of segs.length ? segs : [UNCATEGORIZED]) {
-        let child = node.children.get(seg)
-        if (!child) {
-          child = { name: seg, children: new Map(), notes: [], count: 0 }
-          node.children.set(seg, child)
-        }
-        node = child
-      }
-      node.notes.push(note)
-    }
-  }
-  for (const n of items) {
-    const paths = n.literature?.collections ?? []
-    insert(paths.length ? paths : [UNCATEGORIZED], n)
-  }
-  // 计数 = 子树内唯一笔记数（Set 去重后再写回，避免多分类重复计数）
-  const recount = (node: LitTree): Set<string> => {
-    const ids = new Set(node.notes.map((n) => n.id))
-    node.children.forEach((child) => recount(child).forEach((id) => ids.add(id)))
-    node.count = ids.size
-    return ids
-  }
-  recount(root)
-  // 组内按更新时间倒序
-  const sortDeep = (node: LitTree) => {
-    node.notes.sort((a, b) => b.updatedAt - a.updatedAt)
-    node.children.forEach(sortDeep)
-  }
-  sortDeep(root)
-  return root
-}
-
+/**
+ * 侧栏笔记列表：只列**非文献**笔记，按类型分组。
+ *
+ * 文献（1896 篇）在这栏里一概不出现 —— 既不列条目，也不列分类树：
+ * 一千多篇文献和左边几十条笔记混在一起抢版面，字号也对不齐。
+ * 文献的分类只看一级，统一由「文献」视图的分类筛选承担
+ * （`src/components/literature/collectionTree.ts`）。
+ */
 export function NoteList({ notes, activeId, onSelect, onCreate }: Props) {
   const [q, setQ] = useState('')
+  const activeItemRef = useRef<HTMLButtonElement | null>(null)
   const [collapsed, setCollapsed] = useState<Set<string>>(() => {
     try {
       const raw = readSetting(COLLAPSE_KEY)
-      if (raw) return new Set(JSON.parse(raw) as string[])
-    } catch {
-      /* ignore */
-    }
-    return new Set()
-  })
-  const [litExpanded, setLitExpanded] = useState<Set<string>>(() => {
-    try {
-      const raw = readSetting(LIT_EXPAND_KEY)
       if (raw) return new Set(JSON.parse(raw) as string[])
     } catch {
       /* ignore */
@@ -94,9 +40,11 @@ export function NoteList({ notes, activeId, onSelect, onCreate }: Props) {
     writeSetting(COLLAPSE_KEY, JSON.stringify([...collapsed]))
   }, [collapsed])
 
+  // 图谱里点中节点 → 侧栏把对应笔记滚进视野（列表很长时只高亮看不见等于没做）。
+  // 分组折叠 / 搜索把当前项过滤掉时没有可滚的节点，静默跳过。
   useEffect(() => {
-    writeSetting(LIT_EXPAND_KEY, JSON.stringify([...litExpanded]))
-  }, [litExpanded])
+    activeItemRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [activeId])
 
   const toggleGroup = (type: string) => {
     setCollapsed((prev) => {
@@ -107,20 +55,12 @@ export function NoteList({ notes, activeId, onSelect, onCreate }: Props) {
     })
   }
 
-  const toggleLit = (key: string) => {
-    setLitExpanded((prev) => {
-      const next = new Set(prev)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
-  }
-
   const filtered = useMemo(() => {
     const query = q.trim().toLowerCase()
-    const list = query
+    const list = (query
       ? notes.filter((n) => (n.title + n.content + n.tags.join(' ')).toLowerCase().includes(query))
       : notes
+    ).filter((n) => n.type !== 'literature')
     // 按类型分组，组内按更新时间倒序
     const groups = new Map<string, Note[]>()
     for (const n of list) {
@@ -138,18 +78,10 @@ export function NoteList({ notes, activeId, onSelect, onCreate }: Props) {
   // 搜索时强制展开，避免结果藏在折叠分组里
   const searching = q.trim().length > 0
 
-  // 文献分类树按（过滤后）条目集缓存，避免每次渲染重建
-  const litTrees = useMemo(() => {
-    const map = new Map<string, LitTree>()
-    for (const [type, items] of filtered) {
-      if (type === 'literature') map.set(type, buildLitTree(items))
-    }
-    return map
-  }, [filtered])
-
   const renderNoteItem = (n: Note) => (
     <button
       key={n.id}
+      ref={n.id === activeId ? activeItemRef : undefined}
       onClick={() => onSelect(n.id)}
       className={`note-item mb-0.5 block w-full min-w-0 rounded-md px-2.5 py-2 text-left text-sm transition-colors md:px-2 md:py-1.5 ${
         n.id === activeId ? 'bg-accent font-medium text-accent-foreground' : 'hover:bg-muted'
@@ -169,50 +101,6 @@ export function NoteList({ notes, activeId, onSelect, onCreate }: Props) {
     </button>
   )
 
-  /** 渲染分类树（跳过树根：树根没有名字，只渲染它的子分类与直属条目） */
-  const renderLitTree = (root: LitTree): React.ReactNode => (
-    <div key="literature/tree">
-      {[...root.children.values()]
-        .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
-        .map((child) => renderLitNode(child, [child.name], 0))}
-      {root.notes.map(renderNoteItem)}
-    </div>
-  )
-
-  /** 递归渲染文献分类树；搜索时无视折叠全部展开 */
-  const renderLitNode = (node: LitTree, path: string[], depth: number): React.ReactNode => {
-    const key = `literature/${path.join('/')}`
-    const expanded = searching || litExpanded.has(key)
-    return (
-      <div key={key}>
-        <button
-          type="button"
-          onClick={() => toggleLit(key)}
-          title={expanded ? '收起该分类' : '展开该分类'}
-          className="mb-0.5 flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs text-muted-foreground transition-colors hover:bg-muted"
-          style={{ paddingLeft: `${8 + depth * 14}px` }}
-        >
-          {expanded ? (
-            <ChevronDown className="h-3 w-3 shrink-0" />
-          ) : (
-            <ChevronRight className="h-3 w-3 shrink-0" />
-          )}
-          <FolderOpen className="h-3 w-3 shrink-0" />
-          <span className="min-w-0 truncate">{node.name}</span>
-          <span className="text-muted-foreground/60">({node.count})</span>
-        </button>
-        {expanded && (
-          <div>
-            {[...node.children.values()]
-              .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
-              .map((child) => renderLitNode(child, [...path, child.name], depth + 1))}
-            {node.notes.map(renderNoteItem)}
-          </div>
-        )}
-      </div>
-    )
-  }
-
   return (
     <div className="flex h-full flex-col">
       <div className="space-y-2 border-b p-3">
@@ -231,7 +119,8 @@ export function NoteList({ notes, activeId, onSelect, onCreate }: Props) {
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-2">
         {filtered.map(([type, items]) => {
-          const meta = NOTE_TYPE_META[type as keyof typeof NOTE_TYPE_META]
+          // 未知 type（坏数据 / 旧版本写入）不能让整个列表白屏：退回「其他」
+          const meta = NOTE_TYPE_META[type as keyof typeof NOTE_TYPE_META] ?? NOTE_TYPE_META.other
           const isCollapsed = !searching && collapsed.has(type)
           return (
             <div key={type} className="mb-3">
@@ -239,7 +128,7 @@ export function NoteList({ notes, activeId, onSelect, onCreate }: Props) {
                 type="button"
                 onClick={() => toggleGroup(type)}
                 title={isCollapsed ? '展开该分组' : '收起该分组'}
-                className="mb-1 flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs font-medium text-muted-foreground transition-colors hover:bg-muted"
+                className="mb-1 flex min-h-11 w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs font-medium text-muted-foreground transition-colors hover:bg-muted md:min-h-0"
               >
                 {isCollapsed ? (
                   <ChevronRight className="h-3 w-3 shrink-0" />
@@ -250,10 +139,7 @@ export function NoteList({ notes, activeId, onSelect, onCreate }: Props) {
                 {meta.label}
                 <span className="text-muted-foreground/60">({items.length})</span>
               </button>
-              {!isCollapsed &&
-                (type === 'literature' && litTrees.has(type)
-                  ? renderLitTree(litTrees.get(type)!)
-                  : items.map(renderNoteItem))}
+              {!isCollapsed && items.map(renderNoteItem)}
             </div>
           )
         })}

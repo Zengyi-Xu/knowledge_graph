@@ -12,7 +12,7 @@ const TITLE_ENTITIES: Record<string, string> = {
 const SITE_SUFFIX = /\s*[|\-–—]\s*(nature|sciencedirect|springer(link)?|wiley online library|pubmed( central)?|arxiv(\.org)?|ieee xplore|ieee journals?\s*&?\s*magazine|mdpi|semantic scholar|researchgate|jstor|tandfonline|acs publications|aps physics|iop science|oxford academic|cambridge core|google scholar|web of science|biorxiv|ssrn)\b.*$/i
 
 export function cleanLiteratureTitle(raw: string): string {
-  let text = (raw ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ')
+  let text = (raw ?? '').replace(/\p{Cc}/gu, ' ')
   text = text.replace(/&(#x[0-9a-f]+|#\d+|[a-z][a-z0-9]*);/gi, (match, body: string) => {
     if (body.startsWith('#')) {
       const code = body[1] === 'x' || body[1] === 'X' ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10)

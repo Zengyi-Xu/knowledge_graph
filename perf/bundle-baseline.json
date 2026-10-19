@@ -1,0 +1,295 @@
+{
+  "generatedAt": "2026-10-15T16:23:26.521Z",
+  "git": {
+    "head": "2f7009a",
+    "dirty": true
+  },
+  "vite": "7.3.0",
+  "budgets": {
+    "entryRaw": 512000,
+    "literatureIncrementRaw": 204800,
+    "graphRaw": 81920
+  },
+  "assets": [
+    {
+      "file": "assets/index-B5dlA-TW.js",
+      "raw": 2705593,
+      "gzip": 682081,
+      "kind": "js"
+    },
+    {
+      "file": "assets/pdf.worker.min-CjEcRF4W.mjs",
+      "raw": 1264342,
+      "gzip": 376488,
+      "kind": "asset"
+    },
+    {
+      "file": "assets/index-D4zTrECC.js",
+      "raw": 470736,
+      "gzip": 150731,
+      "kind": "js"
+    },
+    {
+      "file": "assets/pdf.worker.min-BH63Q58_.js",
+      "raw": 436468,
+      "gzip": 131089,
+      "kind": "js"
+    },
+    {
+      "file": "assets/WysiwygEditor-wXFvN4t1.js",
+      "raw": 344451,
+      "gzip": 84620,
+      "kind": "js"
+    },
+    {
+      "file": "assets/PreviewContent-BwI-THuO.js",
+      "raw": 160467,
+      "gzip": 35816,
+      "kind": "js"
+    },
+    {
+      "file": "assets/styles-B6Bpj9wP.js",
+      "raw": 120861,
+      "gzip": 20667,
+      "kind": "js"
+    },
+    {
+      "file": "assets/index-_xp_tUkJ.css",
+      "raw": 89128,
+      "gzip": 14893,
+      "kind": "asset"
+    },
+    {
+      "file": "assets/AiPanel-B3Ga36_q.js",
+      "raw": 74760,
+      "gzip": 22530,
+      "kind": "js"
+    },
+    {
+      "file": "assets/LiteratureView-DWWMfyma.js",
+      "raw": 38359,
+      "gzip": 10797,
+      "kind": "js"
+    },
+    {
+      "file": "assets/GraphView-C7vt_9Ug.js",
+      "raw": 32876,
+      "gzip": 12335,
+      "kind": "js"
+    },
+    {
+      "file": "assets/react-resizable-panels-Dw3SLqDk.js",
+      "raw": 27899,
+      "gzip": 9344,
+      "kind": "js"
+    },
+    {
+      "file": "assets/NoteEditor-DBu1spQk.js",
+      "raw": 24356,
+      "gzip": 7513,
+      "kind": "js"
+    },
+    {
+      "file": "assets/select-C_rAcGME.js",
+      "raw": 24093,
+      "gzip": 8254,
+      "kind": "js"
+    },
+    {
+      "file": "assets/LiteratureAttachments-Drv7b8wD.js",
+      "raw": 16680,
+      "gzip": 5440,
+      "kind": "js"
+    },
+    {
+      "file": "assets/PdfViewer-CXQ00_U-.js",
+      "raw": 13482,
+      "gzip": 4788,
+      "kind": "js"
+    },
+    {
+      "file": "assets/PdfReadingWorkspace-ByBrJtFx.js",
+      "raw": 11288,
+      "gzip": 3985,
+      "kind": "js"
+    },
+    {
+      "file": "assets/literature-0Cp33BXs.js",
+      "raw": 5874,
+      "gzip": 2773,
+      "kind": "js"
+    },
+    {
+      "file": "assets/rtfField-DNx0bqUB.js",
+      "raw": 2611,
+      "gzip": 1542,
+      "kind": "js"
+    },
+    {
+      "file": "assets/PdfSnapshot-DkrU15u-.js",
+      "raw": 1418,
+      "gzip": 814,
+      "kind": "js"
+    },
+    {
+      "file": "assets/PdfViewer-DbqhZn7s.css",
+      "raw": 712,
+      "gzip": 375,
+      "kind": "asset"
+    },
+    {
+      "file": "assets/copyCitation-BPwG3wOP.js",
+      "raw": 695,
+      "gzip": 519,
+      "kind": "js"
+    },
+    {
+      "file": "assets/textarea-YLSBjD47.js",
+      "raw": 670,
+      "gzip": 414,
+      "kind": "js"
+    },
+    {
+      "file": "assets/sliders-horizontal-D6KeLvzh.js",
+      "raw": 425,
+      "gzip": 242,
+      "kind": "js"
+    },
+    {
+      "file": "assets/file-text-Cd_kJdMA.js",
+      "raw": 386,
+      "gzip": 254,
+      "kind": "js"
+    },
+    {
+      "file": "assets/clipboard-copy-BlJBSU1V.js",
+      "raw": 380,
+      "gzip": 263,
+      "kind": "js"
+    },
+    {
+      "file": "assets/index-BdQq_4o_.js",
+      "raw": 64,
+      "gzip": 79,
+      "kind": "js"
+    }
+  ],
+  "chunks": [
+    {
+      "scenario": "home",
+      "js": 470736,
+      "gzip": 150731,
+      "css": 89128,
+      "files": [
+        "assets/index-D4zTrECC.js"
+      ]
+    },
+    {
+      "scenario": "literature",
+      "js": 544293,
+      "gzip": 175868,
+      "css": 89128,
+      "files": [
+        "assets/index-D4zTrECC.js",
+        "assets/LiteratureView-DWWMfyma.js",
+        "assets/select-C_rAcGME.js",
+        "assets/literature-0Cp33BXs.js",
+        "assets/rtfField-DNx0bqUB.js",
+        "assets/copyCitation-BPwG3wOP.js",
+        "assets/textarea-YLSBjD47.js",
+        "assets/sliders-horizontal-D6KeLvzh.js",
+        "assets/file-text-Cd_kJdMA.js",
+        "assets/clipboard-copy-BlJBSU1V.js",
+        "assets/index-BdQq_4o_.js"
+      ]
+    },
+    {
+      "scenario": "preview",
+      "js": 681152,
+      "gzip": 203324,
+      "css": 89128,
+      "files": [
+        "assets/index-D4zTrECC.js",
+        "assets/PreviewContent-BwI-THuO.js",
+        "assets/NoteEditor-DBu1spQk.js",
+        "assets/select-C_rAcGME.js",
+        "assets/textarea-YLSBjD47.js",
+        "assets/file-text-Cd_kJdMA.js",
+        "assets/clipboard-copy-BlJBSU1V.js",
+        "assets/index-BdQq_4o_.js"
+      ]
+    },
+    {
+      "scenario": "edit",
+      "js": 1025603,
+      "gzip": 287944,
+      "css": 89128,
+      "files": [
+        "assets/index-D4zTrECC.js",
+        "assets/WysiwygEditor-wXFvN4t1.js",
+        "assets/PreviewContent-BwI-THuO.js",
+        "assets/NoteEditor-DBu1spQk.js",
+        "assets/select-C_rAcGME.js",
+        "assets/textarea-YLSBjD47.js",
+        "assets/file-text-Cd_kJdMA.js",
+        "assets/clipboard-copy-BlJBSU1V.js",
+        "assets/index-BdQq_4o_.js"
+      ]
+    },
+    {
+      "scenario": "graph",
+      "js": 504101,
+      "gzip": 163387,
+      "css": 89128,
+      "files": [
+        "assets/index-D4zTrECC.js",
+        "assets/GraphView-C7vt_9Ug.js",
+        "assets/sliders-horizontal-D6KeLvzh.js",
+        "assets/index-BdQq_4o_.js"
+      ]
+    },
+    {
+      "scenario": "pdf",
+      "js": 1170289,
+      "gzip": 352530,
+      "css": 89840,
+      "files": [
+        "assets/index-D4zTrECC.js",
+        "assets/pdf.worker.min-BH63Q58_.js",
+        "assets/PreviewContent-BwI-THuO.js",
+        "assets/react-resizable-panels-Dw3SLqDk.js",
+        "assets/NoteEditor-DBu1spQk.js",
+        "assets/select-C_rAcGME.js",
+        "assets/PdfViewer-CXQ00_U-.js",
+        "assets/PdfReadingWorkspace-ByBrJtFx.js",
+        "assets/textarea-YLSBjD47.js",
+        "assets/file-text-Cd_kJdMA.js",
+        "assets/clipboard-copy-BlJBSU1V.js",
+        "assets/index-BdQq_4o_.js"
+      ]
+    },
+    {
+      "scenario": "citation",
+      "js": 3555570,
+      "gzip": 921945,
+      "css": 89128,
+      "files": [
+        "assets/index-B5dlA-TW.js",
+        "assets/index-D4zTrECC.js",
+        "assets/PreviewContent-BwI-THuO.js",
+        "assets/styles-B6Bpj9wP.js",
+        "assets/LiteratureView-DWWMfyma.js",
+        "assets/NoteEditor-DBu1spQk.js",
+        "assets/select-C_rAcGME.js",
+        "assets/literature-0Cp33BXs.js",
+        "assets/rtfField-DNx0bqUB.js",
+        "assets/copyCitation-BPwG3wOP.js",
+        "assets/textarea-YLSBjD47.js",
+        "assets/sliders-horizontal-D6KeLvzh.js",
+        "assets/file-text-Cd_kJdMA.js",
+        "assets/clipboard-copy-BlJBSU1V.js",
+        "assets/index-BdQq_4o_.js"
+      ]
+    }
+  ]
+}

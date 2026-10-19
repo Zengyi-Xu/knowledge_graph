@@ -1,7 +1,7 @@
 {
   "name": "knowledge-graph",
   "private": true,
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "本地优先的知识图谱笔记应用",
   "author": "Zengyi Xu",
   "main": "electron/main.cjs",
@@ -14,15 +14,31 @@
     "frozen:check": "node scripts/frozen-check.mjs",
     "frozen:update": "node scripts/frozen-check.mjs --update",
     "test:frozen": "node scripts/frozen-check.mjs --run-guards",
+    "budget:check": "node scripts/bundle-budget.mjs",
+    "budget:report": "node scripts/bundle-budget.mjs --report",
+    "budget:baseline": "node scripts/bundle-budget.mjs --update",
+    "budget:modules": "node scripts/bundle-modules.mjs",
+    "test:bundle-scenarios": "node scripts/bundle-scenarios.mjs",
     "test:vault": "esbuild scripts/vault-selftest.ts --bundle --platform=node --format=cjs --target=node20 --alias:@=./src --outfile=.tmp-vault-test/selftest.cjs && node .tmp-vault-test/selftest.cjs",
+    "test:use-notes": "esbuild scripts/use-notes-selftest.ts --bundle --platform=node --format=cjs --target=node20 --alias:@=./src --alias:react=./scripts/harness/react-shim.ts --outfile=.tmp-vault-test/use-notes-selftest.cjs && node .tmp-vault-test/use-notes-selftest.cjs",
+    "test:vault-gate": "esbuild scripts/vault-gate-selftest.ts --bundle --platform=node --format=cjs --target=node20 --alias:@=./src --outfile=.tmp-vault-test/vault-gate.cjs && node .tmp-vault-test/vault-gate.cjs",
+    "test:ai-chat": "esbuild scripts/ai-chat-selftest.ts --bundle --platform=node --format=cjs --target=node20 --alias:@=./src --outfile=.tmp-vault-test/ai-chat-selftest.cjs && node .tmp-vault-test/ai-chat-selftest.cjs",
     "test:lit": "esbuild scripts/literature-selftest.ts --bundle --platform=node --format=cjs --target=node20 --alias:@=./src --outfile=.tmp-vault-test/lit-selftest.cjs && node .tmp-vault-test/lit-selftest.cjs",
+    "test:note-list": "esbuild scripts/note-list-selftest.tsx --bundle --platform=node --format=cjs --target=node20 --jsx=automatic --alias:@=./src --outfile=.tmp-vault-test/note-list-selftest.cjs && node .tmp-vault-test/note-list-selftest.cjs",
+    "test:lit-view": "esbuild scripts/literature-view-selftest.tsx --bundle --platform=node --format=cjs --target=node20 --jsx=automatic --alias:@=./src --outfile=.tmp-vault-test/lit-view-selftest.cjs && node .tmp-vault-test/lit-view-selftest.cjs",
+    "test:lit-dom": "node scripts/lit-view-dom-test.mjs",
     "test:vault-e2e": "node scripts/vault-e2e.mjs",
     "test:md": "node scripts/md-selftest.mjs",
     "test:md-render": "esbuild scripts/md-ssr-entry.tsx --bundle --platform=node --format=cjs --target=node20 --alias:@=./src --outfile=.tmp-md-visual/ssr.cjs && node .tmp-md-visual/ssr.cjs",
+    "test:math": "esbuild scripts/math-render-selftest.ts --bundle --platform=node --format=cjs --target=node20 --alias:@=./src --outfile=.tmp-math-visual/selftest.cjs && node .tmp-math-visual/selftest.cjs",
     "visual:md": "node scripts/md-visual.mjs",
+    "visual:math": "node scripts/math-visual.mjs",
     "preview": "vite preview",
     "web:local": "node scripts/local-web.mjs",
     "test:web": "node scripts/local-web-selftest.mjs",
+    "test:web-portable": "node scripts/test-web-portable.mjs",
+    "test:mobile": "node scripts/mobile-responsive-check.mjs",
+    "icons:build": "node scripts/make-pwa-icons.mjs",
     "zotero:build": "esbuild scripts/zotero-vault-sync.ts --bundle --platform=node --format=cjs --target=node20 --alias:@=./src --outfile=.tmp-zotero/zotero-vault-sync.cjs",
     "zotero:sync": "npm run zotero:build && node .tmp-zotero/zotero-vault-sync.cjs",
     "test:zotero": "node scripts/zotero-selftest.mjs",
@@ -30,52 +46,16 @@
     "test:zotero-e2e": "npm run zotero:build && npm run dedupe:build && node scripts/zotero-import-e2e.mjs",
     "dedupe:build": "esbuild scripts/dedupe-vault.ts --bundle --platform=node --format=cjs --target=node20 --alias:@=./src --outfile=.tmp-vault-test/dedupe.cjs",
     "dedupe:vault": "npm run dedupe:build && node .tmp-vault-test/dedupe.cjs",
+    "cluster:report": "esbuild scripts/lit-cluster-report.ts --bundle --platform=node --format=cjs --target=node20 --alias:@=./src --outfile=.tmp-cluster/report.cjs && node .tmp-cluster/report.cjs",
     "test:wysiwyg-e2e": "node scripts/wysiwyg-e2e.mjs",
     "verify:word": "node scripts/word-field-verify.mjs",
     "test:startup": "esbuild scripts/perf-startup.ts --bundle --platform=node --format=cjs --target=node20 --alias:@=./src --outfile=.tmp-vault-test/perf.cjs && node .tmp-vault-test/perf.cjs",
     "test:startup-e2e": "node scripts/startup-e2e.mjs",
     "desktop:dev": "npm run build:dev && electron .",
-    "desktop:pack": "npm run build && electron-builder --win portable",
-    "desktop:installer": "npm run build && electron-builder --win nsis",
-    "desktop:dist": "npm run build && electron-builder --win portable nsis",
-    "release:portable": "node scripts/package-portable.mjs",
     "release:web": "node scripts/package-web-portable.mjs",
     "pdf:build": "esbuild scripts/link-local-pdfs.ts --bundle --platform=node --format=cjs --target=node20 --alias:@=./src --outfile=.tmp-vault-test/link-pdfs.cjs",
-    "pdf:link": "npm run pdf:build && node .tmp-vault-test/link-pdfs.cjs"
-  },
-  "build": {
-    "appId": "com.zengyixu.knowledgegraph",
-    "productName": "知识图谱",
-    "electronDist": "node_modules/electron/dist",
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "dist/**/*",
-      "electron/**/*",
-      "package.json"
-    ],
-    "asar": false,
-    "npmRebuild": false,
-    "win": {
-      "icon": "build/icon.svg",
-      "target": [
-        "portable",
-        "nsis"
-      ]
-    },
-    "nsis": {
-      "include": "build/installer.nsh",
-      "artifactName": "${productName}-Setup-${version}-${arch}.${ext}",
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "shortcutName": "知识图谱"
-    },
-    "portable": {
-      "artifactName": "${productName}-Portable-${version}-${arch}.${ext}"
-    }
+    "pdf:link": "npm run pdf:build && node .tmp-vault-test/link-pdfs.cjs",
+    "tags:strip-direction": "esbuild scripts/strip-direction-tags.ts --bundle --platform=node --format=cjs --target=node20 --alias:@=./src --outfile=.tmp-vault-test/strip-direction-tags.cjs && node .tmp-vault-test/strip-direction-tags.cjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
@@ -113,6 +93,7 @@
     "date-fns": "^4.1.0",
     "embla-carousel-react": "^8.6.0",
     "input-otp": "^1.4.2",
+    "katex": "^0.19.0",
     "lucide-react": "^0.562.0",
     "next-themes": "^0.4.6",
     "pdfjs-dist": "^6.4.299",
@@ -137,7 +118,6 @@
     "@vitejs/plugin-react": "^5.1.1",
     "autoprefixer": "^10.4.23",
     "electron": "^44.7.0",
-    "electron-builder": "^26.15.3",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
@@ -154,7 +134,6 @@
   },
   "allowScripts": {
     "electron@44.7.0": true,
-    "electron-winstaller@5.4.0": true,
     "esbuild@0.27.2": true
   }
 }

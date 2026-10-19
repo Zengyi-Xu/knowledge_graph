@@ -7,4 +7,10 @@ if not exist "runtime\node.exe" (
   exit /b 1
 )
 "%~dp0runtime\node.exe" "%~dp0scripts\start-portable-web.mjs" %*
-if errorlevel 1 pause
+set "kgExit=%errorlevel%"
+if not "%kgExit%"=="0" (
+  echo.
+  echo 服务已退出（代码 %kgExit%）。检查上面的输出后再启动一次。
+  pause
+)
+exit /b %kgExit%

@@ -2,10 +2,8 @@
  * 文献相关纯函数：CSL-JSON 转换、DOI/arXiv/BibTeX/RIS 元数据导入、引文格式化。
  * 网络请求只出现在本模块（CrossRef / arXiv / DataCite 三个域名），其余离线可用。
  */
-import Cite from 'citation-js'
 import type { Note } from '@/types/note'
 export { toLiteratureMeta } from './literatureMeta'
-import { APA_CSL_XML, GB_CSL_XML, ZH_CN_LOCALE_XML } from './csl/styles'
 
 export type CslItem = Record<string, unknown>
 
@@ -32,18 +30,35 @@ interface CslConfig {
   locales: { add: (name: string, xml: string) => void }
 }
 
-let stylesReady = false
+/** citation-js 的最小可用形状（只用到解析出的 data 与 format） */
+interface CiteLike {
+  data: Record<string, unknown>[]
+  format: (format: string, options: Record<string, unknown>) => string
+}
+type CiteCtor = new (input?: unknown) => CiteLike
 
-/** 把内嵌的两个样式与 zh-CN locale 注册进 citation-js（幂等） */
-function ensureStyles(): void {
-  if (stylesReady) return
-  const config = (Cite as unknown as { plugins: { config: { get: (ref: string) => CslConfig } } }).plugins.config.get(
-    '@csl',
-  )
-  config.styles.add('gb', GB_CSL_XML)
-  config.styles.add('apa', APA_CSL_XML)
-  config.locales.add('zh-CN', ZH_CN_LOCALE_XML)
-  stylesReady = true
+/**
+ * citation-js + citeproc + 两个内嵌 CSL 样式合计约 2.8MB（其中 @citation-js/plugin-wikidata 占 2.3MB），
+ * 只有「排版引文」「解析 BibTeX/RIS」这类用户动作才需要它。
+ * 所以它一律走动态 import：打包后落在独立 chunk，进入文献列表不再顺带下载（预算见 docs/BUNDLE_BUDGET.md）。
+ *
+ * 幂等：同一个 Promise 复用（并发调用只加载一次）；样式与 locale 在 resolve 之前注册好，
+ * 因此调用方拿到 Cite 时就能直接用 template: 'gb' / 'apa'。
+ */
+let citePromise: Promise<CiteCtor> | null = null
+
+function loadCite(): Promise<CiteCtor> {
+  citePromise ??= (async () => {
+    const [{ default: Cite }, styles] = await Promise.all([import('citation-js'), import('./csl/styles')])
+    const config = (Cite as unknown as { plugins: { config: { get: (ref: string) => CslConfig } } }).plugins.config.get(
+      '@csl',
+    )
+    config.styles.add('gb', styles.GB_CSL_XML)
+    config.styles.add('apa', styles.APA_CSL_XML)
+    config.locales.add('zh-CN', styles.ZH_CN_LOCALE_XML)
+    return Cite as unknown as CiteCtor
+  })()
+  return citePromise
 }
 
 // ------------------------------------------------------------ CSL 转换
@@ -87,31 +102,25 @@ function langOf(styleId: CitationStyleId): string {
   return styleId === 'gb' ? 'zh-CN' : 'en-US'
 }
 
-/** 多条 CSL-JSON 按样式排成完整文献表（文本，条目间换行） */
-export function formatBibliography(items: CslItem[], styleId: CitationStyleId): string {
+/** 多条 CSL-JSON 按样式排成完整文献表（文本，条目间换行）。首次调用会拉起 citation-js chunk。 */
+export async function formatBibliography(items: CslItem[], styleId: CitationStyleId): Promise<string> {
   if (!items.length) return ''
-  ensureStyles()
-  const cite = new Cite(items) as unknown as {
-    format: (fmt: string, opts: Record<string, unknown>) => string
-  }
-  return cite
+  const Cite = await loadCite()
+  return new Cite(items)
     .format('bibliography', { format: 'text', template: styleId, lang: langOf(styleId) })
     .trim()
 }
 
 /** 单条引文（就是只有一条的文献表） */
-export function formatCitation(csl: CslItem, styleId: CitationStyleId): string {
+export function formatCitation(csl: CslItem, styleId: CitationStyleId): Promise<string> {
   return formatBibliography([csl], styleId)
 }
 
 /** 文中引用标记（如 GB 的「[1]」、APA 的「(Zhang, 2024)」）；供 RTF 域代码与剪贴板使用 */
-export function formatCitationMarker(items: CslItem[], styleId: CitationStyleId): string {
+export async function formatCitationMarker(items: CslItem[], styleId: CitationStyleId): Promise<string> {
   if (!items.length) return ''
-  ensureStyles()
-  const cite = new Cite(items) as unknown as {
-    format: (fmt: string, opts: Record<string, unknown>) => string
-  }
-  return cite.format('citation', { format: 'text', template: styleId, lang: langOf(styleId) })
+  const Cite = await loadCite()
+  return new Cite(items).format('citation', { format: 'text', template: styleId, lang: langOf(styleId) })
 }
 
 /** 自拼 BibTeX（比 citation-js 输出键名可控） */
@@ -257,24 +266,25 @@ function fromCslItem(item: Record<string, unknown>): ImportedLit {
   }
 }
 
-/** 解析 BibTeX/RIS 文本里的全部条目（citation-js 自动识别格式） */
-export function parseCitationText(text: string): ImportedLit[] {
+/** 解析 BibTeX/RIS 文本里的全部条目（citation-js 自动识别格式）；按需加载 citation-js */
+export async function parseCitationText(text: string): Promise<ImportedLit[]> {
   const trimmed = (text ?? '').trim()
   if (!trimmed) return []
+  const Cite = await loadCite()
   const cite = new Cite(trimmed)
-  return (cite.data as Record<string, unknown>[]).map(fromCslItem).filter((l) => l.title)
+  return cite.data.map(fromCslItem).filter((l) => l.title)
 }
 
 /** 导入 BibTeX：取第一条 */
-export function importFromBibtex(text: string): ImportedLit {
-  const all = parseCitationText(text)
+export async function importFromBibtex(text: string): Promise<ImportedLit> {
+  const all = await parseCitationText(text)
   if (!all.length) throw new Error('没有从 BibTeX 中解析到文献条目')
   return all[0]
 }
 
 /** 导入 RIS：取第一条 */
-export function importFromRis(text: string): ImportedLit {
-  const all = parseCitationText(text)
+export async function importFromRis(text: string): Promise<ImportedLit> {
+  const all = await parseCitationText(text)
   if (!all.length) throw new Error('没有从 RIS 中解析到文献条目')
   return all[0]
 }

@@ -70,6 +70,18 @@ updated: 2026-10-08T17:10:12.478Z
 | `tags` | 字符串数组；`功能:xxx` 这类带冒号的标签整套照原样保留 |
 | `created` / `updated` | ISO 时间，精确到毫秒 |
 
+**门禁声明（`type` 之后，只有需要时才出现）**——写入方能力不足就必须只读打开，见 [VAULT_WRITE_GATE.md](VAULT_WRITE_GATE.md)：
+
+| 字段 | 说明 |
+| --- | --- |
+| `formatVersion` | 这篇 md 的磁盘格式代次；写入方代次更低就不许回写（缺失 = 1，人人可写） |
+| `minimumWriterVersion` | 这篇要求的最低写入方版本（缺失 = 无要求） |
+| `requiredCapabilities` | 写入方必须能重新生成的字段名，如 `["zoteroKeys","localPdf"]`（缺失 = 无要求） |
+
+只有带这些数据的笔记才写这三行（策略 B）：普通笔记的序列化结果与以前**逐字节不变**，升级本身不触发重写。
+回写时**必须保留写入方不认识的 front matter 字段**（连注释与列表块一起搬回来）——
+2026-10-13 就是旧客户端把 `zoteroKeys` / `localPdf` 整段抹掉的。
+
 正文取 frontmatter 之后的全部内容，原样保存（不做 trim、不动内部换行）。
 
 ## 文献类型（literature）的 frontmatter 字段
@@ -88,7 +100,7 @@ year: 2024
 doi: "10.1038/s41566-024-xxxx"
 citekey: "zhang2024silicon"
 attachments: []
-tags: ["方向:硅光"]
+tags: ["期刊:Nature Photonics", "年份:2024"]
 created: 2026-10-06T07:01:57.417Z
 updated: 2026-10-08T17:10:12.478Z
 ---
@@ -149,11 +161,15 @@ frontmatter 的 `attachments: ["<id>"]` 只记 id；删除附件会连同标注 
 {
   "format": "kaust-kg-vault",
   "version": 1,
+  "formatVersion": 2,
   "notes": [
     { "id": "a5j48a0muwbz8dl", "file": "技能/版图设计.md", "title": "版图设计" }
   ]
 }
 ```
+
+`formatVersion` 是写入方的门禁声明：客户端代次低于它就不再写这个库（只读打开，见 [VAULT_WRITE_GATE.md](VAULT_WRITE_GATE.md)）。
+老 meta 没有这个字段 = 1，照常可写；重建 meta 时不认识的顶层键会原样保留。
 
 `file` 是**相对 vault 根目录的路径**（用 `/` 分隔），可以带子文件夹。
 
@@ -176,6 +192,10 @@ frontmatter 的 `attachments: ["<id>"]` 只记 id；删除附件会连同标注 
 - 在界面里改动后约 0.5 秒防抖写盘，**只写变化的那一篇**（内容 + 文件名都没变就不碰文件）。
 - 删除笔记只删 `meta.json` 里登记过的文件。
 - 每篇 md 都是「先写临时文件再改名」，中途失败不会留下半截文件；写顺序为 md → 删旧文件 → meta.json。
+- **写入门禁**（[VAULT_WRITE_GATE.md](VAULT_WRITE_GATE.md)）：磁盘上声明了更高格式 / 本客户端没有的能力的笔记
+  → 只读（不写、不删、不改名，meta 继续指向它现在的文件）；回写先把不认识的 front matter 字段合并回去；
+  批量入口不做任何删除、未纳管的 md 一律不碰；索引里登记却读不到的文件（同步盘离线）直接中止写入。
+  主进程落盘前还会再查一次同样的声明，声明超限就整批拒绝。
 - 开启「跟随目录改动」后每 3 秒检查一次目录：在 Obsidian / Typora / 任何编辑器里改 md、
   删 md，改动会自动进到应用（本地正在编辑且尚未落盘的那一篇会保留本地版本，并在状态栏提示）。
 
@@ -201,6 +221,7 @@ frontmatter 的 `attachments: ["<id>"]` 只记 id；删除附件会连同标注 
 ## 自测
 
 ```bash
-npm run test:vault        # 格式往返 / 文件名冲突 / 增量写盘 / 真实磁盘读写（31 项）
+npm run test:vault        # 格式往返 / 文件名冲突 / 增量写盘 / 真实磁盘读写（60 项）
+npm run test:vault-gate   # 写入门禁：声明判定 / 未知字段保留 / 删除数 0 / 未纳管不动 / 离线中止（43 项）
 npm run test:vault-e2e    # 启动真实桌面版，验证「界面编辑→md 落盘」「外部改动→应用跟随」（16 项）
 ```

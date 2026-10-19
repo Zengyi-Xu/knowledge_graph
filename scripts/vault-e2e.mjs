@@ -239,6 +239,19 @@ async function main() {
     const countBefore = noteCount(String(bodyText))
 
     // ---- 界面编辑 → 落盘 ----
+    // 并列视图的经典模式默认停在「预览」页签；先切到「编辑」再驱动 textarea。
+    // （所见即所得模式没有 textarea，所以这里先确保 localStorage 里的经典模式已生效。）
+    if (!(await cdp.eval(`document.querySelectorAll('textarea').length > 0`))) {
+      // Radix Tabs 的切换挂在 mousedown 上（不是 click）：程序化 click() 不会改变页签。
+      await cdp.eval(`(() => {
+        const tab = [...document.querySelectorAll('[role=tab]')].find((e) => e.textContent.trim() === '编辑')
+        if (!tab) return 'no-tab'
+        tab.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0, buttons: 1 }))
+        tab.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }))
+        return 'clicked'
+      })()`)
+      await waitFor(async () => cdp.eval(`document.querySelectorAll('textarea').length > 0`), 5000, 200)
+    }
     const marker = `端到端追加-${Date.now()}`
     const injected = await cdp.eval(`(() => {
       const ta = [...document.querySelectorAll('textarea')].sort((a, b) => b.value.length - a.value.length)[0]

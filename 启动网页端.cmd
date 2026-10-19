@@ -14,7 +14,13 @@ if not exist "dist\index.html" (
     exit /b 1
   )
 )
-echo 知识图谱 v1.2.1 最新网页端
-echo 浏览器打开后，请保留此窗口；关闭窗口会停止本地服务。
+echo 知识图谱 v1.2.2 最新网页端
+echo 双击 启动网页端.wsf 启动时不会出现这个窗口；本窗口模式下关闭窗口即停止服务，无窗口模式用 停止网页端.wsf 停止。
 node scripts\start-local-web.mjs %*
-if errorlevel 1 pause
+set "kgExit=%errorlevel%"
+if not "%kgExit%"=="0" (
+  echo.
+  echo 服务已退出（代码 %kgExit%）。检查上面的输出后再启动一次。
+  pause
+)
+exit /b %kgExit%

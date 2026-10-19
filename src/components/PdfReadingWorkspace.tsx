@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { PreviewContent } from '@/components/PreviewContent'
+import { useIsMobile } from '@/hooks/use-mobile'
 import type { NewAnnotation } from '@/components/PdfViewer'
 import {
   PDF_ANNOTATIONS_FORMAT,
@@ -17,7 +18,7 @@ import {
   type PdfAnnotation,
   type PdfAnnotationsFile,
 } from '@/lib/attachments'
-import { annotationStoreId, loadPdfSource, openPdfSourceExternally, preferredPdfSource, type LoadedPdf } from '@/lib/pdfSource'
+import { annotationStoreId, loadPdfSourceCached, openPdfSourceExternally, preferredPdfSource, type LoadedPdf } from '@/lib/pdfSource'
 import { appendPdfReference, pdfReferenceIdFromHref, referencedAnnotationIds } from '@/lib/pdfReference'
 
 const PdfViewer = lazy(() => import('./PdfViewer').then((module) => ({ default: module.PdfViewer })))
@@ -32,6 +33,7 @@ interface Props {
 }
 
 export function PdfReadingWorkspace({ note, notes, onChange, onClose, onOpenNote, onCreateNote }: Props) {
+  const isMobile = useIsMobile()
   const sourceKey = [
     note.id,
     note.literature?.localPdf ?? '',
@@ -41,6 +43,9 @@ export function PdfReadingWorkspace({ note, notes, onChange, onClose, onOpenNote
     note.literature?.attachments?.[0] ?? '',
   ].join('\u0000')
   // 编辑正文会产生新的 note 对象；PDF 来源没变时不能重新读取整份文件。
+  // sourceKey 已编码 preferredPdfSource 读取的全部 note 字段，故以其为唯一依赖；
+  // 这里的窄依赖是有意为之（避免每次编辑正文都重读 PDF），不是漏写 note。
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const source = useMemo(() => preferredPdfSource(note), [sourceKey])
   const [loaded, setLoaded] = useState<LoadedPdf | null>(null)
   const [annotations, setAnnotations] = useState<PdfAnnotationsFile | null>(null)
@@ -49,6 +54,18 @@ export function PdfReadingWorkspace({ note, notes, onChange, onClose, onOpenNote
   const [focusAnnotationId, setFocusAnnotationId] = useState<string | null>(null)
   const saveTimer = useRef<number | null>(null)
   const pendingSave = useRef<{ id: string; json: PdfAnnotationsFile } | null>(null)
+
+  // 来源变化时清空旧的读取结果（render 期调整，替代旧 effect 开头的同步 setState）
+  const [loadedSourceKey, setLoadedSourceKey] = useState<string | null>(null)
+  if (loadedSourceKey !== sourceKey) {
+    setLoadedSourceKey(sourceKey)
+    setLoaded(null)
+    setAnnotations(null)
+    setError('')
+  }
+
+  // 无可用 PDF 时直接给提示；异步读取错误仍走 error 状态
+  const displayError = error || (source ? '' : '这篇文献没有可读取的本地 PDF')
 
   useEffect(() => {
     const close = (event: KeyboardEvent) => {
@@ -59,17 +76,11 @@ export function PdfReadingWorkspace({ note, notes, onChange, onClose, onOpenNote
   }, [onClose])
 
   useEffect(() => {
+    if (!source) return
     let cancelled = false
-    setLoaded(null)
-    setAnnotations(null)
-    setError('')
-    if (!source) {
-      setError('这篇文献没有可读取的本地 PDF')
-      return
-    }
     void (async () => {
       try {
-        const pdf = await loadPdfSource(source)
+        const pdf = await loadPdfSourceCached(source)
         const storeId = annotationStoreId(note.id, source)
         const saved = await readAnnotations(storeId)
         if (cancelled) return
@@ -161,33 +172,33 @@ export function PdfReadingWorkspace({ note, notes, onChange, onClose, onOpenNote
 
   return (
     <div className="fixed inset-0 z-[80] flex flex-col bg-background" onClickCapture={handleReferenceClick}>
-      <header className="flex min-h-12 items-center gap-2 border-b px-3 py-2">
+      <header className="flex min-h-12 flex-wrap items-center gap-2 border-b px-3 py-2">
         <Button variant="ghost" size="icon" onClick={onClose} title="返回（Esc）"><X className="h-4 w-4" /></Button>
         <FileText className="h-4 w-4 text-muted-foreground" />
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium" title={note.title}>{note.title}</div>
           <div className="truncate text-xs text-muted-foreground">{loaded?.fileName ?? 'PDF 阅读工作台'}</div>
         </div>
-        <Button variant="outline" size="sm" onClick={() => void openExternal()} disabled={!source}>
-          <ExternalLink className="mr-1 h-3.5 w-3.5" /> 系统阅读器
+        <Button variant="outline" size="sm" className="h-11 md:h-8" onClick={() => void openExternal()} disabled={!source}>
+          <ExternalLink className="mr-1 h-3.5 w-3.5" /> <span className="hidden md:inline">系统阅读器</span>
         </Button>
-        <Button variant={notesOpen ? 'secondary' : 'outline'} size="sm" onClick={() => setNotesOpen((value) => !value)}>
+        <Button variant={notesOpen ? 'secondary' : 'outline'} size="sm" className="h-11 md:h-8" onClick={() => setNotesOpen((value) => !value)}>
           {notesOpen ? <PanelRightClose className="mr-1 h-3.5 w-3.5" /> : <PanelRightOpen className="mr-1 h-3.5 w-3.5" />}
-          {notesOpen ? '隐藏笔记' : '显示笔记'}
+          <span className="hidden md:inline">{notesOpen ? '隐藏笔记' : '显示笔记'}</span>
         </Button>
       </header>
 
       <div className="min-h-0 flex-1">
-        {error ? (
+        {displayError ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
             <BookOpen className="h-8 w-8 text-muted-foreground" />
-            <p className="max-w-xl text-sm text-destructive">{error}</p>
+            <p className="max-w-xl text-sm text-destructive">{displayError}</p>
             {source && <Button variant="outline" onClick={() => void openExternal()}>改用系统阅读器</Button>}
           </div>
         ) : !loaded || !annotations ? (
           <div className="flex h-full items-center justify-center text-sm text-muted-foreground">正在读取 PDF 与标注…</div>
         ) : (
-          <Group orientation="horizontal" className="h-full min-h-0">
+          <Group orientation={isMobile ? 'vertical' : 'horizontal'} className="h-full min-h-0">
             <Panel defaultSize={notesOpen ? '68%' : '100%'} minSize="45%" className="min-h-0">
               <Suspense fallback={<div className="p-4 text-sm text-muted-foreground">正在加载 PDF 阅读器…</div>}>
                 <PdfViewer
@@ -204,7 +215,7 @@ export function PdfReadingWorkspace({ note, notes, onChange, onClose, onOpenNote
             </Panel>
             {notesOpen && (
               <>
-                <Separator className="w-1 bg-border hover:bg-primary/40" />
+                <Separator className={isMobile ? 'h-1 bg-border hover:bg-primary/40' : 'w-1 bg-border hover:bg-primary/40'} />
                 <Panel defaultSize="32%" minSize="22%" className="min-h-0">
                   <div className="flex h-full min-h-0 flex-col border-l bg-card">
                     <div className="flex items-center gap-2 border-b px-3 py-2">

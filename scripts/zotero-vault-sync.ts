@@ -3,12 +3,17 @@
  *
  *   npm run zotero:sync -- --vault "D:\...\Vault" --db "D:\...\Zotero\zotero.sqlite"
  *   npm run zotero:sync -- --vault ... --db ... --apply
- *   （可选：--report <file> 指定报告路径；--limit <n> 只同步前 n 条；--allow-missing 跳过读不到的索引文件）
+ *   （可选：--report <file> 指定报告路径；--limit <n> 只同步前 n 条；--allow-missing 跳过读不到的索引文件；
+ *    --prune 额外删掉笔记里已不存在于 Zotero 的分类路径与「方向:」标签）
  *
  * 行为：
  * - 只读打开 Zotero（绝不写入），排除 attachment / annotation / note；
  * - 读 vault 的 meta.json 与索引登记的 md，用 parseNoteMarkdown 还原现有笔记；
  * - 匹配（zoteroKey > DOI > 标题归一化）→ 合并分类/标签、补空缺元数据、刷新 PDF 状态；
+ *   标签只补「期刊:」「年份:」，并清掉旧版压平的「方向:」标签（分类只由 collections 承担）；
+ * - --prune：合并之后再做一次减法——Zotero 里已经删掉的分类路径会被清掉
+ *   （清空后由界面按「未分类」动态显示，不落盘）。默认不加，保持
+ *   「只做并集、不丢数据」的语义；跑一次即幂等，再跑应为 0 变动。
  * - 未匹配书目 → 新建 `文献/` 里的 literature 笔记（id = zotero-<key>，幂等）；
  * - 默认 dry-run：只出报告，不在 vault 里创建任何目录/文件；--apply 时先建带时间戳的完整备份再写盘；
  * - --report <file> 指定报告落盘位置；dry-run 未指定时落到系统临时目录。
@@ -23,6 +28,7 @@ import { parseMeta, parseNoteMarkdown, planVaultWrite, type VaultIndexEntry, typ
 import { baseNameOf } from '@/lib/vaultFormat'
 import type { Note } from '@/types/note'
 import { planZoteroImport, type ZoteroImportStats } from '@/lib/zoteroImport'
+import { isDirectionTag } from '@/lib/zoteroMeta'
 import type { ZoteroItem } from '@/lib/zoteroSync'
 
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -38,6 +44,7 @@ interface Args {
   report?: string
   limit?: number
   allowMissing: boolean
+  prune: boolean
 }
 
 function parseArgs(argv: string[]): Args {
@@ -57,6 +64,7 @@ function parseArgs(argv: string[]): Args {
     report: value('--report'),
     limit: limit ? Number(limit) : undefined,
     allowMissing: argv.includes('--allow-missing'),
+    prune: argv.includes('--prune'),
   }
 }
 
@@ -149,6 +157,37 @@ function chunk<T>(items: T[], size: number): T[][] {
   return out
 }
 
+/**
+ * 删掉笔记里已不存在于 Zotero 的分类路径，以及旧版压平写入的「方向:」标签（--prune）。
+ * 只动 literature.collections 与 tags，不碰正文/其它字段；清空后不写「未分类」占位。
+ */
+function pruneStaleCollections(
+  notes: Note[],
+  validPaths: Set<string>,
+): { notes: Note[]; changed: number; removedPaths: number; removedTags: number; emptied: number; sample: string[] } {
+  let changed = 0
+  let removedPaths = 0
+  let removedTags = 0
+  let emptied = 0
+  const sample: string[] = []
+  const pruned = notes.map((note) => {
+    const lit = note.literature
+    if (!lit) return note
+    const collections = lit.collections.filter((path) => validPaths.has(path))
+    const tags = note.tags.filter((tag) => !isDirectionTag(tag))
+    const droppedPaths = lit.collections.length - collections.length
+    const droppedTags = note.tags.length - tags.length
+    if (droppedPaths === 0 && droppedTags === 0) return note
+    changed++
+    removedPaths += droppedPaths
+    removedTags += droppedTags
+    if (lit.collections.length > 0 && collections.length === 0) emptied++
+    if (sample.length < 10) sample.push(`${note.title}（-${droppedPaths} 分类 / -${droppedTags} 标签）`)
+    return { ...note, tags, literature: { ...lit, collections } }
+  })
+  return { notes: pruned, changed, removedPaths, removedTags, emptied, sample }
+}
+
 function summarizeCollections(items: ZoteroItem[]) {
   const counts = new Map<string, number>()
   for (const item of items) {
@@ -167,6 +206,10 @@ async function main() {
   const items = args.limit ? read.items.slice(0, args.limit) : read.items
   const loaded = await loadVaultNotes(args.vault, args.allowMissing)
   const plan = planZoteroImport(items, loaded.notes)
+  // --prune：合并之后做减法，让分类树与 Zotero 当前状态一致（默认不做，保持只做并集）
+  const validPaths = new Set(read.collections)
+  const prune = args.prune ? pruneStaleCollections(plan.notes, validPaths) : null
+  if (prune) plan.notes = prune.notes
   const writePlan = planVaultWrite(plan.notes, loaded.loadedIndex, loaded.listing.md.map((m) => m.name), loaded.written, loaded.listing.meta ?? '')
 
   // 写盘计划里的「更新」= 匹配到且有变化 + 需要规范化重写的旧笔记；新建的也在 writes 里
@@ -240,6 +283,9 @@ async function main() {
     }),
     createdIds: plan.createdIds,
     updatedIds: plan.updatedIds,
+    prune: prune
+      ? { changed: prune.changed, removedPaths: prune.removedPaths, removedTags: prune.removedTags, emptied: prune.emptied, sample: prune.sample }
+      : null,
     deletes: writePlan.deletes,
   }
 
@@ -252,6 +298,7 @@ async function main() {
   console.log(`新建：${stats.created}；更新：${stats.updated}；无变化：${stats.unchanged}；待规范化：${loaded.needsRewrite}`)
   console.log(`写盘：${writePlan.writes.length} 个 md；删除：${writePlan.deletes.length}（必须为 0）；meta 是否需更新：${!writePlan.metaSkipped}`)
   console.log(`PDF：本机可访问 ${stats.availablePdfTotal} 份，涉及 ${stats.withAvailablePdf} 条书目；有 PDF 记录 ${stats.withPdfRecords} 条`)
+  if (prune) console.log(`清理旧分类：${prune.changed} 篇有变动，删分类路径 ${prune.removedPaths} 条 / 「方向:」标签 ${prune.removedTags} 条；清空后变成未分类 ${prune.emptied} 篇`)
   if (loaded.missingEntries.length) console.log(`注意：${loaded.missingEntries.length} 个索引内文件读不到，已按 --allow-missing 跳过并让其退出索引`)
   console.log(`报告：${reportPath}`)
 

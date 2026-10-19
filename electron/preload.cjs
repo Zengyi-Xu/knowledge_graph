@@ -40,7 +40,7 @@ contextBridge.exposeInMainWorld('knowledgeGraphDesktop', {
   // 在 Zotero 里定位条目（zotero:// 协议）
   selectZoteroItem: (zoteroKey) => ipcRenderer.invoke('zotero:select-item', { zoteroKey }),
 
-  // AI 网关：状态（脱敏）与补全；端点/key 由主进程从 Kimi Code 配置读取
-  aiStatus: (configPath) => ipcRenderer.invoke('ai:status', { configPath }),
+  // AI 网关：状态（脱敏）与补全；端点/key 由主进程从 Kimi Code / ZCode 配置读取
+  aiStatus: (request) => ipcRenderer.invoke('ai:status', request ?? {}),
   aiComplete: (payload) => ipcRenderer.invoke('ai:complete', payload),
 })

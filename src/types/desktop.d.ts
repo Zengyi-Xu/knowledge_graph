@@ -90,17 +90,39 @@ declare global {
       openExternalFile: (filePath: string) => Promise<{ error: string | null }>
       /** 读取笔记 localPdf 字段记录的 PDF，供应用内 PDF.js 阅读；最大 150 MB */
       readExternalPdf: (filePath: string) => Promise<{ data: Uint8Array; name: string; path: string }>
+      /**
+       * 本地 PDF 兜底：把缺 PDF 的文献标题交给本机服务，在授权目录里按文件名保守匹配。
+       * 只有本机网页端（服务端持 --pdf-root 清单）提供；桌面端没有这个方法，调用方要判空。
+       */
+      matchLocalPdf?: (titles: { id: string; title: string }[]) => Promise<{
+        matches: Record<string, { path: string; score: number; reason: string }>
+        stats: { titles: number; files: number; compared: number; matched: number }
+      }>
       /** 在 Zotero 里定位到该条目（zotero://select） */
       selectZoteroItem: (zoteroKey: string) => Promise<{ error: string | null }>
 
-      // AI 网关：状态里的 keyPreview 已脱敏，绝不包含完整 key
-      aiStatus: (configPath?: string) => Promise<
-        | { configured: true; baseUrl: string; model: string; keyPreview: string }
-        | { configured: false; error: string }
+      // AI 网关：状态里的 keyPreview 已脱敏，绝不包含完整 key。
+      // provider 默认 kimi；deepseek 的 key 从本机 ZCode / DSH 配置只读提取。
+      aiStatus: (request?: { provider?: 'kimi' | 'deepseek'; configPath?: string }) => Promise<
+        | {
+            configured: true
+            provider?: 'kimi' | 'deepseek'
+            baseUrl: string
+            model: string
+            models?: string[]
+            keyPreview: string
+          }
+        | { configured: false; provider?: 'kimi' | 'deepseek'; error: string }
       >
       aiComplete: (payload: {
-        prompt: string
+        provider?: 'kimi' | 'deepseek'
+        /** 单轮请求；与 messages 二选一 */
+        prompt?: string
+        /** 多轮对话（自由提问用）；必须至少有一条 user 消息 */
+        messages?: { role: 'user' | 'assistant'; content: string }[]
         system?: string
+        /** deepseek 可指定模型；kimi 始终用配置里的模型 */
+        model?: string
         maxTokens?: number
         configPath?: string
       }) => Promise<

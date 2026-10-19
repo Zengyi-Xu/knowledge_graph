@@ -13,8 +13,16 @@ node_modules/
 
 # 测试脚手架 / 临时产物（vault 自测与端到端验证）
 .tmp-*/
+# 根目录下的 .tmp-*.py / .tmp-*.js / .tmp-*.txt 同属临时产物
+.tmp-*
 
-# 笔记数据：只留在本机，永远不进仓库 / 不进 exe
+# 已归档的临时产物（旧的 .tmp-* 与过期构建目录，可随时删除）
+/old_temp/
+
+# 旧入口归档（旧桌面版构建、旧网页包、旧 dist；只留一份 zip/文件夹，不进仓库）
+/release-archive/
+
+# 笔记数据：只留在本机，永远不进仓库 / 不进共享发布包
 # （vault 目录、本地同步文件与任何导出快照都不提交）
 public/notes.json
 public/notes.json.bak-*
@@ -24,6 +32,17 @@ notes-backup/
 # 本地归档 / 备份
 _backup/
 backup/
+
+# 本机 Zotero 诊断库与本地导出（含真实书目 / 分类 / 标题，绝不入库）
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+zotero-tree.txt
+collection-titles.json
+unclassified-data.json
+分类建议清单.md
+交接-*.md
+CHATGPT*.txt
 
 # 与编辑器源码无关的本机临时材料（PPTX 调试脚本、预览产物等）
 _kaust_preview/
@@ -58,7 +77,3 @@ npm-debug.log*
 
 # Kimi Work runtime files
 *.local
-
-# electron-builder 临时输出（本机 .asar 被锁时会残留）
-release-out/
-release[0-9]/

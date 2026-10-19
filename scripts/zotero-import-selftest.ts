@@ -120,7 +120,7 @@ check('匹配时保留正文/标签/附件，只做并集', () => {
   const merged = notesOf(plan, 'n1')
   assert.equal(merged.content, '用户写的正文')
   assert.deepEqual(merged.literature!.attachments, ['att-1'])
-  assert.deepEqual(merged.tags, ['我的标签', '方向:硅光', '期刊:Nature Photonics', '年份:2024'])
+  assert.deepEqual(merged.tags, ['我的标签', '期刊:Nature Photonics', '年份:2024'])
 })
 
 check('已有的非空字段不被 Zotero 覆盖，空缺字段才补上', () => {
@@ -146,15 +146,15 @@ check('有真实分类时不再保留「未分类」', () => {
   assert.deepEqual(notesOf(plan, 'n1').literature!.collections, ['硅光/调制器'])
 })
 
-check('无分类不写「方向:未分类」标签，历史占位会被清掉', () => {
+check('不再写「方向:」标签，历史「方向:未分类」「方向:硅光」一律清掉', () => {
   const plan = planZoteroImport([zItem({ collectionPaths: [] })], [], NOW)
   const created = notesOf(plan, plan.createdIds[0])
-  assert.ok(!created.tags.includes('方向:未分类'))
-  const kept = existingNote({ tags: ['方向:未分类', '我的标签'] })
+  assert.ok(!created.tags.some((tag) => tag.startsWith('方向:')))
+  const kept = existingNote({ tags: ['方向:未分类', '方向:硅光', '我的标签'] })
   const merged = planZoteroImport([zItem({ collectionPaths: ['硅光'] })], [kept], NOW)
   const tags = notesOf(merged, 'n1').tags
-  assert.ok(!tags.includes('方向:未分类'))
-  assert.ok(tags.includes('我的标签') && tags.includes('方向:硅光'))
+  assert.ok(!tags.some((tag) => tag.startsWith('方向:')))
+  assert.ok(tags.includes('我的标签'))
 })
 
 check('完整层级路径按原样保存', () => {

@@ -4,6 +4,7 @@
  */
 import { uid } from '@/types/note'
 import { resolvedVaultDir } from '@/lib/vaultFs'
+import { capability } from '@/lib/capabilities'
 
 /** 标注 JSON 结构（见 docs/VAULT_FORMAT.md） */
 export interface PdfAnnotation {
@@ -35,7 +36,8 @@ function vaultDir(): string {
 
 function api() {
   const desk = window.knowledgeGraphDesktop
-  if (!desk?.readAttachment || !desk.writeAttachment) throw new Error('附件仅桌面版可用')
+  // 明确降级：附件（PDF 标注）要求「本机服务 + 运行服务的那台电脑」
+  if (!desk?.readAttachment || !desk.writeAttachment) throw new Error(capability('vaultAttachments').reason)
   const dir = vaultDir()
   if (!dir) throw new Error('请先选择笔记目录（附件保存在笔记目录的 attachments/ 里）')
   return { desk, dir }
@@ -102,7 +104,7 @@ export async function removeAttachment(id: string): Promise<void> {
 /** 用系统默认程序打开本地 PDF（如外部 PDF 阅读器）；返回错误信息（成功为 null） */
 export async function openPdfExternal(id: string): Promise<string | null> {
   const desk = window.knowledgeGraphDesktop
-  if (!desk?.openAttachmentExternal) throw new Error('打开本地 PDF 仅桌面版可用')
+  if (!desk?.openAttachmentExternal) throw new Error(capability('systemOpener').reason)
   const dir = vaultDir()
   if (!dir) throw new Error('请先选择笔记目录')
   const result = await desk.openAttachmentExternal(dir, pdfRel(id))
