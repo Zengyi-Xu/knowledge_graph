@@ -38,6 +38,10 @@ jobs:
       - name: Type check
         run: npx tsc -b
 
+      - name: Build dev bundle for e2e
+        # test:frozen 里的 test:vault-e2e 启动未打包的 Electron，加载的是 dist-dev/
+        run: npm run build:dev
+
       - name: Frozen guard tests
         run: npm run test:frozen
 
