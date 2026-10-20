@@ -1,7 +1,7 @@
 {
   "name": "knowledge-graph",
   "private": true,
-  "version": "1.2.3",
+  "version": "1.2.4",
   "description": "本地优先的知识图谱笔记应用",
   "author": "Zengyi Xu",
   "main": "electron/main.cjs",
@@ -96,6 +96,25 @@
         }
       ],
       "artifactName": "${productName}-${version}-mac-${arch}.${ext}"
+    },
+    "linux": {
+      "category": "Utility",
+      "icon": "build/icon.png",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "artifactName": "${productName}-${version}-linux-${arch}.${ext}"
     }
   },
   "dependencies": {
