@@ -174,7 +174,9 @@ async function main() {
     const wsUrl = await waitFor(async () => {
       const res = await fetch(`http://127.0.0.1:${PORT}/json/list`)
       const list = await res.json()
-      const page = list.find((t) => t.type === 'page' && String(t.url).startsWith('kg://')) ?? list.find((t) => t.type === 'page')
+      // 只认 kg:// 页面：窗口刚创建时第一个 page 目标可能是 about:blank，
+      // 对它读写 localStorage 会被拒绝（SecurityError），落上去整个用例就毁了——宁可继续等。
+      const page = list.find((t) => t.type === 'page' && String(t.url).startsWith('kg://'))
       return page?.webSocketDebuggerUrl ?? null
     }, 30000, 500)
 
