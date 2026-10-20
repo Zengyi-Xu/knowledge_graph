@@ -17,11 +17,17 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # electron 44 要求 Node >= 22.12；Node 20 下 electron 的 postinstall 不会下载
+          # electron.exe，导致 test:vault-e2e 找不到二进制。
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Ensure Electron binary downloaded
+        # 兜底：postinstall 没拉下二进制时手动补一次
+        run: if (-not (Test-Path node_modules/electron/dist/electron.exe)) { node node_modules/electron/install.js }
 
       - name: Frozen units check
         run: npm run frozen:check
