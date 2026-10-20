@@ -1,0 +1,36 @@
+name: Release
+
+# 打 tag（v*）即触发：在 macOS runner 上构建桌面版，并把 dmg/zip 上传到同名 GitHub Release。
+# 也可在 Actions 页面手动触发（用 package.json 里的版本号建 Release）。
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release-mac:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build renderer
+        run: npm run build
+
+      - name: Package macOS app and publish GitHub Release
+        run: npx electron-builder --mac --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

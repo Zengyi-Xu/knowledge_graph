@@ -56,7 +56,41 @@
     "release:web": "node scripts/package-web-portable.mjs",
     "pdf:build": "esbuild scripts/link-local-pdfs.ts --bundle --platform=node --format=cjs --target=node20 --alias:@=./src --outfile=.tmp-vault-test/link-pdfs.cjs",
     "pdf:link": "npm run pdf:build && node .tmp-vault-test/link-pdfs.cjs",
-    "tags:strip-direction": "esbuild scripts/strip-direction-tags.ts --bundle --platform=node --format=cjs --target=node20 --alias:@=./src --outfile=.tmp-vault-test/strip-direction-tags.cjs && node .tmp-vault-test/strip-direction-tags.cjs"
+    "tags:strip-direction": "esbuild scripts/strip-direction-tags.ts --bundle --platform=node --format=cjs --target=node20 --alias:@=./src --outfile=.tmp-vault-test/strip-direction-tags.cjs && node .tmp-vault-test/strip-direction-tags.cjs",
+    "dist:mac": "npm run build && electron-builder --mac"
+  },
+  "build": {
+    "appId": "com.zengyixu.knowledgegraph",
+    "productName": "KnowledgeGraph",
+    "directories": {
+      "output": "release-desktop"
+    },
+    "files": [
+      "dist/**",
+      "electron/**",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "build/icon.png",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "${productName}-${version}-mac-${arch}.${ext}"
+    }
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
@@ -119,6 +153,7 @@
     "@vitejs/plugin-react": "^5.1.1",
     "autoprefixer": "^10.4.23",
     "electron": "^44.7.0",
+    "electron-builder": "^26.15.3",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
