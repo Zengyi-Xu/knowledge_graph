@@ -236,7 +236,9 @@ async function main() {
       firstText?.slice(0, 220),
     )
 
-    const bodyText = await cdp.evalRetry('document.body.innerText')
+    // 用 textContent 而不是 innerText：条数徽标是 `hidden lg:inline`，窗口内容区不足 1024px
+    // （小屏幕 CI runner）时 display:none，innerText 读不到它。
+    const bodyText = await cdp.evalRetry('document.body.textContent')
     check('界面已显示为「笔记目录」模式', String(bodyText).includes('笔记目录：'), String(bodyText).slice(0, 160))
     const countBefore = noteCount(String(bodyText))
 
@@ -301,7 +303,7 @@ async function main() {
     const lastEntry = meta.notes[meta.notes.length - 1]
     await fs.rm(path.join(vaultDir, lastEntry.file))
     const countAfter = await waitFor(async () => {
-      const c = noteCount(String(await cdp.eval('document.body.innerText')))
+      const c = noteCount(String(await cdp.eval('document.body.textContent')))
       return c !== null && countBefore !== null && c === countBefore - 1 ? c : null
     }, 20000, 500)
     check('磁盘上删除 md 后，应用里的笔记数减一', countAfter === (countBefore ?? 0) - 1, `${countBefore} -> ${countAfter}`)
