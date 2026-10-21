@@ -30,8 +30,8 @@ front matter 字段；`release-archive/` 里的旧桌面 EXE 不要用于真实 
   - 新增「文献」笔记类型与文献视图：表格排序 / 搜索，DOI（CrossRef/DataCite）与
     arXiv 一键导入元数据，BibTeX / RIS 粘贴批量导入（citekey 自动生成、撞名追加后缀）
   - 复制引用：**GB/T 7714-2015**（国标顺序编码制）/ **APA** / BibTeX 三种格式
-  - PDF 阅读工作台：从文献表点 PDF 徽标进入全屏双栏阅读，左侧翻页 / 缩放 / 搜索，
-    右侧编辑或预览文献笔记；选中 PDF 原文可建立页码链接，点笔记中的链接可跳回原文
+  - PDF 阅读工作台：从文献表点 PDF 徽标进入全屏双栏阅读，左侧连续滚动 / 单页 / 双页对开、
+    缩放与当前页搜索，右侧用所见即所得编辑器写阅读笔记；划词高亮可链接回原文，点笔记里的链接可跳回 PDF
   - PDF 标注存在 vault 的 `attachments/` 里；也可随时改用系统 PDF 阅读器
   - **插入 Word 引用**：复制 RTF 域代码（`ADDIN ZOTERO_ITEM`，与 Zotero 兼容），
     粘进 Word 是可更新的真实域（Alt+F9 可见域代码）；一键复制参考文献表
@@ -52,7 +52,7 @@ front matter 字段；`release-archive/` 里的旧桌面 EXE 不要用于真实 
 macOS 已装旧版时：退出旧版 → 打开新 dmg → 把 `KnowledgeGraph` 拖进「应用程序」→ 选「替换」。
 笔记库与设置都在 App 之外，替换不会动数据；签名相关提示的处理见 [docs/RELEASE.md](docs/RELEASE.md)。
 
-发布页同时提供 SHA-256；下载后可按 [免安装网页使用说明](docs/WEB_PORTABLE.md) 校验。
+网页包附带 `SHA256SUMS.txt`，下载后可按 [免安装网页使用说明](docs/WEB_PORTABLE.md) 校验。
 免安装不等于笔记跟着程序走：笔记仍在你选择的 vault 目录里。
 
 ## 笔记存在哪
