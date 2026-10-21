@@ -36,6 +36,7 @@ import type { ZoteroItem } from '@/lib/zoteroSync'
 const repoRoot = path.join(__dirname, '..')
 const { listVault, readVaultFiles, writeVault } = require(path.join(repoRoot, 'electron', 'vaultFs.cjs'))
 const { readZotero } = require(path.join(repoRoot, 'electron', 'zoteroFs.cjs'))
+const { writeBackupZip, freshZipPath } = require(path.join(repoRoot, 'scripts', 'lib', 'backup-zip.cjs'))
 
 interface Args {
   vault: string
@@ -74,29 +75,14 @@ function timestamp(): string {
   return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
 }
 
-/** 备份 meta.json 与磁盘上全部 md（含未纳管文件），保留相对目录结构 */
-async function backupVault(vault: string, mdNames: string[], metaText: string | null, dir: string): Promise<void> {
+/** 备份 meta.json 与磁盘上全部 md（含未纳管文件），保留相对目录结构，返回 zip 条目 */
+async function collectBackupEntries(vault: string, mdNames: string[], metaText: string | null): Promise<{ name: string; data: Buffer }[]> {
+  const entries: { name: string; data: Buffer }[] = []
   for (const name of mdNames) {
-    const target = path.join(dir, name)
-    await fs.mkdir(path.dirname(target), { recursive: true })
-    await fs.copyFile(path.join(vault, name), target)
+    entries.push({ name: name.replace(/\\/g, '/'), data: await fs.readFile(path.join(vault, name)) })
   }
-  if (metaText !== null) await fs.writeFile(path.join(dir, 'meta.json'), metaText, 'utf8')
-}
-
-/** 取一个尚未占用的备份目录（同一秒内重复运行时加后缀） */
-async function freshDir(base: string): Promise<string> {
-  await fs.mkdir(path.dirname(base), { recursive: true })
-  for (let i = 0; i < 50; i++) {
-    const dir = i === 0 ? base : `${base}-${i + 1}`
-    try {
-      await fs.mkdir(dir, { recursive: false })
-      return dir
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-    }
-  }
-  throw new Error(`无法创建备份目录：${base}`)
+  if (metaText !== null) entries.push({ name: 'meta.json', data: Buffer.from(metaText, 'utf8') })
+  return entries
 }
 
 /** 读回 vault：索引登记的 md → 笔记（与运行时 useNotes 的规则一致） */
@@ -220,17 +206,16 @@ async function main() {
 
   const stats: ZoteroImportStats = plan.stats
   const stamp = timestamp()
-  // dry-run 绝不在 vault 里创建目录/文件；--apply 才建带时间戳的完整备份
-  let backupDir: string | null = null
+  // dry-run 绝不在 vault 里创建目录/文件；--apply 才备份——单个同名 zip（同步盘按一个文件传，几万个 md 不再逐文件上传）
+  let backupZip: string | null = null
+  let backupEntries: { name: string; data: Buffer }[] | null = null
   if (args.apply) {
-    backupDir = await freshDir(path.join(args.vault, '.backups', `zotero-import-${stamp}`))
-    await backupVault(args.vault, loaded.listing.md.map((m) => m.name), loaded.listing.meta, backupDir)
+    backupZip = freshZipPath(path.join(args.vault, '.backups', `zotero-import-${stamp}.zip`))
+    backupEntries = await collectBackupEntries(args.vault, loaded.listing.md.map((m) => m.name), loaded.listing.meta)
   }
   const reportPath = args.report
     ? path.resolve(args.report)
-    : backupDir
-      ? path.join(backupDir, 'report.json')
-      : path.join(os.tmpdir(), 'knowledge-graph-zotero-reports', `report-${stamp}.json`)
+    : path.join(os.tmpdir(), 'knowledge-graph-zotero-reports', `report-${stamp}.json`)
 
   const report = {
     generatedAt: new Date().toISOString(),
@@ -238,7 +223,7 @@ async function main() {
     vault: args.vault,
     zoteroDb: args.db,
     elapsedMs: Date.now() - started,
-    backupDir,
+    backupDir: backupZip,
     reportPath,
     allowMissing: args.allowMissing,
     missingIndexFiles: loaded.missingEntries.map((e) => e.file),
@@ -292,6 +277,12 @@ async function main() {
   await fs.mkdir(path.dirname(reportPath), { recursive: true })
   await fs.writeFile(reportPath, JSON.stringify(report, null, 2) + '\n', 'utf8')
 
+  // 备份 zip 必须在任何写盘之前落完；report.json 一并打进包里
+  if (backupEntries && backupZip) {
+    backupEntries.push({ name: 'report.json', data: Buffer.from(JSON.stringify(report, null, 2) + '\n', 'utf8') })
+    writeBackupZip(backupZip, backupEntries)
+  }
+
   console.log(`模式：${report.mode}${args.apply ? '' : '（不在笔记库建目录/文件，只出报告）'}`)
   console.log(`Zotero 书目：${stats.zoteroItems} 条（有分类 ${stats.withCollections} / 未分类 ${stats.unclassified}）`)
   console.log(`匹配到已有文献笔记：${stats.matched}（key ${stats.matchedByKey} / DOI ${stats.matchedByDoi} / 标题 ${stats.matchedByTitle}）`)
@@ -314,7 +305,7 @@ async function main() {
       deletes: writePlan.deletes,
       meta: writePlan.metaSkipped ? null : writePlan.meta,
     })
-    console.log(`已写入 md ${result.written} 个，删除 ${result.deleted} 个；备份：${backupDir}`)
+    console.log(`已写入 md ${result.written} 个，删除 ${result.deleted} 个；备份：${backupZip}`)
   } else {
     console.log('dry-run 结束：确认统计无误后再加 --apply。')
   }

@@ -33,6 +33,14 @@ const TOPIC_KEY = 'graph-topic-links-v1'
 const HUB_ONLY_KEY = 'graph-hub-only-v1'
 /** 「仅文献」档的聚类下钻开关（本地记忆） */
 const CLUSTER_KEY = 'graph-lit-cluster-v1'
+/** 「静止停帧」开关（本地记忆）：全体节点平均速度足够小就停住画面省电 */
+const SETTLE_KEY = 'graph-settle-freeze-v1'
+
+/** 静止停帧：平均速度（世界坐标 px/帧）低于该值、且持续这么多个运算帧就停。
+ *  不是过载保护（那是 MAX_TICKS_PER_HEAT / MAX_STEP_MS_EMA 的熔断），纯粹省计算开销；
+ *  静默停止、不给提示；拖动节点 / 改力参数 / 重新布局都会 bump simNonce 唤醒。 */
+const SETTLE_AVG_SPEED = 0.08
+const SETTLE_FRAMES = 30
 
 /** 话题相关边默认开；关掉后回到纯 [[双链]] 视图 */
 function loadTopicLinks(): boolean {
@@ -59,6 +67,16 @@ function loadHubOnly(): boolean {
 function loadClusterOn(): boolean {
   try {
     if (readSetting(CLUSTER_KEY) === '0') return false
+  } catch {
+    /* ignore */
+  }
+  return true
+}
+
+/** 静止停帧：默认开。只是省电，停帧时不弹任何提示（区别于负载熔断的自动暂停） */
+function loadSettleOn(): boolean {
+  try {
+    if (readSetting(SETTLE_KEY) === '0') return false
   } catch {
     /* ignore */
   }
@@ -326,6 +344,8 @@ export function GraphView({
   const [hubOnly, setHubOnly] = useState<boolean>(loadHubOnly)
   /** 「仅文献」档的聚类下钻（本地记忆） */
   const [clusterOn, setClusterOn] = useState<boolean>(loadClusterOn)
+  /** 静止停帧（本地记忆）：平均速度足够小就停住力模拟画面省电；静默停止，不给提示 */
+  const [settleOn, setSettleOn] = useState<boolean>(loadSettleOn)
   /** 聚类下钻路径：空 = 停在簇这一层，[簇 id] = 铺开这一簇的文献 */
   const [drill, setDrill] = useState<string[]>([])
   /**
@@ -341,6 +361,8 @@ export function GraphView({
   const placeRef = useRef({ seq: 0, park: 0 })
   const ticksRef = useRef(0)
   const stepEmaRef = useRef(0)
+  /** 连续「平均速度低于阈值」的运算帧数（静止停帧用） */
+  const calmRef = useRef(0)
   const dragRef = useRef<{ id: string; dx: number; dy: number; sx: number; sy: number } | null>(null)
   const panRef = useRef<{ lastX: number; lastY: number; camX: number; camY: number } | null>(null)
   const movedRef = useRef(false)
@@ -376,6 +398,11 @@ export function GraphView({
     writeSetting(CLUSTER_KEY, next ? '1' : '0')
     // 关掉聚类就从顶层重新开始，免得下次打开停在一个早已不存在的层级上
     setDrill([])
+  }, [])
+
+  const changeSettleOn = useCallback((next: boolean) => {
+    setSettleOn(next)
+    writeSetting(SETTLE_KEY, next ? '1' : '0')
   }, [])
 
   // 标题 -> 笔记 索引：解析 [[双链]]（纯函数 buildTitleIndex，见 graphModel）
@@ -825,6 +852,7 @@ export function GraphView({
     let frame = 0
     ticksRef.current = 0
     stepEmaRef.current = 0
+    calmRef.current = 0
     // 场地越大越松：斥力按世界面积缩放，避免小窗口爆炸、大场地又挤在一起
     const areaScale = clamp((world.w * world.h) / (2600 * 1800), 0.55, 3.2)
     const repulsionConst = PHYSICS_BASE.repulsion * effPhysics.repulsion * areaScale * repulsionBoost
@@ -931,7 +959,12 @@ export function GraphView({
         n.y = Math.max(30, Math.min(world.h - 30, n.y))
       }
       let maxV = 0
-      for (const n of arr) maxV = Math.max(maxV, Math.abs(n.vx), Math.abs(n.vy))
+      let sumV = 0
+      for (const n of arr) {
+        maxV = Math.max(maxV, Math.abs(n.vx), Math.abs(n.vy))
+        sumV += Math.hypot(n.vx, n.vy)
+      }
+      const avgV = arr.length > 0 ? sumV / arr.length : 0
 
       // 负载熔断：单步耗时 EMA 或总步数超标 → 自动暂停，交给用户决定
       const dt = performance.now() - t0
@@ -942,6 +975,14 @@ export function GraphView({
         return
       }
       forceTick((t) => t + 1)
+      // 静止停帧（省电，不是过载保护；静默停止、不给提示）：全体节点平均速度
+      // 持续低于阈值就停住画面。重叠节点的随机抖动会让单个节点的速度一直下不来
+      // （maxV 永远 > 0.05），但平均速度早就微乎其微 —— 所以这里看平均不看最大。
+      // 唤醒：拖动节点 / 改力参数 / 重新布局都会 bump simNonce 重跑本 effect。
+      if (settleOn) {
+        calmRef.current = avgV < SETTLE_AVG_SPEED ? calmRef.current + 1 : 0
+        if (calmRef.current >= SETTLE_FRAMES) return
+      }
       // 速度足够小就停住，避免节点持续漂移导致难以点中
       if (maxV > 0.05) raf = requestAnimationFrame(loop)
     }
@@ -957,7 +998,7 @@ export function GraphView({
     }
     raf = requestAnimationFrame(loop)
     return () => cancelAnimationFrame(raf)
-  }, [shownEdges, world.w, world.h, simNonce, effPhysics, autoPaused, repulsionBoost])
+  }, [shownEdges, world.w, world.h, simNonce, effPhysics, autoPaused, repulsionBoost, settleOn])
 
   // 屏幕坐标（clientX/Y）→ 世界坐标
   const toWorld = useCallback(
@@ -1183,6 +1224,19 @@ export function GraphView({
             className="h-3.5 w-3.5 accent-teal-600"
           />
           <span className={hubOnly ? 'font-medium' : 'text-muted-foreground'}>只标大节点</span>
+        </label>
+        {/* 静止停帧：平均速度足够小就停住画面省电（静默停止，不给提示；与负载熔断的自动暂停是两回事） */}
+        <label
+          className="pointer-events-auto flex cursor-pointer items-center gap-1.5 rounded-lg border bg-background/95 px-2 py-1 text-xs shadow backdrop-blur"
+          title="全体节点平均速度足够小并持续约半秒后，停止力模拟画面（只为省电，静默停止、不给提示）；拖动节点、调整力参数、重新布局都会自动唤醒"
+        >
+          <input
+            type="checkbox"
+            checked={settleOn}
+            onChange={(e) => changeSettleOn(e.target.checked)}
+            className="h-3.5 w-3.5 accent-teal-600"
+          />
+          <span className={settleOn ? 'font-medium' : 'text-muted-foreground'}>静止停帧</span>
         </label>
         {/* 文献聚类下钻：只在「仅文献」档有意义 */}
         {tier === 'literature-only' && (

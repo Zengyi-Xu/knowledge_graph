@@ -11,7 +11,7 @@
  * - 被合并项的正文若不在保留项里，追加到保留项正文末尾（带来源标注），不因去重丢正文。
  * 安全：
  * - 默认只预览：逐组打印保留项 / 被合并项 / 风险标记；--report <path> 可落 JSON 报告；
- * - --apply 才写盘：先备份本次会改动的文件到 .backups/dedupe-<时间戳>/，再合并文件、删被合并文件、原子更新 meta.json；
+ * - --apply 才写盘：先备份本次会改动的文件到 .backups/dedupe-<时间戳>.zip，再合并文件、删被合并文件、原子更新 meta.json；
  * - 标题只近似相等的组视为「可疑组」，默认跳过并列出来，加 --merge-suspect 才合并；
  * - --fix-placeholders 额外清理全库历史占位「未分类」分类与「方向:未分类」标签。
  * 幂等：再跑一次应为「0 组」。
@@ -21,6 +21,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { UNCLASSIFIED, isDirectionTag, mergeCollections } from '@/lib/zoteroMeta'
+// @ts-expect-error 纯 JS 的 zip 备份助手（无类型声明，脚本不走 tsc）
+import { writeBackupZip, freshZipPath } from './lib/backup-zip.cjs'
 
 const args = process.argv.slice(2)
 const argValue = (name: string): string | undefined => {
@@ -291,17 +293,17 @@ if (!apply) {
 
 // —— 应用 ——
 const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)
-const backup = path.join(vault, '.backups', `dedupe-${stamp}`)
-fs.mkdirSync(path.join(backup, '文献'), { recursive: true })
-fs.copyFileSync(metaFile, path.join(backup, 'meta.json'))
+const backup = freshZipPath(path.join(vault, '.backups', `dedupe-${stamp}.zip`))
+const backupEntries: { name: string; data: Buffer }[] = [{ name: 'meta.json', data: fs.readFileSync(metaFile) }]
 const backedUp = new Set<string>()
 const backupFile = (note: NoteFile) => {
   if (backedUp.has(note.file)) return
   backedUp.add(note.file)
-  fs.copyFileSync(note.full, path.join(backup, '文献', note.file))
+  backupEntries.push({ name: `文献/${note.file}`, data: fs.readFileSync(note.full) })
 }
 for (const p of actionable) for (const n of [p.keeper, ...p.losers]) backupFile(n)
 for (const entry of placeholderFixes) backupFile(entry.note)
+writeBackupZip(backup, backupEntries)
 
 const replaceLine = (text: string, field: string, value: unknown, number = false) => {
   const line = `${field}: ${number ? value : JSON.stringify(value)}`

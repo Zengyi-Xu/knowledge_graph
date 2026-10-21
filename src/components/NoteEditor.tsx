@@ -24,7 +24,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Trash2, Download, Check, Upload, Palette, MoreVertical, RefreshCw, Pencil, ClipboardCopy, Sparkles, ExternalLink, FileText } from 'lucide-react'
+import { Trash2, Download, Check, Upload, Palette, MoreVertical, RefreshCw, Pencil, ClipboardCopy, Sparkles, ExternalLink, FileText, ArrowLeft } from 'lucide-react'
 import { toast } from 'sonner'
 import { readSetting, writeSetting } from '@/lib/env'
 import { attachmentsSupported, openPdfExternal } from '@/lib/attachments'
@@ -64,6 +64,9 @@ interface Props {
   onAiUpdate?: () => void
   /** 文献笔记专属：PDF 全屏阅读入口（与文献表 PDF 徽标同一个函数）；未提供则不显示该按钮 */
   onReadPdf?: (id: string) => void
+  /** 「返回上一篇笔记」（未提供则不显示该按钮）；canBack 为 false 时按钮置灰 */
+  onBack?: () => void
+  canBack?: boolean
   /** true：左源码右渲染同时显示；false：保留「预览/编辑」切换 */
   splitView?: boolean
   /** 写入门禁拦下的笔记：只能看，不能改（改动不会落盘，见 docs/VAULT_WRITE_GATE.md） */
@@ -82,6 +85,8 @@ export function NoteEditor({
   onCreateNote,
   onAiUpdate,
   onReadPdf,
+  onBack,
+  canBack = false,
   splitView = false,
   readOnly = false,
   flow = false,
@@ -416,6 +421,19 @@ export function NoteEditor({
           </div>
         )}
         <div className="flex flex-col gap-2 md:flex-row md:items-start">
+          {onBack && (
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={onBack}
+              disabled={!canBack}
+              title="返回上一篇笔记（Alt+←）"
+              aria-label="返回上一篇笔记"
+              className="h-11 w-11 shrink-0 md:h-10 md:w-10"
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+          )}
           <Input
             value={note.title}
             onChange={(e) => onChange({ title: e.target.value })}

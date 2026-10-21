@@ -11,13 +11,15 @@
  *
  * 只做减法：除 `tags:` 那一行外，文件其余字节逐字节保持原样（脚本内有前缀/后缀断言 +
  * parseNoteMarkdown 回读校验）；不新建、不删除任何文件；--apply 先备份到
- * `<vault>/.backups/direction-tags-<时间戳>/`。跑一次即收敛，再跑应为 0 变动。
+ * `<vault>/.backups/direction-tags-<时间戳>.zip`。跑一次即收敛，再跑应为 0 变动。
  * 规则层已同步改掉（同步/去重也会清这些标签），所以新写入不会再产生它们。
  */
 import fs from 'node:fs'
 import path from 'node:path'
 import { isDirectionTag } from '@/lib/zoteroMeta'
 import { parseNoteMarkdown } from '@/lib/vaultFormat'
+// @ts-expect-error 纯 JS 的 zip 备份助手（无类型声明，脚本不走 tsc）
+import { writeBackupZip, freshZipPath } from './lib/backup-zip.cjs'
 
 const args = process.argv.slice(2)
 const argValue = (name: string): string | undefined => {
@@ -151,13 +153,15 @@ if (!changes.length) {
 }
 
 const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)
-const backup = path.join(vault, '.backups', `direction-tags-${stamp}`)
+const backup = freshZipPath(path.join(vault, '.backups', `direction-tags-${stamp}.zip`))
+const backupEntries: { name: string; data: Buffer }[] = []
+for (const change of changes) {
+  backupEntries.push({ name: change.rel.replace(/\\/g, '/'), data: fs.readFileSync(path.join(vault, change.rel)) })
+}
+writeBackupZip(backup, backupEntries)
 let written = 0
 for (const change of changes) {
   const abs = path.join(vault, change.rel)
-  const backupFile = path.join(backup, change.rel)
-  fs.mkdirSync(path.dirname(backupFile), { recursive: true })
-  if (!fs.existsSync(backupFile)) fs.copyFileSync(abs, backupFile)
   fs.writeFileSync(abs, change.next, 'utf8')
   written++
 }

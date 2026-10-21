@@ -59,7 +59,8 @@ const LAZY_UNITS = [
   {
     label: '编辑器 Vditor',
     roots: [/src\/components\/WysiwygEditor\.tsx$/, /node_modules\/vditor\//],
-    allowed: ['edit'],
+    // pdf 场景：PDF 阅读工作台的笔记栏就是 WysiwygEditor（与主界面同一个所见即所得编辑器）
+    allowed: ['edit', 'pdf'],
   },
   {
     label: 'citation-js + CSL 样式',

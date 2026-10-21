@@ -19,6 +19,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { indexKeysFor, matchScore } from '@/lib/pdfMatch'
 import { cleanLiteratureTitle } from '@/lib/titleClean'
+// @ts-expect-error 纯 JS 的 zip 备份助手（无类型声明，脚本不走 tsc）
+import { writeBackupZip, freshZipPath } from './lib/backup-zip.cjs'
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const repoRoot = path.join(__dirname, '..')
@@ -197,13 +199,20 @@ if (!apply) {
 
 // ---- 写盘：在 front matter 里补 localPdf ----
 const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)
-const backup = path.join(vault, '.backups', `pdf-link-${stamp}`)
-fs.mkdirSync(path.join(backup, '文献'), { recursive: true })
+const backup = freshZipPath(path.join(vault, '.backups', `pdf-link-${stamp}.zip`))
+const willWrite = hits.filter((hit) => !new RegExp(`^localPdf:`, 'm').test(hit.target.text))
+const backupEntries: { name: string; data: Buffer }[] = []
+const backedUp = new Set<string>()
+for (const hit of willWrite) {
+  if (backedUp.has(hit.target.file)) continue
+  backedUp.add(hit.target.file)
+  backupEntries.push({ name: `文献/${hit.target.file}`, data: fs.readFileSync(hit.target.full) })
+}
+writeBackupZip(backup, backupEntries)
 let written = 0
-for (const hit of hits) {
+for (const hit of willWrite) {
   const line = `localPdf: ${JSON.stringify(hit.pdf)}`
   const text = hit.target.text
-  if (new RegExp(`^localPdf:`, 'm').test(text)) continue
   let next: string
   const anchors = ['zoteroKeys:', 'zoteroKey:', 'doi:']
   const anchor = anchors.map((a) => ({ a, index: text.search(new RegExp(`^${a}.*$`, 'm')) })).filter((x) => x.index >= 0).sort((x, y) => y.index - x.index)[0]
@@ -216,8 +225,6 @@ for (const hit of hits) {
       ? `${text.slice(0, tagsIndex)}${line}\n${text.slice(tagsIndex)}`
       : text.replace(/^---\n/, `---\n${line}\n`)
   }
-  const backupFile = path.join(backup, '文献', hit.target.file)
-  if (!fs.existsSync(backupFile)) fs.copyFileSync(hit.target.full, backupFile)
   fs.writeFileSync(hit.target.full, next, 'utf8')
   written++
 }

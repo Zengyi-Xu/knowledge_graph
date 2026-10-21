@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTheme } from 'next-themes'
 import Vditor from 'vditor'
 import type { Note } from '@/types/note'
@@ -88,6 +88,11 @@ function scopeCss(css: string, scope: string): string {
 
 const WIKI_RE = /\[\[([^[\]]+)\]\]/
 
+/** 正在输入的「半条双链」：光标前最近的一段 `[[查询词`（与经典模式的补全触发规则一致） */
+const WIKI_OPEN_RE = /\[\[([^[\]]*)$/
+
+const clampNum = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
+
 /**
  * 把正文里的 [[双链]] 文本包成样式化 span，与经典预览的视觉一致：
  * 隐藏 `[[ ]]` 括号、按笔记是否存在决定配色、不存在的补一个「?」。
@@ -161,6 +166,84 @@ export default function WysiwygEditor({ value, onChange, onOpenNote, onCreateNot
   const navRef = useRef({ onOpenNote, onCreateNote, noteId, notes })
   navRef.current = { onOpenNote, onCreateNote, noteId, notes }
   const { resolvedTheme } = useTheme()
+
+  // ---- [[ 双链补全：输入 [[ 后按标题过滤，下拉选择（与经典模式同一套规则） ----
+  const rootRef = useRef<HTMLDivElement>(null)
+  const [suggest, setSuggest] = useState<{ query: string; x: number; y: number } | null>(null)
+  const [suggestIndex, setSuggestIndex] = useState(0)
+  const suggestCandidates = useMemo(() => {
+    if (!suggest) return []
+    const q = suggest.query.toLowerCase()
+    return notes.filter((n) => n.id !== noteId && n.title.toLowerCase().includes(q)).slice(0, 6)
+  }, [suggest, notes, noteId])
+
+  /** 读当前光标：前面是不是一段没闭合的 `[[查询词`；是就按光标坐标展开下拉 */
+  const refreshSuggest = () => {
+    const host = hostRef.current
+    const root = rootRef.current
+    const sel = window.getSelection()
+    if (!host || !root || !sel || sel.rangeCount === 0 || !sel.isCollapsed) {
+      setSuggest(null)
+      return
+    }
+    const range = sel.getRangeAt(0)
+    const node = range.startContainer
+    if (node.nodeType !== Node.TEXT_NODE || !host.contains(node)) {
+      setSuggest(null)
+      return
+    }
+    // 代码块里不补全
+    const el = (node as Text).parentElement
+    if (el?.closest('code, .vditor-wysiwyg__pre, [data-type=code-block]')) {
+      setSuggest(null)
+      return
+    }
+    const upto = (node.nodeValue ?? '').slice(0, range.startOffset)
+    const m = upto.match(WIKI_OPEN_RE)
+    if (!m) {
+      setSuggest(null)
+      return
+    }
+    const probe = range.cloneRange()
+    probe.collapse(true)
+    let rect = probe.getBoundingClientRect()
+    if (!rect || (rect.x === 0 && rect.y === 0)) rect = el?.getBoundingClientRect() ?? rect
+    const rootRect = root.getBoundingClientRect()
+    const x = clampNum(rect.left - rootRect.left, 4, Math.max(4, rootRect.width - 268))
+    const y = rect.bottom - rootRect.top + 4
+    setSuggest((prev) => {
+      if (prev && prev.query === m[1] && Math.abs(prev.x - x) < 2 && Math.abs(prev.y - y) < 2) return prev
+      if (!prev || prev.query !== m[1]) setSuggestIndex(0)
+      return { query: m[1], x, y }
+    })
+  }
+
+  /** 采纳候选：把光标前的 `[[查询词` 整段换成 `[[标题]]`，再让 Vditor 感知这次 DOM 改动 */
+  const pickSuggestion = (title: string) => {
+    const host = hostRef.current
+    const sel = window.getSelection()
+    setSuggest(null)
+    if (!host || !sel || sel.rangeCount === 0) return
+    const range = sel.getRangeAt(0)
+    const node = range.startContainer
+    if (node.nodeType !== Node.TEXT_NODE || !host.contains(node)) return
+    const upto = (node.nodeValue ?? '').slice(0, range.startOffset)
+    const m = upto.match(WIKI_OPEN_RE)
+    if (!m) return
+    const r = document.createRange()
+    r.setStart(node, range.startOffset - m[0].length)
+    r.setEnd(node, range.startOffset)
+    r.deleteContents()
+    const tn = document.createTextNode(`[[${title}]]`)
+    r.insertNode(tn)
+    const after = document.createRange()
+    after.setStartAfter(tn)
+    after.collapse(true)
+    sel.removeAllRanges()
+    sel.addRange(after)
+    // 通知 Vditor 重新序列化（它监听的是 contenteditable 上的 input 事件）
+    host.querySelector('.vditor-reset')?.dispatchEvent(new Event('input', { bubbles: true }))
+  }
 
   const decorate = () => {
     const root = hostRef.current?.querySelector('.vditor-wysiwyg')
@@ -269,6 +352,59 @@ export default function WysiwygEditor({ value, onChange, onOpenNote, onCreateNot
     return () => style.remove()
   }, [theme, customCss])
 
+  // [[ 补全：输入/点击/按键后重查光标；滚动时直接收起（位置会漂）
+  useEffect(() => {
+    if (!ready) return
+    const el = hostRef.current
+    if (!el) return
+    let scheduled = false
+    const onEditEvent = () => {
+      if (scheduled) return
+      scheduled = true
+      requestAnimationFrame(() => {
+        scheduled = false
+        refreshSuggest()
+      })
+    }
+    const onScroll = () => setSuggest(null)
+    el.addEventListener('input', onEditEvent)
+    el.addEventListener('keyup', onEditEvent)
+    el.addEventListener('click', onEditEvent)
+    window.addEventListener('scroll', onScroll, true)
+    return () => {
+      el.removeEventListener('input', onEditEvent)
+      el.removeEventListener('keyup', onEditEvent)
+      el.removeEventListener('click', onEditEvent)
+      window.removeEventListener('scroll', onScroll, true)
+    }
+    // refreshSuggest 只读 ref/state setter，闭包稳定
+  }, [ready])
+
+  // 下拉展开时的键盘导航：↑↓ 选、Enter/Tab 采纳、Esc 收起（捕获阶段拦截，别让 Vditor 当成换行）
+  useEffect(() => {
+    if (!ready || !suggest || suggestCandidates.length === 0) return
+    const el = hostRef.current
+    if (!el) return
+    const onKeydown = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault()
+        e.stopPropagation()
+        setSuggestIndex((i) => (i + (e.key === 'ArrowDown' ? 1 : suggestCandidates.length - 1)) % suggestCandidates.length)
+      } else if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        e.stopPropagation()
+        pickSuggestion((suggestCandidates[suggestIndex] ?? suggestCandidates[0]).title)
+      } else if (e.key === 'Escape') {
+        e.preventDefault()
+        e.stopPropagation()
+        setSuggest(null)
+      }
+    }
+    el.addEventListener('keydown', onKeydown, true)
+    return () => el.removeEventListener('keydown', onKeydown, true)
+    // pickSuggestion 只读 ref，闭包稳定
+  }, [ready, suggest, suggestCandidates, suggestIndex])
+
   // 双链点击 = 应用内跳转（与经典预览一致）：已有笔记直接打开（含自身，等于无操作），否则按标题新建
   const handleHostClick = (e: React.MouseEvent) => {
     const span = (e.target as HTMLElement).closest?.('.kg-wiki') as HTMLElement | null
@@ -283,8 +419,36 @@ export default function WysiwygEditor({ value, onChange, onOpenNote, onCreateNot
   }
 
   return (
-    <div className={flow ? 'flex flex-col' : 'flex min-h-0 flex-1 flex-col'} data-testid="wysiwyg-editor">
+    <div ref={rootRef} className={flow ? 'relative flex flex-col' : 'relative flex min-h-0 flex-1 flex-col'} data-testid="wysiwyg-editor">
       <div ref={hostRef} className={flow ? 'kg-vditor kg-vditor-flow' : 'kg-vditor min-h-0 flex-1'} onClick={handleHostClick} />
+      {suggest && suggestCandidates.length > 0 && (
+        <div
+          className="absolute z-20 max-h-60 w-64 overflow-y-auto rounded-md border bg-popover shadow-md"
+          style={{ left: suggest.x, top: suggest.y }}
+          role="listbox"
+          aria-label="匹配笔记"
+        >
+          {suggestCandidates.map((c, i) => (
+            <button
+              key={c.id}
+              type="button"
+              role="option"
+              aria-selected={i === suggestIndex}
+              // mousedown 拦住默认行为：保住编辑器里的光标/选区，pickSuggestion 才能找到 `[[查询词`
+              onMouseDown={(e) => {
+                e.preventDefault()
+                pickSuggestion(c.title)
+              }}
+              onMouseEnter={() => setSuggestIndex(i)}
+              className={`block w-full truncate px-3 py-1.5 text-left text-sm hover:bg-accent ${
+                i === suggestIndex ? 'bg-accent' : ''
+              }`}
+            >
+              {c.title}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

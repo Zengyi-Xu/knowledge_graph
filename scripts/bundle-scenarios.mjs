@@ -282,9 +282,9 @@ try {
         await delay(1200)
         return true
       },
-      allow: ['home', 'preview', 'graph', 'literature', 'pdf'],
-      forbid: ['编辑器 Vditor', 'citation-js + CSL 样式'],
-      require: ['PdfViewer + pdf.worker'],
+      allow: ['home', 'preview', 'graph', 'literature', 'pdf', 'edit'],
+      forbid: ['citation-js + CSL 样式'],
+      require: ['PdfViewer + pdf.worker', '编辑器 Vditor'],
     },
   ]
 

@@ -1,15 +1,14 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MouseEvent as ReactMouseEvent } from 'react'
 import { toast } from 'sonner'
-import { BookOpen, ExternalLink, Eye, FileText, Link2, PanelRightClose, PanelRightOpen, Pencil, X } from 'lucide-react'
+import { BookOpen, ExternalLink, FileText, Link2, PanelRightClose, PanelRightOpen, X } from 'lucide-react'
 import { Group, Panel, Separator } from 'react-resizable-panels'
 import type { Note } from '@/types/note'
 import { uid } from '@/types/note'
 import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { PreviewContent } from '@/components/PreviewContent'
 import { useIsMobile } from '@/hooks/use-mobile'
+import { readSetting } from '@/lib/env'
+import type { PreviewTheme } from '@/lib/previewTheme'
 import type { NewAnnotation } from '@/components/PdfViewer'
 import {
   PDF_ANNOTATIONS_FORMAT,
@@ -22,6 +21,26 @@ import { annotationStoreId, loadPdfSourceCached, openPdfSourceExternally, prefer
 import { appendPdfReference, pdfReferenceIdFromHref, referencedAnnotationIds } from '@/lib/pdfReference'
 
 const PdfViewer = lazy(() => import('./PdfViewer').then((module) => ({ default: module.PdfViewer })))
+// 笔记栏与主界面「所见即所得」共用同一个编辑器（Vditor 按需加载，只在打开阅读工作台时拉取）
+const WysiwygEditor = lazy(() => import('./WysiwygEditor'))
+
+const THEME_KEY = 'preview-theme-v1'
+const CUSTOM_THEME_KEY = 'custom-preview-theme-v1'
+
+function savedTheme(): PreviewTheme {
+  const value = readSetting(THEME_KEY)
+  return value === 'paper' || value === 'night' || value === 'vue-light' || value === 'vue-night' || value === 'custom'
+    ? value
+    : 'default'
+}
+
+function savedCustomCss(): string {
+  try {
+    return (JSON.parse(readSetting(CUSTOM_THEME_KEY) ?? 'null') as { css?: string } | null)?.css ?? ''
+  } catch {
+    return ''
+  }
+}
 
 interface Props {
   note: Note
@@ -232,20 +251,21 @@ export function PdfReadingWorkspace({ note, notes, onChange, onClose, onOpenNote
                         ))}
                       </div>
                     )}
-                    <Tabs defaultValue="edit" className="flex min-h-0 flex-1 flex-col">
-                      <div className="border-b px-3 py-1.5">
-                        <TabsList className="h-8">
-                          <TabsTrigger value="edit" className="gap-1 text-xs"><Pencil className="h-3 w-3" />编辑</TabsTrigger>
-                          <TabsTrigger value="preview" className="gap-1 text-xs"><Eye className="h-3 w-3" />预览</TabsTrigger>
-                        </TabsList>
-                      </div>
-                      <TabsContent value="edit" className="mt-0 min-h-0 flex-1">
-                        <Textarea value={note.content} onChange={(event) => onChange({ content: event.target.value })} className="h-full resize-none rounded-none border-0 p-4 font-mono text-sm focus-visible:ring-0" placeholder="在这里记录阅读笔记。选中左侧 PDF 文字后，点击“链接到笔记”。" />
-                      </TabsContent>
-                      <TabsContent value="preview" className="mt-0 min-h-0 flex-1 overflow-hidden">
-                        <PreviewContent content={note.content} notes={notes} onOpenNote={onOpenNote} onCreateNote={onCreateNote} theme="default" customCss="" />
-                      </TabsContent>
-                    </Tabs>
+                    <div className="flex min-h-0 flex-1 flex-col">
+                      <Suspense fallback={<div className="p-4 text-sm text-muted-foreground" role="status">正在加载所见即所得编辑器…</div>}>
+                        <WysiwygEditor
+                          key={note.id}
+                          value={note.content}
+                          noteId={note.id}
+                          notes={notes}
+                          onChange={(content) => onChange({ content })}
+                          onOpenNote={onOpenNote}
+                          onCreateNote={onCreateNote}
+                          theme={savedTheme()}
+                          customCss={savedCustomCss()}
+                        />
+                      </Suspense>
+                    </div>
                   </div>
                 </Panel>
               </>

@@ -23,7 +23,9 @@ export default defineConfig([
     'public/vditor/**',
 
     // 本地临时目录 / 测试脚手架产物
+    '.tmp-*',
     '.tmp-*/**',
+    'old_temp/**',
   ]),
   {
     files: ['**/*.{ts,tsx}'],

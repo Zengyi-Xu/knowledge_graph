@@ -187,7 +187,47 @@ export default function App() {
     setFilters((f) => ({ ...f, [key]: next }))
   }
 
+  // ---- 返回上一篇笔记：记住「从哪篇跳过来」的栈（双链/图谱/搜索跳走之后能一键回去） ----
+  const backStackRef = useRef<string[]>([])
+  const [canBack, setCanBack] = useState(false)
+  /** 打开另一篇笔记前，把当前这篇压栈（同一篇重复打开不压） */
+  const pushBack = (fromId: string | null, toId: string) => {
+    if (!fromId || fromId === toId) return
+    const stack = backStackRef.current
+    stack.push(fromId)
+    if (stack.length > 50) stack.shift()
+    setCanBack(true)
+  }
+  const goBack = useCallback(() => {
+    const stack = backStackRef.current
+    // 栈里的笔记可能已被删除：一路弹出到还存在的为止
+    while (stack.length > 0) {
+      const id = stack.pop()!
+      if (id !== activeId && notesRef.current.some((n) => n.id === id)) {
+        setActiveId(id)
+        if (view === 'both') setFocusId(id)
+        setMobilePane('detail')
+        setView((v) => (v === 'both' ? 'both' : 'notes'))
+        break
+      }
+    }
+    setCanBack(stack.length > 0)
+  }, [activeId, view])
+  // Alt+← 快捷返回（与浏览器习惯一致）
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.key === 'ArrowLeft') {
+        if (backStackRef.current.length === 0) return
+        e.preventDefault()
+        goBack()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [goBack])
+
   const openNote = (id: string) => {
+    pushBack(activeId, id)
     setActiveId(id)
     // 并列视图：任何入口打开的笔记都同步为图谱焦点（图谱节点单击在并列里也走这里）
     if (view === 'both') setFocusId(id)
@@ -211,6 +251,7 @@ export default function App() {
       return null
     }
     const n = api.createNote(title ? { title, content: '' } : {})
+    pushBack(activeId, n.id)
     setActiveId(n.id)
     setMobilePane('detail')
     setView((v) => (v === 'both' ? 'both' : 'notes'))
@@ -691,6 +732,8 @@ export default function App() {
       onOpenNote={openNote}
       onCreateNote={(t) => createNote(t)}
       onReadPdf={openPdfReader}
+      onBack={goBack}
+      canBack={canBack}
       onAiUpdate={
         n.type === 'summary'
           ? () => {
@@ -770,7 +813,10 @@ export default function App() {
       // 并列视图：图谱和正文同屏，单击节点就直接打开（右侧换正文、左侧列表高亮）
       openOnClick={view === 'both'}
       // 图谱单栏：单击只选中，但要同步侧栏高亮 —— 点哪篇，列表里就落在哪篇
-      onSelectNote={(id) => setActiveId(id)}
+      onSelectNote={(id) => {
+        pushBack(activeId, id)
+        setActiveId(id)
+      }}
       filters={filters}
       focusId={focusId}
       onFocusChange={setFocusId}

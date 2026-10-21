@@ -37,7 +37,7 @@
   因为无头窗口最小宽度约 500px）。`--no-build` 复用 dist、`--only 360,768` 挑宽度、`--shots[=状态]` 出截图；
   能力检测与降级口径见 [docs/MOBILE_PHASE1_REPORT.md](docs/MOBILE_PHASE1_REPORT.md)。
 - 批量 Zotero 同步：`npm run zotero:sync -- --vault "<v>" --db "<zotero.sqlite>"`（dry-run，不在 vault 建任何目录/文件）；
-  `--apply` 才写盘（先整库备份 `.backups/zotero-import-<时间戳>/`）；`--report <file>` 指定报告；`--limit <n>` 小批量试跑；`--allow-missing` 放行索引里读不到的文件；
+  `--apply` 才写盘（先整库备份成**单个压缩包** `.backups/zotero-import-<时间戳>.zip`，report.json 也打进包里）；`--report <file>` 指定报告；`--limit <n>` 小批量试跑；`--allow-missing` 放行索引里读不到的文件；
   **`--prune` 额外做减法**：删掉笔记里已不存在于 Zotero 的分类路径与由旧分类派生的「方向:」标签（默认不加 = 只做并集）。
 - 本地 PDF 认回：`npm run pdf:link -- --vault "<v>"`（dry-run）/ `--apply`（先备份）——按「Zotero 附件文件名 → 标题（清洗后）」在 Literature/Archive/Inform/Zotero storage 等目录搜 PDF，命中的绝对路径写进笔记的 `literature.localPdf`（只记路径，不复制不移动文件；同一份 PDF 只归一篇）。搜索目录用 `--search` 追加（传了 `--search` 就用它替换默认目录），`--loose` 放宽到 0.70。
   注意：`--db` 不指定时它默认找 `%APPDATA%\Zotero\Zotero\zotero.sqlite`（profile 目录，本机并不存在这个库）——**本机要显式传 `--db "C:\Users\Administrator\Zotero\zotero.sqlite"`**。
@@ -57,6 +57,9 @@
 2. 「未分类」是动态状态，不落盘：`collections` 不写「未分类」，标签里也不写分类 —— **分类只存在 `collections`（完整路径的树）**；界面用 `realCollectionsOf()`（`src/lib/zoteroMeta.ts`）判断。旧版把树压平成 `方向:<一级分类>` 标签（会与 collections 漂移：分类清空后标签还留着，实测 454 篇），已废弃 —— 同步/去重一律清掉（`isDirectionTag`），AI 面板的「方向」选项改从 `collections` 首段取。
 3. 写盘安全：dry-run 不在 vault 创建任何文件/目录；`--apply` 先备份；`planVaultWrite` 的删除数必须为 0；未纳管 md 一律不碰；
    索引里登记但磁盘读不到的文件（同步盘离线）→ **直接中止**，绝不静默丢索引。
+   **备份统一是同名压缩包**（2026-10-21 改）：`.backups/<动作>-<时间戳>.zip` 单文件（vault 在同步盘上，几万个 md 逐文件上传极慢），
+   包内保留原相对目录结构；写入走 `scripts/lib/backup-zip.cjs`（纯 Node 写/读 zip，先写临时文件再 rename，无第三方依赖），
+   恢复时用系统解压工具或 `readBackupZip()` 解出即可。
 4. 去重只做并集、不丢数据：被合并项正文不在保留项里则追加到末尾（带来源标注）；collections/tags/attachments/zoteroKeys 全并集；PDF 计数取组内之和；可疑组（标题仅近似相等）默认跳过。
 5. 打开本地文件不走 shell：Windows `explorer.exe <file>`（`scripts/local-web.mjs` 的 `openerCommand`），文件名含 `&`、括号不会被解释；
    `resolveZoteroPdf(dbPath, key, extraKeys)` 支持多 key 回退（去重后的文献可选到任一 key 下的 PDF）。
@@ -186,6 +189,16 @@
    没有挂载点（单栏「笔记」视图、手机端、自测里的 SSR）时 `slot` 为 null，面板就地分栏渲染。
 12. **PDF 高亮必须 `mix-blend-multiply`**（`PdfViewer.tsx` 的标注色块）：色块叠在 canvas 之上，
    半透明色块会把正文冲淡成灰（看着像没渲染清楚）；multiply 才是「荧光笔垫在文字下面」：白底染色、黑字仍是黑字。
+   **同一条高亮要画成一条 SVG path 并集**（2026-10-21 改）：相邻文本行的 ±1px 补偿重叠若逐个矩形画，
+   multiply 会在接缝处叠出深色横带；同一条 `<path>` 里 nonzero 填充只着色一次。搜索命中仍是逐个 div 描边，不走并集。
+   **阅读器浏览模式（2026-10-21）**：连续滚动 / 单页 / 双页对开（可切换 1+2 起 或 封面单页后 2+3 起；
+   本地记忆 `pdf-view-mode-v1` / `pdf-double-parity-v1`）。每页一个 `PdfPageView`（memo），连续模式靠
+   IntersectionObserver（rootMargin 150%）只渲染视口附近的页、其余画占位框（占位纵横比来自后台顺序预取的
+   scale=1 尺寸 `dimsRef`）；最可见的页即「当前页」。键盘 PageUp/PageDown/方向键/Home/End 翻页或滚动
+   （window 级监听，`input/textarea/contenteditable` 里不抢按键——笔记栏是 contenteditable）；
+   单页/双页下滚轮滚到页边上/下沿后继续滚 = 翻页（280ms 节流，Ctrl+滚轮留给浏览器缩放）。
+   笔记栏就是主界面的 `WysiwygEditor`（同一个 chunk，懒加载；pdf 场景的预算/测试已放行 Vditor）。
+   回归：`.tmp-pdf-viewer/check.mjs`（合成 5 页 PDF，真 Chrome 点遍三种模式 + 键盘/滚轮 + 编辑器按键隔离）。
 13. **单栏「笔记」视图是流式滚动（flow，2026-10-16 加）**：整篇笔记（标题/标签/两条工具条/正文）一起随外层容器滚，
    正文不再自己滚 —— 只让正文滚时，744px 高的窗口里正文只有 343px，滚下去之后是整屏 744px。
    - 只有桌面端传 `NoteEditor flow`：单栏「笔记」与**并列**视图的笔记列都是 flow（并列那张卡片自己就是滚动容器：
@@ -294,8 +307,12 @@
 - 不要整页读无障碍树或全量 DOM：用「过滤 + 小 limit」的元素快照、按 `maxChars` 截断的文本快照、`region` 裁剪图，只读需要的那一小块。
 - 验证顺序：先 `npx tsc -b`（秒级）→ 跑目标测试（`test:zotero-e2e` 等）→ 最后才 `npm run build`；同一结果不要重复构建。
 - 长任务先建 TodoList；真实数据操作前先备份并在副本上验证；失败先看脚本输出，不要盲目重跑。
-- **当前唯一推荐发行路线是免安装网页包**：改完 `src/` 后运行 `npm run build`，发布时再运行 `npm run release:web`。
-  不再生成或刷新 Electron EXE/NSIS 安装器。旧桌面 EXE 不认识新增字段，禁止再用于真实 vault；`electron/**` 仅作为冻结兼容层和开发/测试依赖保留。
+- **发行路线（2026-10-21 起：三端桌面安装包 + Windows 免安装网页包）**：打 `v*` tag 后由 GitHub Actions
+  三端并行构建并发布到同名 Release——Windows NSIS(x64)、macOS dmg/zip(arm64+x64)、Linux AppImage/deb(arm64 树莓派)；
+  配置在 `package.json` 的 `build` 与 `.github/workflows/release.yml`，Release 正文取根目录 `release-notes.md`。
+  Windows x64 免安装网页包仍可出（`npm run build` + `npm run release:web`）。
+  只有 v1.2.6+ 的构建认识新增 front matter 字段；`release-archive/` 里的旧桌面 EXE 禁止再用于真实 vault；
+  `electron/**` 作为桌面壳与冻结兼容层保留。
 - **`.cmd` 启动器必须保持 CRLF**：`启动网页端.cmd` 与 `build/web-portable/启动知识图谱.cmd` 都是 `chcp 65001` + UTF-8 中文；
   换成 LF 换行后 `cmd.exe` 会截断命令（实测把 `echo` 读成 `ho`、`node` 读成 `ode`，并误报「请先安装 Node.js」而无法启动）。
   用工具改写这两个文件后要确认换行没被改成 LF（`file x.cmd` 应显示 `with CRLF line terminators`）。

@@ -15,6 +15,7 @@ import { createRequire } from 'node:module'
 
 const require = createRequire(import.meta.url)
 const Database = require('better-sqlite3')
+const { readBackupZip } = require('./lib/backup-zip.cjs')
 const bundle = path.resolve('.tmp-zotero/zotero-vault-sync.cjs')
 const dedupeBundle = path.resolve('.tmp-vault-test/dedupe.cjs')
 assert.ok(fs.existsSync(bundle), '先运行 npm run zotero:build')
@@ -151,20 +152,20 @@ const meta = JSON.stringify({
 await fsp.writeFile(path.join(vault, 'meta.json'), meta)
 
 const runScript = (...extra) => {
-  const out = execFileSync('node', [bundle, '--vault', vault, '--db', dbPath, ...extra], { encoding: 'utf8' })
+  const out = execFileSync(process.execPath, [bundle, '--vault', vault, '--db', dbPath, ...extra], { encoding: 'utf8' })
   console.log(out.split('\n').filter((l) => l.trim()).slice(0, 6).map((l) => '    ' + l).join('\n'))
   return out
 }
 const runScriptExpectFail = (args) => {
   try {
-    execFileSync('node', [bundle, ...args], { encoding: 'utf8', stdio: 'pipe' })
+    execFileSync(process.execPath, [bundle, ...args], { encoding: 'utf8', stdio: 'pipe' })
     return ''
   } catch (error) {
     return String(error.stdout) + String(error.stderr)
   }
 }
 const runDedupe = (...extra) => {
-  const out = execFileSync('node', [dedupeBundle, '--vault', vault, ...extra], { encoding: 'utf8' })
+  const out = execFileSync(process.execPath, [dedupeBundle, '--vault', vault, ...extra], { encoding: 'utf8' })
   console.log(out.split('\n').filter((l) => l.trim()).slice(0, 6).map((l) => '    ' + l).join('\n'))
   return out
 }
@@ -207,13 +208,14 @@ try {
   check('新文献的 id 稳定为 zotero-<key>', litIds.includes('zotero-loosezzz') && litIds.includes('lit-existing'))
   check('普通笔记与未纳管 md 未被改动', fs.readFileSync(path.join(vault, 'Inbox', '普通笔记.md'), 'utf8') === plainNote && fs.readFileSync(path.join(vault, '学习', '未纳管.md'), 'utf8') === '未纳管的文件，脚本不能动它\n')
   check('apply 输出声明 0 删除', applyOut.includes('删除 0 个'))
-  const backupDirs = (await fsp.readdir(path.join(vault, '.backups'))).filter((d) => d.startsWith('zotero-import-'))
-  check('apply 建立带时间戳的备份目录', backupDirs.length === 1)
-  const backup = path.join(vault, '.backups', backupDirs[0])
-  check('备份里含原始 meta.json 与全部原 md', fs.readFileSync(path.join(backup, 'meta.json'), 'utf8') === meta &&
-    fs.readFileSync(path.join(backup, '文献', 'A classified paper on modulators.md'), 'utf8') === existingLit &&
-    fs.existsSync(path.join(backup, '学习', '未纳管.md')))
-  check('备份里带 report.json', fs.existsSync(path.join(backup, 'report.json')))
+  const backupZips = (await fsp.readdir(path.join(vault, '.backups'))).filter((d) => d.startsWith('zotero-import-') && d.endsWith('.zip'))
+  check('apply 建立带时间戳的备份压缩包（单个 zip）', backupZips.length === 1)
+  const backup = readBackupZip(path.join(vault, '.backups', backupZips[0]))
+  const backupText = (name) => backup.find((e) => e.name === name)?.data.toString('utf8')
+  check('备份里含原始 meta.json 与全部原 md', backupText('meta.json') === meta &&
+    backupText('文献/A classified paper on modulators.md') === existingLit &&
+    backup.some((e) => e.name === '学习/未纳管.md'))
+  check('备份里带 report.json', backup.some((e) => e.name === 'report.json'))
 
   // ---- 3) 去重：合并同 DOI 的两篇笔记，保留全部 key 与正文 ----
   const dedupeReport = path.join(root, 'reports', 'dedupe.json')
@@ -227,8 +229,9 @@ try {
   check('保留项记下全部 zoteroKey（去重后再同步不会重新长出重复文献）', Boolean(mergedFile))
   check('被合并项的正文追加保留，不丢', merged.includes('重复条目里的正文（去重合并后必须还能找到）') && merged.includes('用户自己写的正文，不能丢'))
   check('被合并项的附件与标签取并集', merged.includes('"att-keep"') && merged.includes('我的标签'))
-  const dedupeBackup = (await fsp.readdir(path.join(vault, '.backups'))).filter((d) => d.startsWith('dedupe-'))
-  check('去重前备份了会改动的文件', dedupeBackup.length === 1 && fs.existsSync(path.join(vault, '.backups', dedupeBackup[0], '文献')) && fs.readdirSync(path.join(vault, '.backups', dedupeBackup[0], '文献')).length === 2)
+  const dedupeBackup = (await fsp.readdir(path.join(vault, '.backups'))).filter((d) => d.startsWith('dedupe-') && d.endsWith('.zip'))
+  const dedupeEntries = dedupeBackup.length === 1 ? readBackupZip(path.join(vault, '.backups', dedupeBackup[0])) : []
+  check('去重前备份了会改动的文件', dedupeBackup.length === 1 && dedupeEntries.filter((e) => e.name.startsWith('文献/') && e.name.endsWith('.md')).length === 2)
   const metaAfterDedupe = JSON.parse(await fsp.readFile(path.join(vault, 'meta.json'), 'utf8'))
   check('meta 里被合并的重复条目已移除、保留项留下', metaAfterDedupe.notes.length === 3 &&
     !metaAfterDedupe.notes.some((n) => n.id === 'lit-existing') && metaAfterDedupe.notes.some((n) => n.id === 'lit-dup'))
@@ -244,7 +247,7 @@ try {
   const againOut = runScript('--apply')
   check('重复执行仍不新增文件', litFiles().length === 2)
   check('重复执行：新建 0、更新 0、写盘 0、删除 0', againOut.includes('新建：0') && againOut.includes('更新：0') && againOut.includes('写盘：0 个 md') && againOut.includes('删除：0'))
-  const dirsAfter = (await fsp.readdir(path.join(vault, '.backups'))).filter((d) => d.startsWith('zotero-import-'))
+  const dirsAfter = (await fsp.readdir(path.join(vault, '.backups'))).filter((d) => d.startsWith('zotero-import-') && d.endsWith('.zip'))
   check('重复 apply 仍各自备份（不影响幂等判定）', dirsAfter.length === 3)
 
   // ---- 6) 参数与边界 ----
