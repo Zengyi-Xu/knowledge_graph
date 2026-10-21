@@ -1,6 +1,8 @@
 # 知识图谱
 
-当前 v1.2.1 提供附带 Node 的 Windows x64 免安装网页包：解压后双击 `启动知识图谱.wsf`（无窗口启动），无需安装 Node、npm 或 Electron。
+当前 v1.2.6 同时提供 Windows / macOS / Linux 三端桌面安装包，以及附带 Node 的 Windows x64 免安装网页包。
+桌面版在 [最新 Release](https://github.com/Zengyi-Xu/knowledge_graph/releases/latest) 下载；网页包解压后双击
+`启动知识图谱.wsf`（无窗口启动），无需安装 Node、npm 或 Electron。
 详见 [免安装网页使用说明](docs/WEB_PORTABLE.md)；完整功能用法见 [使用手册](docs/USAGE.md)。
 开发目录网页端仍可双击 `启动网页端.wsf`，
 或按 [本地网页端说明](docs/LOCAL_WEB.md) 启动。
@@ -8,9 +10,10 @@
 本地优先的 Markdown 笔记 + 知识图谱应用。笔记之间用 `[[双链]]` 关联，在图谱视图里
 把「谁做过什么、一个问题牵涉哪些工作」看成一整张网。
 
-推荐发行方式是 Windows x64 **免安装本地网页包**。Electron 桥仍保留给开发、自动化测试和旧接口兼容，
-但不再生成或发布 EXE/安装器。笔记以「每篇一个 `.md` + 一个 `meta.json` 索引」存在你自己选的目录里，
-可以直接用 Obsidian 打开。
+发行方式有两种：三端**桌面安装包**（Windows NSIS / macOS dmg / Linux deb+AppImage，打 tag 后由
+GitHub Actions 在对应系统上构建）和 Windows x64 **免安装本地网页包**。只有 v1.2.6 起的构建认识新增的
+front matter 字段；`release-archive/` 里的旧桌面 EXE 不要用于真实 vault。笔记以「每篇一个 `.md` +
+一个 `meta.json` 索引」存在你自己选的目录里，可以直接用 Obsidian 打开。
 
 ## 功能
 
@@ -37,9 +40,17 @@
 
 在 [最新 Release](https://github.com/Zengyi-Xu/knowledge_graph/releases/latest) 页面下载：
 
-| 文件 | 用途 |
+| 文件 | 平台 / 用途 |
 | --- | --- |
-| `knowledge-graph-web-<版本>-windows-x64.zip` | 唯一推荐：附带 Node，解压后双击启动网页 |
+| `KnowledgeGraph-<版本>-win-x64.exe` | Windows x64 安装包（NSIS，可直接覆盖升级） |
+| `KnowledgeGraph-<版本>-mac-arm64.dmg` | macOS Apple 芯片（M 系列） |
+| `KnowledgeGraph-<版本>-mac-x64.dmg` | macOS Intel |
+| `KnowledgeGraph-<版本>-linux-arm64.deb` | Linux arm64（树莓派 64 位） |
+| `KnowledgeGraph-<版本>-linux-arm64.AppImage` | Linux arm64 免安装 |
+| `knowledge-graph-web-<版本>-windows-x64.zip` | Windows x64 免安装网页包（附带 Node） |
+
+macOS 已装旧版时：退出旧版 → 打开新 dmg → 把 `KnowledgeGraph` 拖进「应用程序」→ 选「替换」。
+笔记库与设置都在 App 之外，替换不会动数据；签名相关提示的处理见 [docs/RELEASE.md](docs/RELEASE.md)。
 
 发布页同时提供 SHA-256；下载后可按 [免安装网页使用说明](docs/WEB_PORTABLE.md) 校验。
 免安装不等于笔记跟着程序走：笔记仍在你选择的 vault 目录里。
@@ -60,14 +71,15 @@
 
 这是有意的设计，避免开发时误改正式数据：
 
-| | 开发版 | 发布版（本地网页包） |
+| | 开发版 | 发布版（桌面安装包 / 网页包） |
 | --- | --- | --- |
-| 谁在用 | `npm run dev`（浏览器）；必要时 `npm run desktop:dev` 验证兼容层 | 解压 ZIP 后双击 `启动知识图谱.wsf`（无窗口；`启动知识图谱.cmd` 是窗口版） |
-| 前端产物 | Vite 开发服务；兼容测试使用 `dist-dev/` | `dist/` + 本地服务 + 随包 Node |
+| 谁在用 | `npm run dev`（浏览器）；必要时 `npm run desktop:dev` 验证兼容层 | 双击安装后的 App；或解压 ZIP 后双击 `启动知识图谱.wsf`（无窗口；`启动知识图谱.cmd` 是窗口版） |
+| 前端产物 | Vite 开发服务；兼容测试使用 `dist-dev/` | 安装包内置 `dist/`；网页包为 `dist/` + 本地服务 + 随包 Node |
 | 数据 | 使用专门的测试 vault | 用户明确选择的 vault |
 | localStorage 键 | `kg-dev-*` | `kg-*` |
 
-开发时不要选择真实 vault；旧桌面 EXE 已退出发行路线，也不应再用于真实数据。细节见
+开发时不要选择真实 vault；`release-archive/` 里的旧桌面 EXE 不认识新字段，不应再用于真实数据，
+v1.2.6 起由 CI 构建的安装包可以。细节见
 [docs/ENVIRONMENTS.md](docs/ENVIRONMENTS.md)。
 
 ## 打包发布

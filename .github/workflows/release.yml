@@ -1,6 +1,9 @@
 name: Release
 
-# 打 tag（v*）即触发：在 macOS runner 上构建桌面版，并把 dmg/zip 上传到同名 GitHub Release。
+# 打 tag（v*）即触发：三端并行构建桌面版，并把产物上传到同名 GitHub Release。
+# - macOS：dmg/zip（arm64 + x64）
+# - Windows：NSIS 安装包（x64）
+# - Linux：AppImage/deb（arm64，树莓派 64 位专用；原生模块在 arm64 runner 上原生编译）
 # 也可在 Actions 页面手动触发（用 package.json 里的版本号建 Release）。
 on:
   push:
@@ -12,6 +15,29 @@ permissions:
   contents: write
 
 jobs:
+  release-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build renderer
+        run: npm run build
+
+      - name: Package Windows app and publish GitHub Release
+        run: npx electron-builder --win --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   release-mac:
     runs-on: macos-latest
     steps:

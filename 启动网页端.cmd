@@ -14,7 +14,7 @@ if not exist "dist\index.html" (
     exit /b 1
   )
 )
-echo 知识图谱 v1.2.2 最新网页端
+echo 知识图谱 v1.2.6 最新网页端
 echo 双击 启动网页端.wsf 启动时不会出现这个窗口；本窗口模式下关闭窗口即停止服务，无窗口模式用 停止网页端.wsf 停止。
 node scripts\start-local-web.mjs %*
 set "kgExit=%errorlevel%"

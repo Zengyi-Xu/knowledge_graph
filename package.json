@@ -1,7 +1,7 @@
 {
   "name": "knowledge-graph",
   "private": true,
-  "version": "1.2.5",
+  "version": "1.2.6",
   "description": "本地优先的知识图谱笔记应用",
   "author": {
     "name": "Zengyi Xu",
@@ -60,7 +60,8 @@
     "pdf:build": "esbuild scripts/link-local-pdfs.ts --bundle --platform=node --format=cjs --target=node20 --alias:@=./src --outfile=.tmp-vault-test/link-pdfs.cjs",
     "pdf:link": "npm run pdf:build && node .tmp-vault-test/link-pdfs.cjs",
     "tags:strip-direction": "esbuild scripts/strip-direction-tags.ts --bundle --platform=node --format=cjs --target=node20 --alias:@=./src --outfile=.tmp-vault-test/strip-direction-tags.cjs && node .tmp-vault-test/strip-direction-tags.cjs",
-    "dist:mac": "npm run build && electron-builder --mac"
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:win": "npm run build && electron-builder --win"
   },
   "build": {
     "appId": "com.zengyixu.knowledgegraph",
@@ -79,6 +80,23 @@
         "releaseType": "release"
       }
     ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "${productName}-${version}-win-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "知识图谱"
+    },
     "mac": {
       "category": "public.app-category.productivity",
       "icon": "build/icon.png",
