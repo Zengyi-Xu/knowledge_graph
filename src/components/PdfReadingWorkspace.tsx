@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MouseEvent as ReactMouseEvent } from 'react'
 import { toast } from 'sonner'
-import { BookOpen, ExternalLink, FileText, Link2, PanelRightClose, PanelRightOpen, X } from 'lucide-react'
+import { BookOpen, ExternalLink, FileText, Link2, Loader2, PanelRightClose, PanelRightOpen, RefreshCw, Upload, X } from 'lucide-react'
 import { Group, Panel, Separator } from 'react-resizable-panels'
 import type { Note } from '@/types/note'
 import { uid } from '@/types/note'
@@ -19,6 +19,19 @@ import {
 } from '@/lib/attachments'
 import { annotationStoreId, loadPdfSourceCached, openPdfSourceExternally, preferredPdfSource, type LoadedPdf } from '@/lib/pdfSource'
 import { appendPdfReference, pdfReferenceIdFromHref, referencedAnnotationIds } from '@/lib/pdfReference'
+import { openZoteroItem, useZoteroMarkup, zoteroKeysOf } from '@/hooks/useZoteroMarkup'
+import { useZoteroWriteback, type PushedAnnotation } from '@/hooks/useZoteroWriteback'
+import { applyZoteroWriteback } from '@/lib/zoteroWriteback'
+import { ZoteroNotesPanel } from '@/components/ZoteroNotesPanel'
+import {
+  appendZoteroNoteMarkdown,
+  hasExportedZoteroNote,
+  mapZoteroAnnotation,
+  mergeViewerAnnotations,
+  zoteroSyncSummary,
+  type ZoteroAnnotationRecord,
+  type ZoteroNoteRecord,
+} from '@/lib/zoteroMarkup'
 
 const PdfViewer = lazy(() => import('./PdfViewer').then((module) => ({ default: module.PdfViewer })))
 // 笔记栏与主界面「所见即所得」共用同一个编辑器（Vditor 按需加载，只在打开阅读工作台时拉取）
@@ -66,6 +79,11 @@ export function PdfReadingWorkspace({ note, notes, onChange, onClose, onOpenNote
   // 这里的窄依赖是有意为之（避免每次编辑正文都重读 PDF），不是漏写 note。
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const source = useMemo(() => preferredPdfSource(note), [sourceKey])
+  /** 与本地标注同一份仓库 id：Zotero sidecar 落在 attachments/<storeId>.zotero.json */
+  const storeId = source ? annotationStoreId(note.id, source) : ''
+  const markup = useZoteroMarkup({ note, source, storeId })
+  /** 没有 Zotero 条目 key 的文献不显示同步入口：那是「无从同步」，不是「忘了同步」 */
+  const hasZoteroKey = Boolean(zoteroKeysOf(note).key)
   const [loaded, setLoaded] = useState<LoadedPdf | null>(null)
   const [annotations, setAnnotations] = useState<PdfAnnotationsFile | null>(null)
   const [error, setError] = useState('')
@@ -151,6 +169,74 @@ export function PdfReadingWorkspace({ note, notes, onChange, onClose, onOpenNote
     persist(next)
   }, [annotations, persist])
 
+  /** 回写成功后把 Zotero 返回的 key 记到本地标注上（只改命中的那几条） */
+  const saveWriteback = useCallback((saved: PushedAnnotation[], attachmentKey: string) => {
+    if (!annotations) return
+    const next = applyZoteroWriteback(annotations, {
+      saved: saved.map((entry, index) => ({ index, id: entry.id, key: entry.key })),
+      attachmentKey,
+    })
+    setAnnotations(next)
+    persist(next)
+  }, [annotations, persist])
+
+  const writeback = useZoteroWriteback({
+    annotations: annotations?.items ?? [],
+    attachment: markup.attachment,
+    onSaved: saveWriteback,
+  })
+
+  // 阅读器看到的是「本地 + Zotero」合并列表；所有写盘回调只动本地 items（Zotero 只读）
+  const viewerAnnotations = useMemo(
+    () => mergeViewerAnnotations(annotations?.items ?? [], markup.drawable),
+    [annotations, markup.drawable],
+  )
+
+  const exportAnnotation = (item: PdfAnnotation) => {
+    if (referencedAnnotationIds(note.content).has(item.id)) {
+      toast('这条标注已经在笔记里了')
+      return
+    }
+    onChange({ content: appendPdfReference(note.content, item, loaded?.fileName ?? 'PDF') })
+    toast.success('已导出到笔记正文')
+  }
+
+  const exportZoteroAnnotation = (record: ZoteroAnnotationRecord) => {
+    const mapped = mapZoteroAnnotation(record)
+    if (mapped) exportAnnotation(mapped)
+  }
+
+  const exportZoteroNote = (record: ZoteroNoteRecord) => {
+    if (hasExportedZoteroNote(note.content, record.key)) {
+      toast('这条 Zotero 笔记已经导出过')
+      return
+    }
+    onChange({ content: appendZoteroNoteMarkdown(note.content, record) })
+    toast.success('已导出到当前笔记')
+  }
+
+  const runZoteroSync = async () => {
+    try {
+      const result = await markup.sync()
+      toast.success(zoteroSyncSummary(result.file))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '同步 Zotero 标注失败')
+    }
+  }
+
+  /** 把本软件画的高亮回写到 Zotero（只增）：需要 Zotero 开着，并允许本机应用通信 */
+  const runWriteback = async () => {
+    try {
+      const result = await writeback.push()
+      if (!result) return
+      if (result.failed > 0) toast.error(result.summary)
+      else if (result.saved.length > 0) toast.success(result.summary)
+      else toast(result.summary)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '回写 Zotero 失败')
+    }
+  }
+
   const linkSelection = (draft: NewAnnotation) => {
     if (!loaded) return
     const annotation = addAnnotation(draft)
@@ -198,6 +284,32 @@ export function PdfReadingWorkspace({ note, notes, onChange, onClose, onOpenNote
           <div className="truncate text-sm font-medium" title={note.title}>{note.title}</div>
           <div className="truncate text-xs text-muted-foreground">{loaded?.fileName ?? 'PDF 阅读工作台'}</div>
         </div>
+        {(hasZoteroKey || markup.file) && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-11 md:h-8"
+            disabled={!markup.canSync || markup.syncing}
+            title={markup.canSync ? '只读导入 Zotero 高亮与子笔记（不改 Zotero、不改正文）' : markup.blockReason}
+            onClick={() => void runZoteroSync()}
+          >
+            {markup.syncing ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1 h-3.5 w-3.5" />}
+            <span className="hidden md:inline">同步 Zotero 标注</span>
+          </Button>
+        )}
+        {hasZoteroKey && writeback.plan.items.length > 0 && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-11 md:h-8"
+            disabled={!writeback.canPush}
+            title={writeback.blockReason || `把本软件画的 ${writeback.plan.items.length} 条高亮回写到 Zotero（只增，不改 Zotero 里已有的标注）`}
+            onClick={() => void runWriteback()}
+          >
+            {writeback.pushing ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Upload className="mr-1 h-3.5 w-3.5" />}
+            <span className="hidden md:inline">回写 Zotero ({writeback.plan.items.length})</span>
+          </Button>
+        )}
         <Button variant="outline" size="sm" className="h-11 md:h-8" onClick={() => void openExternal()} disabled={!source}>
           <ExternalLink className="mr-1 h-3.5 w-3.5" /> <span className="hidden md:inline">系统阅读器</span>
         </Button>
@@ -222,11 +334,14 @@ export function PdfReadingWorkspace({ note, notes, onChange, onClose, onOpenNote
               <Suspense fallback={<div className="p-4 text-sm text-muted-foreground">正在加载 PDF 阅读器…</div>}>
                 <PdfViewer
                   data={loaded.data}
-                  annotations={annotations.items}
+                  annotations={viewerAnnotations}
                   onAddAnnotation={(draft) => { addAnnotation(draft) }}
                   onUpdateAnnotation={(id, comment) => updateAnnotations((items) => items.map((item) => item.id === id ? { ...item, comment } : item))}
                   onDeleteAnnotation={(id) => updateAnnotations((items) => items.filter((item) => item.id !== id))}
-                  onExportAnnotation={(item) => onChange({ content: appendPdfReference(note.content, item, loaded.fileName) })}
+                  onExportAnnotation={exportAnnotation}
+                  onOpenInZotero={(key) => {
+                    void openZoteroItem(key).catch((e) => toast.error(e instanceof Error ? e.message : '无法在 Zotero 中定位条目'))
+                  }}
                   onLinkSelection={linkSelection}
                   focusAnnotationId={focusAnnotationId}
                 />
@@ -237,6 +352,15 @@ export function PdfReadingWorkspace({ note, notes, onChange, onClose, onOpenNote
                 <Separator className={isMobile ? 'h-1 bg-border hover:bg-primary/40' : 'w-1 bg-border hover:bg-primary/40'} />
                 <Panel defaultSize="32%" minSize="22%" className="min-h-0">
                   <div className="flex h-full min-h-0 flex-col border-l bg-card">
+                    {(hasZoteroKey || markup.file) && (
+                      <ZoteroNotesPanel
+                        compact
+                        view={markup}
+                        content={note.content}
+                        onExportNote={exportZoteroNote}
+                        onExportAnnotation={exportZoteroAnnotation}
+                      />
+                    )}
                     <div className="flex items-center gap-2 border-b px-3 py-2">
                       <Link2 className="h-3.5 w-3.5 text-muted-foreground" />
                       <span className="text-xs font-medium">PDF 链接 {linked.length}</span>

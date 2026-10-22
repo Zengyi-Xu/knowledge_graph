@@ -37,7 +37,7 @@
 | `vault-gate` | 契约冻结 | `src/lib/vaultGate.ts` | 写入门禁：声明判定、只读范围、未知字段保留、写盘计划过滤 | `test:vault-gate` |
 | `vault-io` | 契约冻结 | `src/lib/vaultFs.ts`、`src/lib/vaultLoad.ts`、`src/lib/syncFile.ts` | vault 读写通道与同步文件封装 | `test:vault-e2e` |
 | `zotero-rules` | 契约冻结 | `src/lib/zoteroMeta.ts`、`src/lib/zoteroImport.ts`、`src/lib/zoteroSync.ts` | Zotero 分类/标签/去重/导入规则 | `test:zotero`、`test:zotero-import`、`test:zotero-e2e` |
-| `desktop-bridge` | 契约冻结 | `electron/*.cjs`、`src/types/desktop.d.ts` | 页面 ↔ 主进程的 27 个方法 + 24 个 IPC 通道 | 契约交叉校验（内置）、`test:vault-gate` |
+| `desktop-bridge` | 契约冻结 | `electron/*.cjs`、`src/types/desktop.d.ts` | 页面 ↔ 主进程的 29 个方法 + 26 个 IPC 通道 | 契约交叉校验（内置）、`test:vault-gate`、`test:web` |
 | `note-store` | 契约冻结 | `src/types/note.ts`、`src/lib/noteStore.ts` | 笔记数据模型（类型/元数据常量）与纯数据操作（缓存、合并、双链边） | `test:use-notes` |
 | `md-import` | 契约冻结 | `src/lib/mdImport.ts` | 外部 Markdown 导入解析（front matter 标量剥引号、CRLF/BOM） | `test:md-import` |
 | `math-pipeline` | 契约冻结 | `src/lib/mathMarkup.ts`、`src/lib/katexRuntime.ts` | 公式渲染管线（占位抽取 + KaTeX 运行时水合） | `test:math` |
@@ -135,6 +135,16 @@ splitRow(line: string): string[]
 改契约 = 同时动 `preload.cjs` + `desktop.d.ts`（+ 主进程 handler）+ `frozen:update`。
 主进程脚本里的其余实现（窗口管理、安全头、路径白名单）是黑箱：**排查问题时才读，功能开发只用上面的方法**。
 
+2026-10-23 新增只读方法 `readZoteroMarkup(dbPath, zoteroKey, zoteroKeys?)`（IPC `zotero:read-markup`，
+网页桥同名 action）：标注 → PDF 附件 → 书目的关联、子笔记、跳过计数。附件归属只由主进程/本机服务解析，
+页面不能传附件路径；查询失败会抛错，不会用空结果冒充成功。用法与 sidecar 格式见 [ZOTERO_MARKUP.md](ZOTERO_MARKUP.md)。
+
+2026-10-23 新增写入方法 `zoteroLocalApi(request)`（IPC `zotero:local-api`，网页桥同名 action），
+`action` 为 `status` / `authorize` / `write`：只连 `127.0.0.1:23119` 的 Zotero 10+ 本地写入 API，
+把本软件画的高亮**新建**成 annotation 条目（只增，不删改 Zotero 已有对象）。
+本地密钥只缓存在宿主进程内存，渲染端拿不到；单次密钥失效（401）由调用方重新授权后重试一次。
+设计、坐标来源与限制见 [ZOTERO_MARKUP.md](ZOTERO_MARKUP.md) 第 7 节。
+
 ### note-store（契约冻结）
 
 契约 = `src/types/note.ts` 与 `src/lib/noteStore.ts` 的导出名：`Note` / `LiteratureMeta` / `NoteType` 等数据模型、
@@ -230,3 +240,14 @@ Alt+F9 可见域代码）。守护测试 `test:lit` 的 H 组（8 项，含转�
   test:use-notes 10、test:web 56、test:mobile 325。
   顺带修了 `test:math` 的行尾脆弱性：夹具在 `core.autocrlf=true` 的 Windows 签出成 CRLF 会误挂，
   现在读入时先归一成 LF。
+- 2026-10-23：`desktop-bridge` 增加只读 `readZoteroMarkup`（27→28 个方法、24→25 个 IPC 通道），
+  用于导入单篇文献的 Zotero 高亮与子笔记。**只读**：不写 Zotero、不改 front matter、不复制 PDF；
+  标注镜像存独立的 `attachments/<storeId>.zotero.json`，与本软件自己的 `.annotations.json` 分开。
+  设计与已知限制见 [ZOTERO_MARKUP.md](ZOTERO_MARKUP.md)；新增 `test:zotero-markup`（58 项）、
+  `test:zotero-panel`（17 项），`test:zotero` 扩到 40 项、`test:web` 扩到 72 项。
+- 2026-10-23（同日第二版）：`desktop-bridge` 增加 `zoteroLocalApi`（28→29 个方法、25→26 个 IPC 通道），
+  走 Zotero 10+ 本地写入 API 把本软件画的高亮**回写**成 annotation（只增；不删、不改 Zotero 已有对象）。
+  高亮在创建时记下 PDF 坐标 / `pageLabel` / `sortIndex`（`.annotations.json` 的可选字段，向后兼容），
+  回写成功后把返回的 key 记回本地标注，重新同步时按 key 去重；本地 API 密钥只留在宿主进程内存。
+  新增 `test:zotero-writeback`（41 项）与 `test:zotero-local-api`（28 项，假 Zotero 服务器），
+  `test:web` 扩到 75 项。细节见 [ZOTERO_MARKUP.md](ZOTERO_MARKUP.md) 第 7 节。

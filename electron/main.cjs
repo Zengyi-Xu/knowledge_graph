@@ -3,7 +3,8 @@ const fs = require('node:fs/promises')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 const { listVault, readVaultFiles, writeVault } = require('./vaultFs.cjs')
-const { readZotero, resolveZoteroPdf } = require('./zoteroFs.cjs')
+const { readZotero, resolveZoteroPdf, readZoteroMarkup } = require('./zoteroFs.cjs')
+const zoteroLocalApi = require('./zoteroLocalApi.cjs')
 const { aiStatus, aiComplete } = require('./aiGateway.cjs')
 const attachmentFs = require('./attachmentFs.cjs')
 
@@ -293,6 +294,43 @@ function registerZoteroHandlers() {
     }
     const extraKeys = Array.isArray(payload.zoteroKeys) ? payload.zoteroKeys.filter((k) => typeof k === 'string') : []
     return readPdfFile(resolveZoteroPdf(payload.dbPath, payload.zoteroKey, extraKeys))
+  })
+
+  // 标注与子笔记：只读；PDF 附件路径由主进程按 key 解析，渲染端不能指定任意文件
+  ipcMain.handle('zotero:read-markup', async (_event, payload) => {
+    if (!payload || typeof payload.dbPath !== 'string' || !payload.dbPath || typeof payload.zoteroKey !== 'string') {
+      throw new Error('Invalid zotero markup request')
+    }
+    if (!path.isAbsolute(payload.dbPath) || path.extname(payload.dbPath).toLowerCase() !== '.sqlite') {
+      throw new Error('Invalid zotero db path')
+    }
+    const extraKeys = Array.isArray(payload.zoteroKeys) ? payload.zoteroKeys.filter((k) => typeof k === 'string') : []
+    return readZoteroMarkup(payload.dbPath, payload.zoteroKey, extraKeys)
+  })
+
+  // Zotero 10+ 本地写入：只增（把本软件画的高亮回写成 annotation 条目），绝不删改 Zotero 里的对象。
+  // 读取仍然走上面的只读 SQLite；这条通道只连 127.0.0.1:23119 的本地 API。
+  ipcMain.handle('zotero:local-api', async (_event, payload) => {
+    const request = payload && typeof payload === 'object' ? payload : {}
+    if (request.action === 'status') return zoteroLocalApi.status()
+    if (request.action === 'authorize') return zoteroLocalApi.authorize()
+    if (request.action === 'write') {
+      const annotations = Array.isArray(request.annotations) ? request.annotations.slice(0, 50) : []
+      const clean = annotations.map((item) => ({
+        id: typeof item?.id === 'string' ? item.id : '',
+        text: typeof item?.text === 'string' ? item.text : '',
+        comment: typeof item?.comment === 'string' ? item.comment : '',
+        color: typeof item?.color === 'string' ? item.color : '',
+        pageLabel: typeof item?.pageLabel === 'string' ? item.pageLabel : '',
+        sortIndex: typeof item?.sortIndex === 'string' ? item.sortIndex : '',
+        position: typeof item?.position === 'string' ? item.position : '',
+      }))
+      return zoteroLocalApi.write({
+        attachmentKey: typeof request.attachmentKey === 'string' ? request.attachmentKey : '',
+        annotations: clean,
+      })
+    }
+    throw new Error('Invalid zotero local api request')
   })
 
   // 在 Zotero 里定位到该条目（zotero:// 协议；Zotero 会选中并展示它，可顺手下载附件）

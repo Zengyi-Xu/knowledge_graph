@@ -199,8 +199,9 @@
    单页/双页下滚轮滚到页边上/下沿后继续滚 = 翻页（280ms 节流，Ctrl+滚轮留给浏览器缩放）。
    笔记栏就是主界面的 `WysiwygEditor`（同一个 chunk，懒加载；pdf 场景的预算/测试已放行 Vditor）。
    回归：`.tmp-pdf-viewer/check.mjs`（合成 5 页 PDF，真 Chrome 点遍三种模式 + 键盘/滚轮 + 编辑器按键隔离）。
-13. **单栏「笔记」视图是流式滚动（flow，2026-10-16 加）**：整篇笔记（标题/标签/两条工具条/正文）一起随外层容器滚，
+13. **单栏「笔记」视图是流式滚动（flow，2026-10-16 加）**：整篇笔记（标题/标签/工具条行/正文）一起随外层容器滚，
    正文不再自己滚 —— 只让正文滚时，744px 高的窗口里正文只有 343px，滚下去之后是整屏 744px。
+   **例外是 Vditor 工具栏：flow 档里 `position: sticky; top: 0` 吸在滚动容器顶端**（2026-10-22，见第 17 条）。
    - 只有桌面端传 `NoteEditor flow`：单栏「笔记」与**并列**视图的笔记列都是 flow（并列那张卡片自己就是滚动容器：
      `min-w-0 flex-1 overflow-y-auto rounded-lg border bg-card`，共用同一个 `note-flow-scroll` testid 与 `noteScrollRef`）；
      手机详情页保持原来的「整屏高度 + 正文内部滚」。
@@ -273,6 +274,62 @@
      不会被抽取（真库中没有这种写法）。四空格缩进代码块里的 `$…$` 会被当公式（只承诺保护围栏/行内代码）。
    - KaTeX 字体（woff2/woff/ttf）随构建进入 `dist/assets`，离线包可用；`katexRuntime` 是懒加载 chunk，
      不要把 `katex` 或 `katex/dist/katex.min.css` 改成静态 import，否则首屏预算会回退。
+
+17. **所见即所得编辑器的四个细节（2026-10-22 修，来源 `Vault/Inbox/Debug 20261021.md`）**：
+   - **有序列表没有序号**：Tailwind preflight 把 `ol/ul` 的 `list-style` 清成 none，Vditor 只补回了 `ul`
+     （阅读面板的 `#write ol` 是好的，只有编辑器缺）。`WysiwygEditor.css` 里恢复
+     `ol decimal / ol ol lower-alpha / ol ol ol lower-roman`，别删。
+   - **flow 档工具栏吸顶**：`.kg-vditor-flow .vditor-toolbar { position: sticky; top: 0; z-index: 10 }`
+     吸在 `note-flow-scroll` / 并列卡片顶端（背景要不透明）。注意 Vditor 会给 `.vditor` 写内联 `height: auto`，
+     所以 sticky 的包含块是整篇编辑器，能一直吸到文末。
+   - **选中文字浮出排版条（Word 迷你工具栏）**：`WysiwygEditor.tsx` 的 `BUBBLE_BUTTONS` + `bubble` 状态，
+     `position: fixed` + 视口坐标（滚动/改窗口大小直接收起），`<768px` 不出现（手机用原生选择菜单）。
+     按钮一律 `.click()` Vditor 工具栏上的同名按钮 —— 格式化、撤销栈、序列化仍归 Vditor；
+     容器 `onMouseDown` 必须 `preventDefault` 保住选区。**Vditor 只在 click/keyup 时刷新按钮可用状态**
+     （拖选文本不触发），会残留「在代码块里被禁用」的 `vditor-menu--disabled`，所以点之前先移除该 class。
+   - **标题快捷键 `Alt+1…6`**：Vditor 只实现了 `Ctrl+Alt+1…6`；`Ctrl+1…8` 是浏览器切标签页、
+     标题按钮自带的 `⌘H` 是历史记录 —— 按下去只会跳页（用户报的「小标题没有快捷键、会和切换 tab 重合」）。
+     做法：把 `Alt+N` 翻译成 Vditor 认识的 `Ctrl+Alt+DigitN` **合成 keydown 派发到 `.vditor-reset`**
+     （Vditor 的 hotkey 监听挂在这个 contenteditable 上，不是 `.vditor-wysiwyg`），复用「已是该级标题就取消」
+     的语义；标题按钮 tip 改成「标题（Alt+1…6）」并把 hotkey 清成 `''`。
+   - **双链按钮只插一对空括号**：以前 `insertValue('[[笔记标题]]')` 会立刻被装饰成「缺失笔记」芯片，
+     点一下（哪怕只想放光标）就按占位标题新建一篇。现在插 `[[]]` 并把光标放进中间：Vditor 用 `<wbr>`
+     保存/恢复光标，插入后光标可能落在文本节点里、也可能落在 `<p>` 的元素偏移上，所以按「编辑区拼接文本」
+     算位置再定位，并补一次 `input` 让 Vditor 用 wbr 记住它。`pickSuggestion` 要吃掉光标后面的 `]]`
+     （`<wbr>` 会把 `[[查询]]` 拆成两个文本节点：同节点找不到就继续往后找一段），否则选完变 `[[标题]]]]`。
+   - 回归：`npm run test:wysiwyg-e2e`（42 项，无头 Chrome + 真 Vditor：有序列表序号、吸顶、气泡条位置/加粗、
+     Alt+2 标题、双链插入/光标/补全去重）。**夹具原来的 esbuild outfile 写成 `app.js`，esbuild 会把
+     `pdfTextLayer.css` 抽成同名的 `app.css` 覆盖掉 Tailwind 产物**，整个夹具页面其实没有 Tailwind 样式
+     （`fixed/hidden/md:flex` 全不生效）；现在 outfile 改叫 `bundle.js`，Tailwind 的 `app.css` 才留得住。
+     真实构建的肉眼验收：`.tmp-editor-polish/check.mjs`（合成夹具 + 真实鼠标拖选，12 项 + 截图）。
+
+18. **Zotero 标注导入（只读）与回写（只增，2026-10-23）**：单篇手动同步，入口在 PDF 阅读工作台与文献详情附件区；
+   全库后台同步、自动改正文都**没做**；回写只新建 annotation，**不删、不改 Zotero 已有对象**、不做双向编辑同步。
+   导入契约是 `readZoteroMarkup`（`desktop-bridge`，IPC `zotero:read-markup`；网页桥同名 action），关联链
+   `itemAnnotations.parentItemID → itemAttachments → items(key)`，子笔记要同时查「书目下」与「附件下」两种父级。
+   - **sidecar 独立**：`attachments/<annotationStoreId>.zotero.json`（`format: kaust-kg-zotero-markup`），
+     与本软件自己的 `.annotations.json` 分开；同步只在完整查询 + 写盘都成功后整份替换，失败/锁库保留旧数据。
+     本地标注不在这个文件里，所以永远删不到。
+   - **只读**：Zotero 高亮不能在本软件改/删，只有「导出到笔记」「在 Zotero 中打开」；笔记导出用
+     `<!-- zotero-note:<key> -->` 这种不可见标记判重（渲染成空块），同一条只追加一次。
+   - **页码**：Zotero `pageIndex` 从 0 开始，映射到本软件 `+1`；`pageLabel` 只用于显示（可能是 `xiv`）。
+   - **附件匹配**：Zotero 来源用同步时记下的主附件（与 `readZoteroPdf` 同一选取规则）；`localPdf` 按规范化路径比
+     （`\`→`/`、Windows 盘符大小写不敏感）；vault 内副本不画。多份 PDF 时只画当前那份，其余计入
+     `skipped.otherAttachment` 并提示「属于另一份 Zotero PDF」，绝不把第一份的高亮盖到第二份。
+   - 图片/墨迹/便签/文本框不画但**必须列出并计数**（不许静默丢）；缺文字、position 损坏分别计数。
+   - 高亮沿用现有渲染路径（文本重锚定），所以 PDF 文本层与 Zotero 文本有差异时可能画不出来——列表仍可导出；
+     不要把 `rects` 拿去另写一套 SVG 高亮。
+   - **回写（P1）**：`zoteroLocalApi`（`desktop-bridge`，IPC `zotero:local-api`，action `status|authorize|write`）
+     连 Zotero 10+ 的 `127.0.0.1:23119/api`（实现在 `electron/zoteroLocalApi.cjs`，桌面与网页共用）。
+     画高亮时就把选区换算成 PDF 坐标（`convertToPdfPoint`）连同 `pageLabel`/`sortIndex` 存进 `.annotations.json`
+     可选字段（**向后兼容：没有 `position` 的老标注跳过回写，不猜坐标**）。只回写 `origin` 为空的本地高亮，
+     已有 `zotero.key` 的跳过；成功后把 key 记回本地，`mergeViewerAnnotations` 按 key 跳过重新导入的同一条。
+     密钥只在宿主进程内存：单次密钥写入后即失效 → 401 时重新 authorize 再试一次；用户选 Always Allow 才长期复用；
+     `Zotero-Server-ID` 变了要清缓存。`annotationType` 必须排在其它 annotation 字段之前（Zotero 校验顺序）。
+     **导入要退出 Zotero（SQLite 锁），回写要 Zotero 在运行**，两者分先后操作；一次最多 50 条。
+   - 回归：`npm run test:zotero`（40，合成库）、`test:zotero-markup`（58，纯逻辑）、`test:zotero-panel`（17，SSR）、
+     `test:zotero-writeback`（41，回写纯逻辑）、`test:zotero-local-api`（28，假 Zotero 服务器）、
+     `test:web`（75，网页桥）。真实库只读实测与限制见 [docs/ZOTERO_MARKUP.md](docs/ZOTERO_MARKUP.md)。
 
 ## 真实数据环境（动手前先看）
 

@@ -12,7 +12,7 @@
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
-import type { PDFDocumentProxy } from 'pdfjs-dist'
+import type { PDFDocumentProxy, PageViewport } from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import {
   ZoomIn,
@@ -26,12 +26,15 @@ import {
   File,
   Columns2,
   FlipHorizontal2,
+  Check,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { readSetting, writeSetting } from '@/lib/env'
 import { buildAnchor, locateAnchor, type TextAnchor } from '@/lib/pdfAnchor'
-import type { PdfAnnotation } from '@/lib/attachments'
+import type { PdfAnnotation, PdfAnnotationPosition } from '@/lib/attachments'
+import { formatZoteroTime } from '@/lib/zoteroMarkup'
+import { buildZoteroSortIndex, countedCharOffset } from '@/lib/zoteroWriteback'
 import './pdfTextLayer.css'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
@@ -72,6 +75,12 @@ export interface NewAnnotation {
   page: number
   anchor: TextAnchor
   color: string
+  /** 创建时记下的 PDF 坐标：回写 Zotero 用（拿不到页面几何时为空，这条高亮就不参与回写） */
+  position?: PdfAnnotationPosition
+  /** Zotero 显示的页码标签（可能是罗马数字） */
+  pageLabel?: string
+  /** Zotero 标注列表的排序键「页|字符偏移|距页顶」 */
+  sortIndex?: string
 }
 
 interface Props {
@@ -82,6 +91,8 @@ interface Props {
   onDeleteAnnotation: (id: string) => void
   /** 「导出到笔记」：把高亮文本追加到文献笔记正文（由外层走 updateNote） */
   onExportAnnotation: (a: PdfAnnotation) => void
+  /** 只读的 Zotero 标注：在 Zotero 里定位到条目 */
+  onOpenInZotero?: (zoteroKey: string) => void
   /** 把当前选区保存为高亮并插入一条可返回 PDF 原文的笔记链接 */
   onLinkSelection?: (a: NewAnnotation) => void
   /** 外层请求定位某条标注；阅读器会跳页并短暂强调 */
@@ -100,6 +111,9 @@ interface PaletteState {
   x: number
   y: number
   anchor: TextAnchor
+  position?: PdfAnnotationPosition
+  pageLabel?: string
+  sortIndex?: string
 }
 
 interface ActiveState {
@@ -236,6 +250,8 @@ interface PageViewProps {
   canLink: boolean
   onText: (page: number, text: string) => void
   onRegister: (page: number, holder: HTMLElement | null, layer: HTMLElement | null) => void
+  /** 本页 CSS 视口：把划选的屏幕坐标换算成 PDF 坐标（卸载时传 null） */
+  onViewport: (page: number, viewport: PageViewport | null) => void
   onSelectMouseUp: (page: number) => void
   onHighlightClick: (page: number, id: string, clientX: number, clientY: number) => void
   onPickColor: (color: string) => void
@@ -243,6 +259,7 @@ interface PageViewProps {
   onExportAnnotation: (a: PdfAnnotation) => void
   onUpdateAnnotation: (id: string, comment: string) => void
   onDeleteAnnotation: (id: string) => void
+  onOpenInZotero: (zoteroKey: string) => void
   onCloseActive: () => void
 }
 
@@ -263,6 +280,7 @@ const PdfPageView = memo(function PdfPageView({
   canLink,
   onText,
   onRegister,
+  onViewport,
   onSelectMouseUp,
   onHighlightClick,
   onPickColor,
@@ -270,6 +288,7 @@ const PdfPageView = memo(function PdfPageView({
   onExportAnnotation,
   onUpdateAnnotation,
   onDeleteAnnotation,
+  onOpenInZotero,
   onCloseActive,
 }: PageViewProps) {
   const holderRef = useRef<HTMLDivElement>(null)
@@ -323,6 +342,7 @@ const PdfPageView = memo(function PdfPageView({
       setSize({ w: cssViewport.width, h: cssViewport.height })
       // pdf.js 6 读的是 --total-scale-factor，值必须是 CSS 缩放比（--font-height 是无缩放值）
       layer.style.setProperty('--total-scale-factor', String(cssViewport.scale))
+      onViewport(page, cssViewport)
 
       const ctx = canvas.getContext('2d')
       if (!ctx) return
@@ -358,8 +378,9 @@ const PdfPageView = memo(function PdfPageView({
       cancelled = true
       renderTask?.cancel()
       textLayerTask?.cancel()
+      onViewport(page, null)
     }
-  }, [doc, page, shouldRender, scaleMode, fitWidth, onText])
+  }, [doc, page, shouldRender, scaleMode, fitWidth, onText, onViewport])
 
   // ---- 本页高亮：锚定 → 覆盖矩形（rAF 里 setState，避免 effect 内同步 setState 级联） ----
   useEffect(() => {
@@ -502,38 +523,76 @@ const PdfPageView = memo(function PdfPageView({
           style={{ left: Math.max(130, active.x), top: Math.max(10, active.y - 8) }}
         >
           <div className="mb-1 max-h-24 overflow-y-auto text-xs text-muted-foreground">{active.annotation.anchor.exact}</div>
-          <textarea
-            defaultValue={active.annotation.comment}
-            placeholder="评论（可空）"
-            className="mb-2 h-16 w-full resize-none rounded border bg-background px-2 py-1 text-xs"
-            id={`pdf-comment-${active.annotation.id}`}
-          />
+          {active.annotation.origin?.provider === 'zotero' ? (
+            <>
+              <div className="mb-2 flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
+                <span className="rounded bg-muted px-1 py-0.5 text-foreground">来自 Zotero</span>
+                {formatZoteroTime(active.annotation.origin.dateModified) && (
+                  <span>更新于 {formatZoteroTime(active.annotation.origin.dateModified)}</span>
+                )}
+              </div>
+              {/* Zotero 标注在本软件里只读：批注只展示，改/删都要回 Zotero 做 */}
+              <div className="mb-2 max-h-20 overflow-y-auto whitespace-pre-wrap rounded border bg-muted/40 px-2 py-1 text-xs">
+                {active.annotation.comment || <span className="text-muted-foreground">（无批注）</span>}
+              </div>
+            </>
+          ) : (
+            <>
+              <textarea
+                defaultValue={active.annotation.comment}
+                placeholder="评论（可空）"
+                className="mb-2 h-16 w-full resize-none rounded border bg-background px-2 py-1 text-xs"
+                id={`pdf-comment-${active.annotation.id}`}
+              />
+              {active.annotation.zotero && (
+                <div className="mb-2 flex items-center gap-1 text-[11px] text-muted-foreground">
+                  <Check className="h-3 w-3 text-emerald-600" /> 已回写 Zotero
+                </div>
+              )}
+            </>
+          )}
           <div className="flex justify-end gap-1">
             <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={() => onExportAnnotation(active.annotation)}>
               导出到笔记
             </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-6 text-xs text-destructive"
-              onClick={() => {
-                onDeleteAnnotation(active.annotation.id)
-                onCloseActive()
-              }}
-            >
-              删除
-            </Button>
-            <Button
-              size="sm"
-              className="h-6 text-xs"
-              onClick={() => {
-                const el = document.getElementById(`pdf-comment-${active.annotation.id}`) as HTMLTextAreaElement | null
-                onUpdateAnnotation(active.annotation.id, el?.value ?? '')
-                onCloseActive()
-              }}
-            >
-              保存
-            </Button>
+            {active.annotation.origin?.provider === 'zotero' ? (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-6 text-xs"
+                onClick={() => {
+                  onOpenInZotero(active.annotation.origin!.key)
+                  onCloseActive()
+                }}
+              >
+                在 Zotero 中打开
+              </Button>
+            ) : (
+              <>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 text-xs text-destructive"
+                  onClick={() => {
+                    onDeleteAnnotation(active.annotation.id)
+                    onCloseActive()
+                  }}
+                >
+                  删除
+                </Button>
+                <Button
+                  size="sm"
+                  className="h-6 text-xs"
+                  onClick={() => {
+                    const el = document.getElementById(`pdf-comment-${active.annotation.id}`) as HTMLTextAreaElement | null
+                    onUpdateAnnotation(active.annotation.id, el?.value ?? '')
+                    onCloseActive()
+                  }}
+                >
+                  保存
+                </Button>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -550,6 +609,7 @@ export function PdfViewer({
   onExportAnnotation,
   onLinkSelection,
   focusAnnotationId,
+  onOpenInZotero,
 }: Props) {
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null)
   const [error, setError] = useState('')
@@ -588,6 +648,10 @@ export function PdfViewer({
   const layersRef = useRef(new Map<number, HTMLElement>())
   const pageTextsRef = useRef(new Map<number, string>())
   const dimsRef = useRef(new Map<number, PageDims>())
+  /** 每页当前的 CSS 视口：把划选矩形换算成 PDF 坐标（回写 Zotero 用） */
+  const viewportsRef = useRef(new Map<number, PageViewport>())
+  /** PDF 自带页码标签（`iv` / `12`）；拿不到就回退成页码数字 */
+  const pageLabelsRef = useRef<string[]>([])
   const [dimsVersion, setDimsVersion] = useState(0)
   const observedRef = useRef<{ renderObserver: IntersectionObserver; currentObserver: IntersectionObserver } | null>(null)
   // dimsVersion 只是「尺寸预取进度」的版本号：读到它，占位框才会随预取进度重算纵横比
@@ -625,6 +689,26 @@ export function PdfViewer({
       layers.clear()
     }
   }, [data])
+
+  // ---- 页码标签（PDF 自带的页面 label，Zotero 的 annotationPageLabel 用这个） ----
+  useEffect(() => {
+    if (!doc) {
+      pageLabelsRef.current = []
+      return
+    }
+    let cancelled = false
+    void Promise.resolve()
+      .then(() => doc.getPageLabels())
+      .then((labels) => {
+        if (!cancelled) pageLabelsRef.current = Array.isArray(labels) ? labels : []
+      })
+      .catch(() => {
+        if (!cancelled) pageLabelsRef.current = []
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [doc])
 
   // ---- 预取各页 scale=1 尺寸（占位框纵横比 + 适应宽度的分母），空闲时顺序取，不阻塞首屏 ----
   useEffect(() => {
@@ -813,6 +897,59 @@ export function PdfViewer({
     setTextsVersion((v) => v + 1)
   }, [])
 
+  const registerViewport = useCallback((page: number, viewport: PageViewport | null) => {
+    if (viewport) viewportsRef.current.set(page, viewport)
+    else viewportsRef.current.delete(page)
+  }, [])
+
+  /**
+   * 划选矩形 → Zotero 的 PDF 坐标 + sortIndex。
+   * 优先用 pdf.js 视口的 convertToPdfPoint（旋转页也对）；视口还没登记时按页面尺寸线性换算。
+   */
+  const pdfPositionFor = useCallback((page: number, rects: Rect[], textOffset: number): { position: PdfAnnotationPosition; sortIndex: string } | null => {
+    const round = (n: number) => Math.round(n * 10000) / 10000
+    const pdfRects: [number, number, number, number][] = []
+    const viewport = viewportsRef.current.get(page)
+    const dims = dimsRef.current.get(page)
+    if (viewport) {
+      for (const rect of rects) {
+        const corners = [
+          viewport.convertToPdfPoint(rect.left, rect.top),
+          viewport.convertToPdfPoint(rect.left + rect.width, rect.top),
+          viewport.convertToPdfPoint(rect.left, rect.top + rect.height),
+          viewport.convertToPdfPoint(rect.left + rect.width, rect.top + rect.height),
+        ]
+        const xs = corners.map((corner) => corner[0])
+        const ys = corners.map((corner) => corner[1])
+        pdfRects.push([round(Math.min(...xs)), round(Math.min(...ys)), round(Math.max(...xs)), round(Math.max(...ys))])
+      }
+    } else {
+      const box = layersRef.current.get(page)?.getBoundingClientRect()
+      if (!dims || !box || !box.width || !box.height) return null
+      const sx = dims.w / box.width
+      const sy = dims.h / box.height
+      for (const rect of rects) {
+        pdfRects.push([
+          round(rect.left * sx),
+          round(dims.h - (rect.top + rect.height) * sy),
+          round((rect.left + rect.width) * sx),
+          round(dims.h - rect.top * sy),
+        ])
+      }
+    }
+    if (!pdfRects.length) return null
+    const pageHeight = dims?.h ?? Math.max(...pdfRects.map((rect) => rect[3]))
+    const top = pageHeight - Math.max(...pdfRects.map((rect) => rect[3]))
+    return {
+      position: { pageIndex: page - 1, rects: pdfRects },
+      sortIndex: buildZoteroSortIndex({
+        pageIndex: page - 1,
+        top,
+        charOffset: countedCharOffset(pageTextsRef.current.get(page) ?? '', textOffset),
+      }),
+    }
+  }, [])
+
   // ---- 搜索：当前页内全部匹配，回车下一个；本页没有就翻到下一页 ----
   const matches = useMemo(() => {
     void textsVersion // 页文本到位后重算
@@ -853,6 +990,7 @@ export function PdfViewer({
       }
       const anchor = buildAnchor(text, range.start, range.end)
       const previewRects = rectsForRange(layer, range.start, range.end)
+      const geometry = pdfPositionFor(page, previewRects, range.start)
       const sel = window.getSelection()
       const rect = sel && sel.rangeCount > 0 ? sel.getRangeAt(0).getBoundingClientRect() : null
       const origin = layer.getBoundingClientRect()
@@ -863,12 +1001,15 @@ export function PdfViewer({
         x: rect ? rect.left - origin.left + rect.width / 2 : 0,
         y: rect ? rect.top - origin.top : 0,
         anchor,
+        position: geometry?.position,
+        pageLabel: pageLabelsRef.current[page - 1] || String(page),
+        sortIndex: geometry?.sortIndex,
       })
       // PDF.js 把一行拆成大量带 transform 的 span；浏览器原生选区会在
       // span/空格边界显示深浅条纹。锚点取完后清掉原生选区，改画连续预览。
       sel?.removeAllRanges()
     }, 0)
-  }, [])
+  }, [pdfPositionFor])
 
   const handleHighlightClick = useCallback(
     (page: number, id: string, clientX: number, clientY: number) => {
@@ -886,7 +1027,14 @@ export function PdfViewer({
 
   const pickColor = (color: string) => {
     if (!palette) return
-    onAddAnnotation({ page: palette.page, anchor: palette.anchor, color })
+    onAddAnnotation({
+      page: palette.page,
+      anchor: palette.anchor,
+      color,
+      position: palette.position,
+      pageLabel: palette.pageLabel,
+      sortIndex: palette.sortIndex,
+    })
     window.getSelection()?.removeAllRanges()
     setPalette(null)
     setSelection(null)
@@ -894,7 +1042,14 @@ export function PdfViewer({
 
   const linkSelection = () => {
     if (!palette || !onLinkSelection) return
-    onLinkSelection({ page: palette.page, anchor: palette.anchor, color: HIGHLIGHT_COLORS[0] })
+    onLinkSelection({
+      page: palette.page,
+      anchor: palette.anchor,
+      color: HIGHLIGHT_COLORS[0],
+      position: palette.position,
+      pageLabel: palette.pageLabel,
+      sortIndex: palette.sortIndex,
+    })
     window.getSelection()?.removeAllRanges()
     setPalette(null)
     setSelection(null)
@@ -1025,6 +1180,7 @@ export function PdfViewer({
     canLink: Boolean(onLinkSelection),
     onText: handleText,
     onRegister: registerPage,
+    onViewport: registerViewport,
     onSelectMouseUp: handleSelectMouseUp,
     onHighlightClick: handleHighlightClick,
     onPickColor: pickColor,
@@ -1032,6 +1188,7 @@ export function PdfViewer({
     onExportAnnotation,
     onUpdateAnnotation,
     onDeleteAnnotation,
+    onOpenInZotero: onOpenInZotero ?? (() => {}),
     onCloseActive: () => setActive(null),
   }
 

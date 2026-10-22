@@ -15,6 +15,7 @@ const require = createRequire(import.meta.url)
 const vaultFs = require('../electron/vaultFs.cjs')
 const attachmentFs = require('../electron/attachmentFs.cjs')
 const zoteroFs = require('../electron/zoteroFs.cjs')
+const zoteroLocalApi = require('../electron/zoteroLocalApi.cjs')
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 // 版本号只从 package.json 读一次，打印在启动横幅里（避免 .cmd 里再硬编码一份，写死了就会过期）
 const { version } = (() => {
@@ -260,6 +261,27 @@ export async function createLocalServer({ port = 4173, vault = '', zoteroDb = ''
         if (!zoteroDbPath) throw new Error('本地网页端未配置 Zotero 数据库（启动参数 --zotero-db）')
         const extraKeys = Array.isArray(p.zoteroKeys) ? p.zoteroKeys.filter((k) => typeof k === 'string') : []
         return readPdfPayload(zoteroFs.resolveZoteroPdf(zoteroDbPath, p.zoteroKey, extraKeys))
+      }
+      case 'zotero:read-markup': {
+        // 只读标注/子笔记：数据库固定用启动时授权的那个，前端只给书目 key
+        if (!zoteroDbPath) throw new Error('本地网页端未配置 Zotero 数据库（启动参数 --zotero-db）')
+        if (typeof p.zoteroKey !== 'string') throw new Error('无效的 Zotero 条目 key')
+        const extraKeys = Array.isArray(p.zoteroKeys) ? p.zoteroKeys.filter((k) => typeof k === 'string') : []
+        return zoteroFs.readZoteroMarkup(zoteroDbPath, p.zoteroKey, extraKeys)
+      }
+      case 'zotero:local-api': {
+        // Zotero 10+ 本地写入：只增；密钥由服务端内存缓存，前端拿不到
+        const action = p && p.action
+        if (action === 'status') return zoteroLocalApi.status()
+        if (action === 'authorize') return zoteroLocalApi.authorize()
+        if (action === 'write') {
+          const annotations = Array.isArray(p.annotations) ? p.annotations.slice(0, 50) : []
+          return zoteroLocalApi.write({
+            attachmentKey: typeof p.attachmentKey === 'string' ? p.attachmentKey : '',
+            annotations,
+          })
+        }
+        throw new Error('不支持的 Zotero 写入请求')
       }
       case 'ai:status': return require('../electron/aiGateway.cjs').aiStatus(p)
       case 'ai:complete': return require('../electron/aiGateway.cjs').aiComplete(p)

@@ -1,5 +1,8 @@
 // FROZEN(desktop-bridge) 契约冻结：本文件就是契约，可以读；实现在 electron/*.cjs（黑箱，排查故障时才读）。
 // 新增/改名方法要同时改 electron/preload.cjs，然后 npm run frozen:update -- "desktop-bridge ..."（docs/FROZEN.md）
+import type { ZoteroMarkupBundle } from '@/lib/zoteroMarkup'
+import type { ZoteroLocalApiRequest, ZoteroLocalApiResult } from '@/lib/zoteroWriteback'
+
 export {}
 
 /** 与 electron/vaultFs.cjs 的返回结构保持一致 */
@@ -86,6 +89,23 @@ declare global {
       openZoteroPdf: (dbPath: string, zoteroKey: string, zoteroKeys?: string[]) => Promise<{ path: string }>
       /** 读取 Zotero key 对应的本地 PDF，供应用内 PDF.js 阅读；最大 150 MB */
       readZoteroPdf: (dbPath: string, zoteroKey: string, zoteroKeys?: string[]) => Promise<{ data: Uint8Array; name: string; path: string }>
+      /**
+       * 只读读取一篇文献的 Zotero 标注与子笔记（不写 Zotero）。
+       * 附件归属由主进程按书目 key 从数据库解析，渲染端不能指定任意附件路径；
+       * 数据库被占用 / 查询失败会抛错，绝不以「空结果」冒充同步成功。
+       */
+      readZoteroMarkup: (
+        dbPath: string,
+        zoteroKey: string,
+        zoteroKeys?: string[],
+      ) => Promise<ZoteroMarkupBundle>
+      /**
+       * Zotero 10+ 本地写入（只增，绝不删改 Zotero 里的对象）：
+       * status 探测本地 API 与 Server ID；authorize 让 Zotero 弹窗授权（密钥只留在宿主进程内存）；
+       * write 把本软件画的高亮批量创建成 attachment 下的 annotation 条目。
+       * 只连 127.0.0.1:23119，不联网；401 时调用方重新 authorize 再试一次即可。
+       */
+      zoteroLocalApi?: (request: ZoteroLocalApiRequest) => Promise<ZoteroLocalApiResult>
       /** 打开笔记 localPdf 字段记录的本地 PDF（只接受存在的 .pdf 绝对路径） */
       openExternalFile: (filePath: string) => Promise<{ error: string | null }>
       /** 读取笔记 localPdf 字段记录的 PDF，供应用内 PDF.js 阅读；最大 150 MB */

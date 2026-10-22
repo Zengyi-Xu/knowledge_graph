@@ -34,6 +34,10 @@ contextBridge.exposeInMainWorld('knowledgeGraphDesktop', {
   readZotero: (dbPath) => ipcRenderer.invoke('zotero:read', { dbPath }),
   openZoteroPdf: (dbPath, zoteroKey, zoteroKeys) => ipcRenderer.invoke('zotero:open-pdf', { dbPath, zoteroKey, zoteroKeys }),
   readZoteroPdf: (dbPath, zoteroKey, zoteroKeys) => ipcRenderer.invoke('zotero:read-pdf', { dbPath, zoteroKey, zoteroKeys }),
+  // 标注与子笔记（只读）：附件归属由主进程从数据库解析，渲染端只给书目 key
+  readZoteroMarkup: (dbPath, zoteroKey, zoteroKeys) => ipcRenderer.invoke('zotero:read-markup', { dbPath, zoteroKey, zoteroKeys }),
+  // Zotero 10+ 本地写入（只增）：status / authorize / write，密钥只在主进程内存里
+  zoteroLocalApi: (request) => ipcRenderer.invoke('zotero:local-api', request),
   // 打开笔记里记录的本地 PDF（localPdf 字段）
   openExternalFile: (filePath) => ipcRenderer.invoke('file:open-external', { path: filePath }),
   readExternalPdf: (filePath) => ipcRenderer.invoke('file:read-pdf', { path: filePath }),

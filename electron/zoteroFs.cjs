@@ -52,7 +52,7 @@ function resolveAttachmentPath(dbPath, attachment) {
 
 function pdfRowsFor(db, itemID) {
   return db.prepare(
-    `SELECT ai.key AS attachmentKey, ia.path, ia.linkMode
+    `SELECT ia.itemID AS attachmentItemID, ai.key AS attachmentKey, ia.path, ia.linkMode
      FROM itemAttachments ia
      JOIN items ai ON ai.itemID = ia.itemID
      WHERE ia.parentItemID = ?
@@ -200,4 +200,181 @@ function pdfFileNamesForItems(dbPath, itemKeys) {
   }
 }
 
-module.exports = { readZotero, resolveZoteroPdf, resolveAttachmentPath, pdfFileNamesForItems }
+/**
+ * Zotero 标注 / 子笔记只读读取（与书目同步 readZotero 完全分开）。
+ *
+ * 关联链：标注 itemAnnotations.parentItemID → PDF 附件 itemAttachments → 书目 items.key。
+ * 只把「用户明确给出的书目 key」当作入口，附件路径由本库解析，渲染端不能指定任何文件。
+ *
+ * Zotero 7 的 itemAnnotations.type 是内部编号（没有 annotationTypes 表可 join）：
+ *   1=highlight 2=note 3=image 4=ink 5=underline 6=text
+ * 其中只有 highlight / underline 能落到本软件的 PDF 高亮上；其余仍返回并计入 skipped。
+ */
+const ANNOTATION_TYPE_NAMES = { 1: 'highlight', 2: 'note', 3: 'image', 4: 'ink', 5: 'underline', 6: 'text' }
+const DRAWABLE_ANNOTATION_TYPES = new Set(['highlight', 'underline'])
+
+/** Zotero 的日期是 UTC 的 "YYYY-MM-DD HH:MM:SS"；转成 ISO 才能安全交给 JS Date */
+function isoFromSqlite(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value)) return ''
+  return `${value.replace(' ', 'T')}Z`
+}
+
+/**
+ * position 是 Zotero 自己序列化的 JSON：rects 为 PDF 坐标（点、原点在左下）。
+ * 解析失败 / 没有 pageIndex 时仍要保留这条标注（列表里展示并标记无法定位），不能静默丢弃。
+ */
+function parseAnnotationPosition(raw) {
+  try {
+    const value = JSON.parse(String(raw || ''))
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+    const pageIndex = Number.isInteger(value.pageIndex) && value.pageIndex >= 0 ? value.pageIndex : null
+    const rects = Array.isArray(value.rects)
+      ? value.rects.filter((rect) => Array.isArray(rect) && rect.length === 4 && rect.every((n) => Number.isFinite(n)))
+      : []
+    return { pageIndex, rects }
+  } catch {
+    return null
+  }
+}
+
+function readZoteroMarkup(dbPath, zoteroKey, extraKeys) {
+  const keys = [zoteroKey, ...(Array.isArray(extraKeys) ? extraKeys : [])]
+    .filter((key, index, all) => typeof key === 'string' && key && all.indexOf(key) === index)
+  if (!keys.length) throw new Error('无效的 Zotero 条目 key')
+  for (const key of keys) {
+    if (!/^[A-Z0-9]{8}$/i.test(key)) throw new Error('无效的 Zotero 条目 key')
+  }
+  const db = openReadonly(dbPath)
+  try {
+    const parentStmt = db.prepare(
+      `SELECT itemID, key FROM items WHERE key = ? AND itemID NOT IN (SELECT itemID FROM deletedItems)`,
+    )
+    const parents = []
+    for (const key of keys) {
+      const row = parentStmt.get(key)
+      if (row && !parents.some((parent) => parent.itemID === row.itemID)) {
+        parents.push({ itemID: row.itemID, key: String(row.key) })
+      }
+    }
+    if (!parents.length) throw new Error('Zotero 中找不到这篇文献')
+
+    // 附件：去重后的文献可能有多份 PDF（多个 key 各自挂附件），逐份登记，标注不能串附件。
+    const attachments = []
+    for (const parent of parents) {
+      for (const pdf of pdfRowsFor(db, parent.itemID)) {
+        const key = String(pdf.attachmentKey)
+        if (attachments.some((entry) => entry.key === key)) continue
+        const resolved = resolveAttachmentPath(dbPath, pdf)
+        attachments.push({
+          itemID: pdf.attachmentItemID,
+          key,
+          parentKey: parent.key,
+          path: resolved || '',
+          fileName: resolved ? path.basename(resolved) : '',
+          exists: Boolean(resolved && fs.existsSync(resolved)),
+          primary: false,
+        })
+      }
+    }
+    // 「当前 PDF」与 readZoteroPdf 用同一规则：按 key 顺序取第一份实际存在的附件
+    const primary = attachments.find((entry) => entry.exists) || null
+    if (primary) primary.primary = true
+
+    const annotationStmt = db.prepare(
+      `SELECT a.itemID, a.type, a.text, a.comment, a.color, a.pageLabel, a.position,
+              i.key AS annotationKey, i.dateAdded, i.dateModified
+       FROM itemAnnotations a
+       JOIN items i ON i.itemID = a.itemID
+       WHERE a.parentItemID = ? AND a.itemID NOT IN (SELECT itemID FROM deletedItems)
+       ORDER BY a.itemID`,
+    )
+    const skipped = { unsupportedType: 0, missingText: 0, invalidPosition: 0, otherAttachment: 0 }
+    const annotations = []
+    const seenAnnotations = new Set()
+    for (const attachment of attachments) {
+      for (const row of annotationStmt.all(attachment.itemID)) {
+        const key = String(row.annotationKey)
+        if (seenAnnotations.has(key)) continue
+        seenAnnotations.add(key)
+        const type = ANNOTATION_TYPE_NAMES[row.type] || 'unknown'
+        const position = parseAnnotationPosition(row.position)
+        const text = String(row.text || '')
+        let status = 'ok'
+        if (!DRAWABLE_ANNOTATION_TYPES.has(type)) status = 'unsupported-type'
+        else if (!position || position.pageIndex === null) status = 'invalid-position'
+        else if (!text.trim()) status = 'missing-text'
+        if (status === 'unsupported-type') skipped.unsupportedType++
+        else if (status === 'invalid-position') skipped.invalidPosition++
+        else if (status === 'missing-text') skipped.missingText++
+        if (primary && attachment.key !== primary.key) skipped.otherAttachment++
+        annotations.push({
+          key,
+          parentKey: attachment.parentKey,
+          attachmentKey: attachment.key,
+          attachmentPath: attachment.path,
+          type,
+          text,
+          comment: String(row.comment || ''),
+          color: String(row.color || ''),
+          // Zotero 的 pageIndex 从 0 开始；调用方转到本软件时要 +1（pageLabel 只用于显示）
+          pageIndex: position ? position.pageIndex : null,
+          pageLabel: String(row.pageLabel || ''),
+          rects: position ? position.rects : [],
+          status,
+          dateAdded: isoFromSqlite(row.dateAdded),
+          dateModified: isoFromSqlite(row.dateModified),
+        })
+      }
+    }
+
+    // 子笔记：既可能挂在书目下，也可能挂在 PDF 附件下（真库两种都有），两处都查并按 key 去重。
+    const noteStmt = db.prepare(
+      `SELECT n.note, i.key AS noteKey, i.dateAdded, i.dateModified
+       FROM itemNotes n
+       JOIN items i ON i.itemID = n.itemID
+       WHERE n.parentItemID = ? AND n.itemID NOT IN (SELECT itemID FROM deletedItems)
+       ORDER BY n.itemID`,
+    )
+    const notes = []
+    const seenNotes = new Set()
+    const noteOwners = [
+      ...parents.map((parent) => ({ itemID: parent.itemID, key: parent.key })),
+      ...attachments.map((attachment) => ({ itemID: attachment.itemID, key: attachment.key })),
+    ]
+    for (const owner of noteOwners) {
+      for (const row of noteStmt.all(owner.itemID)) {
+        const key = String(row.noteKey)
+        if (seenNotes.has(key)) continue
+        seenNotes.add(key)
+        notes.push({
+          key,
+          parentKey: owner.key,
+          html: String(row.note || ''),
+          dateAdded: isoFromSqlite(row.dateAdded),
+          dateModified: isoFromSqlite(row.dateModified),
+        })
+      }
+    }
+
+    const publicAttachment = (entry) => ({
+      key: entry.key,
+      parentKey: entry.parentKey,
+      path: entry.path,
+      fileName: entry.fileName,
+      exists: entry.exists,
+      primary: entry.primary,
+    })
+    return {
+      parentKeys: parents.map((parent) => parent.key),
+      attachment: primary ? publicAttachment(primary) : null,
+      attachments: attachments.map(publicAttachment),
+      annotations,
+      notes,
+      skipped,
+    }
+  } finally {
+    db.close()
+  }
+}
+
+module.exports = { readZotero, resolveZoteroPdf, resolveAttachmentPath, pdfFileNamesForItems, readZoteroMarkup }

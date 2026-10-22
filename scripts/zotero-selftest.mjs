@@ -11,7 +11,7 @@ import { createRequire } from 'node:module'
 
 const require = createRequire(import.meta.url)
 const Database = require('better-sqlite3')
-const { readZotero, resolveZoteroPdf, resolveAttachmentPath } = require('../electron/zoteroFs.cjs')
+const { readZotero, resolveZoteroPdf, resolveAttachmentPath, readZoteroMarkup } = require('../electron/zoteroFs.cjs')
 
 let checks = 0
 function check(name, ok, detail = '') {
@@ -34,7 +34,7 @@ await fsp.writeFile(linkedPdf, '%PDF-1.4 linked')
 const db = new Database(dbPath)
 db.exec(`
   CREATE TABLE itemTypes (itemTypeID INTEGER PRIMARY KEY, typeName TEXT);
-  CREATE TABLE items (itemID INTEGER PRIMARY KEY, key TEXT, itemTypeID INTEGER);
+  CREATE TABLE items (itemID INTEGER PRIMARY KEY, key TEXT, itemTypeID INTEGER, dateAdded TEXT, dateModified TEXT);
   CREATE TABLE deletedItems (itemID INTEGER PRIMARY KEY);
   CREATE TABLE collections (collectionID INTEGER PRIMARY KEY, collectionName TEXT, parentCollectionID INTEGER);
   CREATE TABLE collectionItems (collectionID INTEGER, itemID INTEGER);
@@ -43,19 +43,21 @@ db.exec(`
   CREATE TABLE itemAttachments (itemID INTEGER, parentItemID INTEGER, contentType TEXT, path TEXT, linkMode INTEGER);
   CREATE TABLE creators (creatorID INTEGER PRIMARY KEY, lastName TEXT, firstName TEXT);
   CREATE TABLE itemCreators (itemID INTEGER, creatorID INTEGER, orderIndex INTEGER);
+  CREATE TABLE itemAnnotations (itemID INTEGER PRIMARY KEY, parentItemID INTEGER, type INTEGER, text TEXT, comment TEXT, color TEXT, pageLabel TEXT, position TEXT);
+  CREATE TABLE itemNotes (itemID INTEGER PRIMARY KEY, parentItemID INTEGER, note TEXT, title TEXT);
 `)
 const types = ['journalArticle', 'conferencePaper', 'webpage', 'attachment', 'annotation', 'note']
 types.forEach((name, i) => db.prepare('INSERT INTO itemTypes VALUES (?, ?)').run(i + 1, name))
-db.prepare('INSERT INTO items VALUES (1, ?, 1)').run('AAAA1111') // journalArticle，2 个 PDF（1 个在、1 个缺失）
-db.prepare('INSERT INTO items VALUES (2, ?, 2)').run('BBBB2222') // conferencePaper，绝对路径 PDF
-db.prepare('INSERT INTO items VALUES (3, ?, 3)').run('CCCC3333') // webpage
-db.prepare('INSERT INTO items VALUES (10, ?, 4)').run('DDDD4444') // attachment（有题名也要排除）
-db.prepare('INSERT INTO items VALUES (11, ?, 5)').run('EEEE5555') // annotation
-db.prepare('INSERT INTO items VALUES (12, ?, 6)').run('FFFF6666') // note
-db.prepare('INSERT INTO items VALUES (13, ?, 1)').run('GGGG7777') // 已删除
-db.prepare('INSERT INTO items VALUES (14, ?, 1)').run('HHHH8888') // 没有题名 → 排除
+db.prepare('INSERT INTO items (itemID, key, itemTypeID) VALUES (1, ?, 1)').run('AAAA1111') // journalArticle，2 个 PDF（1 个在、1 个缺失）
+db.prepare('INSERT INTO items (itemID, key, itemTypeID) VALUES (2, ?, 2)').run('BBBB2222') // conferencePaper，绝对路径 PDF
+db.prepare('INSERT INTO items (itemID, key, itemTypeID) VALUES (3, ?, 3)').run('CCCC3333') // webpage
+db.prepare('INSERT INTO items (itemID, key, itemTypeID) VALUES (10, ?, 4)').run('DDDD4444') // attachment（有题名也要排除）
+db.prepare('INSERT INTO items (itemID, key, itemTypeID) VALUES (11, ?, 5)').run('EEEE5555') // annotation
+db.prepare('INSERT INTO items (itemID, key, itemTypeID) VALUES (12, ?, 6)').run('FFFF6666') // note
+db.prepare('INSERT INTO items (itemID, key, itemTypeID) VALUES (13, ?, 1)').run('GGGG7777') // 已删除
+db.prepare('INSERT INTO items (itemID, key, itemTypeID) VALUES (14, ?, 1)').run('HHHH8888') // 没有题名 → 排除
 for (const [id, key, filename] of [[20, 'STORED01', '论文.pdf'], [21, 'STORED02', '缺失.pdf']]) {
-  db.prepare('INSERT INTO items VALUES (?, ?, 4)').run(id, key)
+  db.prepare('INSERT INTO items (itemID, key, itemTypeID) VALUES (?, ?, 4)').run(id, key)
   if (id === 20) await fsp.mkdir(path.join(storage, key), { recursive: true })
   if (id === 20) await fsp.writeFile(path.join(storage, key, filename), '%PDF-1.4 stored')
 }
@@ -63,7 +65,7 @@ db.prepare('INSERT INTO itemAttachments VALUES (20, 1, ?, ?, 1)').run('applicati
 db.prepare('INSERT INTO itemAttachments VALUES (21, 1, ?, ?, 0)').run('application/pdf', 'storage:缺失.pdf')
 db.prepare('INSERT INTO itemAttachments VALUES (30, 2, ?, ?, 2)').run('application/pdf', linkedPdf)
 db.prepare('INSERT INTO itemAttachments VALUES (10, NULL, ?, ?, 0)').run('application/pdf', 'storage:论文.pdf')
-db.prepare('INSERT INTO items VALUES (30, ?, 4)').run('LINKED03')
+db.prepare('INSERT INTO items (itemID, key, itemTypeID) VALUES (30, ?, 4)').run('LINKED03')
 db.prepare('INSERT INTO collections VALUES (1, ?, NULL)').run('光通信')
 db.prepare('INSERT INTO collections VALUES (2, ?, 1)').run('调制器')
 db.prepare('INSERT INTO collectionItems VALUES (2, 1)').run()
@@ -84,6 +86,32 @@ db.prepare('INSERT INTO creators VALUES (1, ?, ?)').run('Zhang', 'San')
 db.prepare('INSERT INTO creators VALUES (2, ?, ?)').run('Li', '')
 db.prepare('INSERT INTO itemCreators VALUES (1, 1, 0)').run()
 db.prepare('INSERT INTO itemCreators VALUES (1, 2, 1)').run()
+
+// 标注 / 子笔记夹具：高亮、下划线、便签、缺文字、坏 position、另一份 PDF 上的标注
+const stamp = '2025-02-10 11:28:35'
+const annotationRows = [
+  [40, 'ANNOTA01', 20, 1, '高亮文本', '批注', '#ffd400', '3', '{"pageIndex":0,"rects":[[1,2,30,14]]}'],
+  [41, 'ANNOTA02', 20, 5, '下划线文本', '', '#5fb236', '4', '{"pageIndex":1,"rects":[[1,2,30,14]]}'],
+  [42, 'ANNOTA03', 20, 2, '', '便签内容', '#2ea8e5', '5', '{"pageIndex":2,"rects":[[1,2,30,14]]}'],
+  [43, 'ANNOTA04', 20, 1, '', '', '#ffd400', '3', '{"pageIndex":0}'],
+  [44, 'ANNOTA05', 20, 1, '坏位置', '', '#ffd400', '6', '{oops'],
+  [45, 'ANNOTA06', 21, 1, '另一份 PDF 的高亮', '', '#ff6666', '1', '{"pageIndex":0,"rects":[]}'],
+  [46, 'ANNOTD07', 20, 1, '已删除的标注', '', '#ffd400', '7', '{"pageIndex":0}'],
+]
+for (const [itemID, key, parentItemID, type, text, comment, color, pageLabel, position] of annotationRows) {
+  db.prepare('INSERT INTO items (itemID, key, itemTypeID, dateAdded, dateModified) VALUES (?, ?, 5, ?, ?)').run(itemID, key, stamp, stamp)
+  db.prepare('INSERT INTO itemAnnotations VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(itemID, parentItemID, type, text, comment, color, pageLabel, position)
+}
+const noteRows = [
+  [50, 'NOTEB001', 1, '<div class="zotero-note"><p>书目下的子笔记</p></div>'],
+  [51, 'NOTEB002', 20, '<div class="zotero-note"><p>PDF 附件下的子笔记</p></div>'],
+  [52, 'NOTEB003', null, '<div class="zotero-note"><p>独立笔记</p></div>'],
+]
+for (const [itemID, key, parentItemID, note] of noteRows) {
+  db.prepare('INSERT INTO items (itemID, key, itemTypeID, dateAdded, dateModified) VALUES (?, ?, 6, ?, ?)').run(itemID, key, stamp, stamp)
+  db.prepare('INSERT INTO itemNotes VALUES (?, ?, ?, ?)').run(itemID, parentItemID, note, '')
+}
+db.prepare('INSERT INTO deletedItems VALUES (46)').run()
 db.close()
 
 const hash = (file) => createHash('sha256').update(fs.readFileSync(file)).digest('hex')
@@ -143,7 +171,69 @@ try {
   }
   check('不存在的数据库 → 中文错误', openError.startsWith('无法打开 Zotero 数据库'))
 
-  console.log(`\nzoteroFs 只读读取：${checks}/${checks} 通过`)
-} finally {
+  // ---- readZoteroMarkup：标注 / 子笔记（与书目同步完全独立的只读接口）----
+  const markup = readZoteroMarkup(dbPath, 'AAAA1111')
+  check(
+    '标注沿「标注 → PDF 附件 → 书目」关联到文献',
+    markup.parentKeys.length === 1 && markup.parentKeys[0] === 'AAAA1111' && markup.annotations.length === 6,
+    `${markup.parentKeys.join(',')} / ${markup.annotations.length}`,
+  )
+  check('主附件是按 key 顺序第一份存在的 PDF', markup.attachment?.key === 'STORED01' && markup.attachment?.exists === true)
+  check('标注保留 0 起页索引、颜色、批注与页码标签', (() => {
+    const ann = markup.annotations.find((item) => item.key === 'ANNOTA01')
+    return ann?.pageIndex === 0 && ann.color === '#ffd400' && ann.comment === '批注' && ann.pageLabel === '3'
+  })())
+  check('Zotero 的 UTC 日期转成 ISO', markup.annotations.find((item) => item.key === 'ANNOTA01')?.dateAdded === '2025-02-10T11:28:35Z')
+  check('下划线保留为可绘制类型', (() => {
+    const ann = markup.annotations.find((item) => item.key === 'ANNOTA02')
+    return ann?.type === 'underline' && ann.status === 'ok' && ann.pageIndex === 1
+  })())
+  check('便签（不支持类型）保留并计入 skipped', (() => {
+    const ann = markup.annotations.find((item) => item.key === 'ANNOTA03')
+    return ann?.type === 'note' && ann.status === 'unsupported-type' && markup.skipped.unsupportedType === 1
+  })())
+  check('缺文字 / 坏 position 分别计数且不丢标注', (() => {
+    const missing = markup.annotations.find((item) => item.key === 'ANNOTA04')
+    const broken = markup.annotations.find((item) => item.key === 'ANNOTA05')
+    return missing?.status === 'missing-text' && broken?.status === 'invalid-position' &&
+      markup.skipped.missingText === 1 && markup.skipped.invalidPosition === 1
+  })())
+  check('另一份 PDF 的标注带自己的附件 key 并计入 otherAttachment', (() => {
+    const other = markup.annotations.find((item) => item.key === 'ANNOTA06')
+    return other?.attachmentKey === 'STORED02' && markup.skipped.otherAttachment === 1
+  })())
+  check('已删除的标注不返回', !markup.annotations.some((item) => item.key === 'ANNOTD07'))
+  check('子笔记覆盖书目下与附件下两种挂法', (() => {
+    const keys = markup.notes.map((item) => item.key).sort()
+    return keys.length === 2 && keys[0] === 'NOTEB001' && keys[1] === 'NOTEB002' &&
+      markup.notes.some((item) => item.parentKey === 'AAAA1111') && markup.notes.some((item) => item.parentKey === 'STORED01')
+  })())
+  check('独立笔记不会被当成文献子笔记', !markup.notes.some((item) => item.key === 'NOTEB003'))
+  check('多个归并 key：父条目取并集', (() => {
+    const merged = readZoteroMarkup(dbPath, 'BBBB2222', ['AAAA1111'])
+    return merged.parentKeys.length === 2 && merged.parentKeys.includes('AAAA1111') && merged.parentKeys.includes('BBBB2222')
+  })())
+  check('重复 key 不会重复返回', readZoteroMarkup(dbPath, 'AAAA1111', ['AAAA1111']).parentKeys.length === 1)
+  check('标注数据不串附件（主附件只拿自己的标注）', (() => {
+    const primaryAnn = markup.annotations.filter((item) => item.attachmentKey === 'STORED01')
+    return primaryAnn.length === 5 && primaryAnn.every((item) => item.parentKey === 'AAAA1111')
+  })())
+  let markupInvalid = ''
+  try {
+    readZoteroMarkup(dbPath, '../etc/passwd')
+  } catch (error) {
+    markupInvalid = error.message
+  }
+  check('标注接口同样拒绝非法 key', markupInvalid === '无效的 Zotero 条目 key')
+  let markupUnknown = ''
+  try {
+    readZoteroMarkup(dbPath, 'ZZZZ9999')
+  } catch (error) {
+    markupUnknown = error.message
+  }
+  check('不存在的条目 → 中文错误而不是空结果', markupUnknown === 'Zotero 中找不到这篇文献')
+  check('读标注后数据库字节不变（只读）', hash(dbPath) === before)
+
+  console.log(`\nzoteroFs 只读读取：${checks}/${checks} 通过`)} finally {
   await fsp.rm(base, { recursive: true, force: true })
 }

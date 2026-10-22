@@ -71,6 +71,10 @@
       const result = await call('zotero:read-pdf', { zoteroKey, zoteroKeys })
       return { ...result, data: fromBase64(result.data) }
     },
+    // 标注与子笔记（只读）：附件归属由服务端从授权的 Zotero 库解析
+    readZoteroMarkup: (_dbPath, zoteroKey, zoteroKeys) => call('zotero:read-markup', { zoteroKey, zoteroKeys }),
+    // Zotero 10+ 本地写入（只增）：服务端持密钥并连 127.0.0.1:23119
+    zoteroLocalApi: (request) => call('zotero:local-api', request ?? {}),
     // 笔记 localPdf 字段记录的 PDF：服务端只允许白名单目录内的 .pdf
     openExternalFile: (filePath) => call('file:open-external', { path: filePath }),
     readExternalPdf: async (filePath) => {

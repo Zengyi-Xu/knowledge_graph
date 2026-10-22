@@ -1,97 +1,103 @@
 {
-  "generatedAt": "2026-10-21T17:23:36.085Z",
-  "entry": "assets/index-DP90XlnI.js",
+  "generatedAt": "2026-10-22T22:16:01.840Z",
+  "entry": "assets/index-B60jzlBI.js",
   "workerAssets": [
     "assets/pdf.worker.min-CjEcRF4W.mjs",
     "assets/pdf.worker.min-BH63Q58_.js"
   ],
   "scenarios": {
     "home": [
-      "assets/index-DP90XlnI.js"
+      "assets/index-B60jzlBI.js"
     ],
     "literature": [
-      "assets/index-DP90XlnI.js",
-      "assets/LiteratureView-DHeu-jMR.js",
-      "assets/select-Da1U0h91.js",
-      "assets/literature-B9gPj303.js",
-      "assets/rtfField-CtgH-YNz.js",
-      "assets/copyCitation-BykhZAsj.js",
-      "assets/sliders-horizontal-DRjnWzwK.js",
-      "assets/file-text-DmnYo9SU.js",
-      "assets/clipboard-copy-BZdAgNSg.js",
+      "assets/index-B60jzlBI.js",
+      "assets/LiteratureView-Dr_U6wJy.js",
+      "assets/select-XvQqnphy.js",
+      "assets/literature-BUfjGOO7.js",
+      "assets/rtfField-CA4QolYB.js",
+      "assets/copyCitation-BlldbfDW.js",
+      "assets/sliders-horizontal-CyLoeo1M.js",
+      "assets/file-text-Awsb3BZ7.js",
+      "assets/clipboard-copy-CSbtI0Tn.js",
+      "assets/check-DDtp43TH.js",
       "assets/index-BdQq_4o_.js"
     ],
     "preview": [
-      "assets/index-DP90XlnI.js",
-      "assets/NoteEditor-CSrocBSF.js",
-      "assets/Markdown-BOVi8_tX.js",
-      "assets/select-Da1U0h91.js",
+      "assets/index-B60jzlBI.js",
+      "assets/NoteEditor-BBlWXJtE.js",
+      "assets/Markdown-VHfscFoJ.js",
+      "assets/select-XvQqnphy.js",
       "assets/mathMarkup-DA6Quczq.js",
-      "assets/file-text-DmnYo9SU.js",
-      "assets/clipboard-copy-BZdAgNSg.js",
-      "assets/external-link-DzUvga_1.js",
+      "assets/file-text-Awsb3BZ7.js",
+      "assets/clipboard-copy-CSbtI0Tn.js",
+      "assets/external-link-BY5tLVTT.js",
+      "assets/check-DDtp43TH.js",
       "assets/index-BdQq_4o_.js"
     ],
     "edit": [
-      "assets/index-DP90XlnI.js",
-      "assets/WysiwygEditor-EXR38vD_.js",
-      "assets/NoteEditor-CSrocBSF.js",
-      "assets/Markdown-BOVi8_tX.js",
-      "assets/select-Da1U0h91.js",
+      "assets/index-B60jzlBI.js",
+      "assets/WysiwygEditor-BcAn8hTs.js",
+      "assets/NoteEditor-BBlWXJtE.js",
+      "assets/Markdown-VHfscFoJ.js",
+      "assets/select-XvQqnphy.js",
       "assets/mathMarkup-DA6Quczq.js",
-      "assets/file-text-DmnYo9SU.js",
-      "assets/clipboard-copy-BZdAgNSg.js",
-      "assets/external-link-DzUvga_1.js",
+      "assets/file-text-Awsb3BZ7.js",
+      "assets/clipboard-copy-CSbtI0Tn.js",
+      "assets/external-link-BY5tLVTT.js",
+      "assets/check-DDtp43TH.js",
       "assets/index-BdQq_4o_.js"
     ],
     "graph": [
-      "assets/index-DP90XlnI.js",
-      "assets/GraphView-nr-UpMfp.js",
-      "assets/sliders-horizontal-DRjnWzwK.js",
-      "assets/chevron-left-DB3fwNnc.js",
+      "assets/index-B60jzlBI.js",
+      "assets/GraphView-DV_oJ_uQ.js",
+      "assets/sliders-horizontal-CyLoeo1M.js",
+      "assets/chevron-left-Bz9QUAyL.js",
       "assets/index-BdQq_4o_.js"
     ],
     "pdf": [
-      "assets/index-DP90XlnI.js",
+      "assets/index-B60jzlBI.js",
       "assets/pdf.worker.min-BH63Q58_.js",
-      "assets/NoteEditor-CSrocBSF.js",
-      "assets/Markdown-BOVi8_tX.js",
-      "assets/react-resizable-panels-SwnfOVyw.js",
-      "assets/select-Da1U0h91.js",
-      "assets/PdfViewer-CEPVMyRc.js",
-      "assets/PdfReadingWorkspace-Bjwp-D9T.js",
+      "assets/NoteEditor-BBlWXJtE.js",
+      "assets/ZoteroNotesPanel-B4IAjQHs.js",
+      "assets/Markdown-VHfscFoJ.js",
+      "assets/PdfViewer-BGi0Cuo1.js",
+      "assets/select-XvQqnphy.js",
+      "assets/PdfReadingWorkspace-CwTwUqYc.js",
       "assets/mathMarkup-DA6Quczq.js",
-      "assets/file-text-DmnYo9SU.js",
-      "assets/clipboard-copy-BZdAgNSg.js",
-      "assets/external-link-DzUvga_1.js",
-      "assets/chevron-left-DB3fwNnc.js",
+      "assets/file-text-Awsb3BZ7.js",
+      "assets/clipboard-copy-CSbtI0Tn.js",
+      "assets/external-link-BY5tLVTT.js",
+      "assets/loader-circle-BU-7kWF3.js",
+      "assets/chevron-left-Bz9QUAyL.js",
+      "assets/check-DDtp43TH.js",
       "assets/index-BdQq_4o_.js"
     ],
     "citation": [
-      "assets/index-CsxFOXJ6.js",
-      "assets/index-DP90XlnI.js",
-      "assets/NoteEditor-CSrocBSF.js",
+      "assets/index-DmBOLQIP.js",
+      "assets/index-B60jzlBI.js",
+      "assets/NoteEditor-BBlWXJtE.js",
       "assets/styles-B6Bpj9wP.js",
-      "assets/LiteratureView-DHeu-jMR.js",
-      "assets/Markdown-BOVi8_tX.js",
-      "assets/select-Da1U0h91.js",
-      "assets/literature-B9gPj303.js",
+      "assets/LiteratureView-Dr_U6wJy.js",
+      "assets/Markdown-VHfscFoJ.js",
+      "assets/select-XvQqnphy.js",
+      "assets/literature-BUfjGOO7.js",
       "assets/mathMarkup-DA6Quczq.js",
-      "assets/rtfField-CtgH-YNz.js",
-      "assets/copyCitation-BykhZAsj.js",
-      "assets/sliders-horizontal-DRjnWzwK.js",
-      "assets/file-text-DmnYo9SU.js",
-      "assets/clipboard-copy-BZdAgNSg.js",
-      "assets/external-link-DzUvga_1.js",
+      "assets/rtfField-CA4QolYB.js",
+      "assets/copyCitation-BlldbfDW.js",
+      "assets/sliders-horizontal-CyLoeo1M.js",
+      "assets/file-text-Awsb3BZ7.js",
+      "assets/clipboard-copy-CSbtI0Tn.js",
+      "assets/external-link-BY5tLVTT.js",
+      "assets/check-DDtp43TH.js",
       "assets/index-BdQq_4o_.js"
     ]
   },
   "units": {
     "PdfViewer + pdf.worker": {
       "files": [
-        "assets/PdfReadingWorkspace-Bjwp-D9T.js",
-        "assets/PdfViewer-CEPVMyRc.js",
-        "assets/LiteratureAttachments-DIHY2Mtd.js",
+        "assets/PdfReadingWorkspace-CwTwUqYc.js",
+        "assets/PdfViewer-BGi0Cuo1.js",
+        "assets/LiteratureAttachments-BZjbjoSd.js",
         "assets/pdf.worker.min-BH63Q58_.js"
       ],
       "allowed": [
@@ -100,7 +106,7 @@
     },
     "编辑器 Vditor": {
       "files": [
-        "assets/WysiwygEditor-EXR38vD_.js"
+        "assets/WysiwygEditor-BcAn8hTs.js"
       ],
       "allowed": [
         "edit",
@@ -109,7 +115,7 @@
     },
     "citation-js + CSL 样式": {
       "files": [
-        "assets/index-CsxFOXJ6.js",
+        "assets/index-DmBOLQIP.js",
         "assets/styles-B6Bpj9wP.js"
       ],
       "allowed": [

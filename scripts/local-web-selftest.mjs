@@ -39,7 +39,7 @@ async function makeZoteroFixture(zoteroDir) {
   const db = new Database(dbPath)
   db.exec(`
     CREATE TABLE itemTypes (itemTypeID INTEGER PRIMARY KEY, typeName TEXT);
-    CREATE TABLE items (itemID INTEGER PRIMARY KEY, key TEXT, itemTypeID INTEGER);
+    CREATE TABLE items (itemID INTEGER PRIMARY KEY, key TEXT, itemTypeID INTEGER, dateAdded TEXT, dateModified TEXT);
     CREATE TABLE deletedItems (itemID INTEGER PRIMARY KEY);
     CREATE TABLE collections (collectionID INTEGER PRIMARY KEY, collectionName TEXT, parentCollectionID INTEGER);
     CREATE TABLE collectionItems (collectionID INTEGER, itemID INTEGER);
@@ -48,23 +48,53 @@ async function makeZoteroFixture(zoteroDir) {
     CREATE TABLE itemAttachments (itemID INTEGER, parentItemID INTEGER, contentType TEXT, path TEXT, linkMode INTEGER);
     CREATE TABLE creators (creatorID INTEGER PRIMARY KEY, lastName TEXT, firstName TEXT);
     CREATE TABLE itemCreators (itemID INTEGER, creatorID INTEGER, orderIndex INTEGER);
+    CREATE TABLE itemAnnotations (itemID INTEGER PRIMARY KEY, parentItemID INTEGER, type INTEGER, text TEXT, comment TEXT, color TEXT, pageLabel TEXT, position TEXT);
+    CREATE TABLE itemNotes (itemID INTEGER PRIMARY KEY, parentItemID INTEGER, note TEXT, title TEXT);
   `)
   db.prepare('INSERT INTO itemTypes VALUES (1, ?)').run('journalArticle')
   db.prepare('INSERT INTO itemTypes VALUES (2, ?)').run('attachment')
-  db.prepare('INSERT INTO items VALUES (1, ?, 1)').run('PDFKEY02')
-  db.prepare('INSERT INTO items VALUES (2, ?, 1)').run('NOPDFF03')
-  db.prepare('INSERT INTO items VALUES (3, ?, 2)').run('PDFKEY01')
-  db.prepare('INSERT INTO items VALUES (4, ?, 2)').run('MISSING1')
-  db.prepare('INSERT INTO items VALUES (5, ?, 1)').run('MULTIKEY')
-  db.prepare('INSERT INTO items VALUES (6, ?, 2)').run('PDFKEY09')
+  db.prepare('INSERT INTO itemTypes VALUES (3, ?)').run('annotation')
+  db.prepare('INSERT INTO itemTypes VALUES (4, ?)').run('note')
+  db.prepare('INSERT INTO items (itemID, key, itemTypeID) VALUES (1, ?, 1)').run('PDFKEY02')
+  db.prepare('INSERT INTO items (itemID, key, itemTypeID) VALUES (2, ?, 1)').run('NOPDFF03')
+  db.prepare('INSERT INTO items (itemID, key, itemTypeID) VALUES (3, ?, 2)').run('PDFKEY01')
+  db.prepare('INSERT INTO items (itemID, key, itemTypeID) VALUES (4, ?, 2)').run('MISSING1')
+  db.prepare('INSERT INTO items (itemID, key, itemTypeID) VALUES (5, ?, 1)').run('MULTIKEY')
+  db.prepare('INSERT INTO items (itemID, key, itemTypeID) VALUES (6, ?, 2)').run('PDFKEY09')
+  db.prepare('INSERT INTO items (itemID, key, itemTypeID) VALUES (7, ?, 2)').run('PDFKEY07')
   db.prepare('INSERT INTO itemAttachments VALUES (3, 1, ?, ?, 1)').run('application/pdf', 'storage:论文.pdf')
   db.prepare('INSERT INTO itemAttachments VALUES (4, 2, ?, ?, 0)').run('application/pdf', 'storage:不在本机.pdf')
   db.prepare('INSERT INTO itemAttachments VALUES (6, 5, ?, ?, 1)').run('application/pdf', 'storage:备用.pdf')
+  // 同一篇文献的第二份 PDF（文件不在本机）：它的标注属于「另一份 PDF」，不能画到第一份上
+  db.prepare('INSERT INTO itemAttachments VALUES (7, 1, ?, ?, 0)').run('application/pdf', 'storage:另一份.pdf')
   const values = [[1, 1, '有本地 PDF 的论文'], [2, 1, 'PDF 不在本机的论文'], [5, 1, '去重合并后的重复条目']]
   values.forEach(([itemID, fieldID, value], i) => {
     db.prepare('INSERT INTO itemDataValues VALUES (?, ?)').run(i + 1, value)
     db.prepare('INSERT INTO itemData VALUES (?, ?, ?)').run(itemID, fieldID, i + 1)
   })
+  // 标注 / 子笔记：覆盖「能画的高亮、下划线、墨迹、缺文字、坏位置、另一份 PDF、书目与附件下的笔记」
+  const stamp = '2025-02-10 11:28:35'
+  const annotationItems = [
+    [10, 'ANNHL001', 3, 1, '可画的高亮', 'Zotero 批注', '#ffd400', '3', '{"pageIndex":0,"rects":[[1,2,30,14]]}'],
+    [11, 'ANNUL002', 3, 5, '下划线文本', '', '#5fb236', '4', '{"pageIndex":1,"rects":[[1,2,30,14]]}'],
+    [12, 'ANNINK03', 3, 4, '', '', '#2ea8e5', '5', '{"paths":[[1,2,3,4]]}'],
+    [13, 'ANNMT004', 3, 1, '', '', '#ffd400', '3', '{"pageIndex":0,"rects":[[1,2,30,14]]}'],
+    [14, 'ANNBAD05', 3, 1, '坏位置', '', '#ffd400', '6', '{broken json'],
+    [18, 'ANNOTH06', 7, 1, '另一份 PDF 的高亮', '', '#ff6666', '1', '{"pageIndex":0,"rects":[[1,2,30,14]]}'],
+  ]
+  for (const [itemID, key, parentItemID, type, text, comment, color, pageLabel, position] of annotationItems) {
+    db.prepare('INSERT INTO items (itemID, key, itemTypeID, dateAdded, dateModified) VALUES (?, ?, 3, ?, ?)').run(itemID, key, stamp, stamp)
+    db.prepare('INSERT INTO itemAnnotations VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(itemID, parentItemID, type, text, comment, color, pageLabel, position)
+  }
+  const noteItems = [
+    [15, 'NOTEBI01', 1, '<div class="zotero-note"><p>挂在书目下的子笔记</p></div>'],
+    [16, 'NOTEAT02', 3, '<div class="zotero-note"><p>挂在 PDF 附件下的子笔记</p></div>'],
+    [17, 'NOTEROOT', null, '<div class="zotero-note"><p>独立笔记，不是任何文献的子笔记</p></div>'],
+  ]
+  for (const [itemID, key, parentItemID, note] of noteItems) {
+    db.prepare('INSERT INTO items (itemID, key, itemTypeID, dateAdded, dateModified) VALUES (?, ?, 4, ?, ?)').run(itemID, key, stamp, stamp)
+    db.prepare('INSERT INTO itemNotes VALUES (?, ?, ?, ?)').run(itemID, parentItemID, note, '')
+  }
   db.close()
   return dbPath
 }
@@ -187,6 +217,44 @@ try {
     const invalid = await call2('zotero:open-pdf', { zoteroKey: '..\\..\\etc' })
     check('非法 key → 400', invalid.status === 400 && invalid.body.error.includes('无效的 Zotero 条目 key'))
     check('缺 key → 400 而不是崩溃', (await call2('zotero:open-pdf', {})).status === 400)
+
+    // ---- 只读标注 / 子笔记接口 ----
+    const markup = await call2('zotero:read-markup', { zoteroKey: 'PDFKEY02' })
+    const bundle = markup.body.result
+    check('授权库可以只读读取标注与子笔记', markup.status === 200 && bundle.annotations.length === 6)
+    check(
+      '跳过计数区分不支持类型 / 缺文字 / 坏位置 / 另一份 PDF',
+      bundle.skipped.unsupportedType === 1 && bundle.skipped.missingText === 1 &&
+        bundle.skipped.invalidPosition === 1 && bundle.skipped.otherAttachment === 1,
+    )
+    check('主附件是按 key 顺序第一份存在的 PDF', bundle.attachment?.key === 'PDFKEY01' && bundle.attachment?.exists === true)
+    check('标注保留 Zotero 的 0 起页索引（换算交给渲染端）', bundle.annotations.find((a) => a.key === 'ANNHL001')?.pageIndex === 0)
+    check('标注保留颜色、批注与 ISO 时间', (() => {
+      const ann = bundle.annotations.find((a) => a.key === 'ANNHL001')
+      return ann?.color === '#ffd400' && ann.comment === 'Zotero 批注' && ann.dateAdded === '2025-02-10T11:28:35Z'
+    })())
+    check('墨迹标注不被静默丢弃', (() => {
+      const ink = bundle.annotations.find((a) => a.key === 'ANNINK03')
+      return ink?.type === 'ink' && ink.status === 'unsupported-type' && ink.pageIndex === null
+    })())
+    check('缺文字的高亮保留但标记无法定位', bundle.annotations.find((a) => a.key === 'ANNMT004')?.status === 'missing-text')
+    check('position JSON 损坏不丢标注', bundle.annotations.find((a) => a.key === 'ANNBAD05')?.status === 'invalid-position')
+    check('另一份 PDF 的标注带上自己的附件 key', bundle.annotations.find((a) => a.key === 'ANNOTH06')?.attachmentKey === 'PDFKEY07')
+    check('子笔记同时覆盖书目下与附件下两种挂法', bundle.notes.length === 2 && bundle.notes.some((n) => n.parentKey === 'PDFKEY02') && bundle.notes.some((n) => n.parentKey === 'PDFKEY01'))
+    check('独立笔记不会被当成文献子笔记', !bundle.notes.some((n) => n.key === 'NOTEROOT'))
+    check('前端夹带的附件路径被忽略（归属由服务端解析）', (await call2('zotero:read-markup', { zoteroKey: 'PDFKEY02', attachmentPath: 'C:\\Windows\\System32\\calc.exe' })).body.result.annotations.length === 6)
+    check('前端指定的其它数据库路径无效（只用授权的库）', (await call2('zotero:read-markup', { zoteroKey: 'PDFKEY02', dbPath: path.join(dir, 'other.sqlite') })).status === 200)
+    check('非法 key → 400', (await call2('zotero:read-markup', { zoteroKey: '..\\..\\etc' })).body.error.includes('无效的 Zotero 条目 key'))
+    check('不存在的条目 → 可读错误，而不是空结果', (await call2('zotero:read-markup', { zoteroKey: 'ZZZZ9999' })).status === 400)
+    const noZotero = await request('zotero:read-markup', { zoteroKey: 'PDFKEY02' })
+    check('未配置 Zotero 数据库时明确报错', noZotero.status === 400 && String((await noZotero.json()).error).includes('未配置 Zotero 数据库'))
+
+    // ---- Zotero 10+ 本地写入（只增）：网页端转发探测与参数校验 ----
+    const localApi = await call2('zotero:local-api', { action: 'status' })
+    check('网页端转发 Zotero 本地写入探测', localApi.status === 200 && localApi.body.result.action === 'status' && typeof localApi.body.result.available === 'boolean')
+    const badWrite = await call2('zotero:local-api', { action: 'write', attachmentKey: '', annotations: [] })
+    check('空白附件 key 直接拒绝（不冒充成功）', badWrite.status === 200 && badWrite.body.result.code === 'bad-request')
+    check('未知 action 返回可读错误', (await call2('zotero:local-api', { action: 'delete-everything' })).status === 400)
   } finally { await local2.close() }
 
   // ---- 打开笔记里记录的本地 PDF（localPdf）：白名单 + 只认 .pdf ----

@@ -34,6 +34,17 @@ import {
   type PdfAnnotationsFile,
 } from '@/lib/attachments'
 import { annotationStoreId, cachedPdfSource, externalPdfSource, loadPdfSourceCached } from '@/lib/pdfSource'
+import { openZoteroItem, useZoteroMarkup, zoteroKeysOf } from '@/hooks/useZoteroMarkup'
+import { ZoteroNotesPanel } from '@/components/ZoteroNotesPanel'
+import { appendPdfReference, referencedAnnotationIds } from '@/lib/pdfReference'
+import {
+  appendZoteroNoteMarkdown,
+  hasExportedZoteroNote,
+  mapZoteroAnnotation,
+  mergeViewerAnnotations,
+  type ZoteroAnnotationRecord,
+  type ZoteroNoteRecord,
+} from '@/lib/zoteroMarkup'
 import { clearLocalPdfMatch, ensureLocalPdfMatches, localPdfFallbackVersion, subscribeLocalPdfFallback } from '@/lib/localPdfFallback'
 import type { NewAnnotation } from '@/components/PdfViewer'
 
@@ -101,6 +112,10 @@ export function LiteratureAttachments({ note, onChange, onFullscreenRead, childr
     toast('已记到这篇笔记的「本地 PDF」')
   }
   const externalStoreId = external ? annotationStoreId(note.id, external) : ''
+  // Zotero 标注 sidecar 与本地标注同仓库 id：详情页与全屏工作台读到的是同一份
+  const markup = useZoteroMarkup({ note, source: external, storeId: externalStoreId })
+  /** 没有 Zotero 条目 key、也没同步过的文献不显示这一块（对普通文献只是噪声） */
+  const showZoteroMarkup = Boolean(zoteroKeysOf(note).key) || Boolean(markup.file)
   // 字节已经读过（本会话打开过这份 PDF）才出快照：否则打开笔记就要跨桥读整份文件
   const externalReady = Boolean(external && cachedPdfSource(external))
   /** 顶层布局给的挂载点：并列视图下把阅读面板 portal 到独立一列（图谱会让出宽度），没有就地渲染 */
@@ -235,8 +250,41 @@ export function LiteratureAttachments({ note, onChange, onFullscreenRead, childr
     toast.success('已导出到笔记正文')
   }
 
-  const confirmRemove = async (id: string) => {
-    try {
+  /** Zotero 标注导出：与工作台用同一条 PDF 引用；重复点不会重复追加 */
+  const exportZoteroAnnotation = (record: ZoteroAnnotationRecord) => {
+    const mapped = mapZoteroAnnotation(record)
+    if (!mapped) return
+    if (referencedAnnotationIds(note.content).has(mapped.id)) {
+      toast('这条标注已经在笔记里了')
+      return
+    }
+    onChange({
+      content: appendPdfReference(note.content, mapped, open?.fileName ?? markup.attachment?.fileName ?? 'Zotero PDF'),
+    })
+    toast.success('已导出到笔记正文')
+  }
+
+  const exportZoteroNote = (record: ZoteroNoteRecord) => {
+    if (hasExportedZoteroNote(note.content, record.key)) {
+      toast('这条 Zotero 笔记已经导出过')
+      return
+    }
+    onChange({ content: appendZoteroNoteMarkdown(note.content, record) })
+    toast.success('已导出到当前笔记')
+  }
+
+  /** 详情页阅读器同样看到「本地 + Zotero」合并高亮；写盘回调只动本地标注。
+      只有当前打开的就是这篇的外部 PDF 时才合并——否则会把 Zotero 高亮画到 vault 里的附件上 */
+  const viewerAnnotations = useMemo(
+    () =>
+      mergeViewerAnnotations(
+        open?.annotations.items ?? [],
+        open && open.id === externalStoreId ? markup.drawable : [],
+      ),
+    [open, externalStoreId, markup.drawable],
+  )
+
+  const confirmRemove = async (id: string) => {    try {
       await removeAttachment(id)
       const cur = litRef.current
       if (cur) onChange({ literature: { ...cur, attachments: cur.attachments.filter((x) => x !== id) } })
@@ -263,11 +311,14 @@ export function LiteratureAttachments({ note, onChange, onFullscreenRead, childr
         <Suspense fallback={<div className="p-4 text-sm text-muted-foreground" role="status">正在加载 PDF 阅读器…</div>}>
           <PdfViewer
             data={open.data}
-            annotations={open.annotations.items}
+            annotations={viewerAnnotations}
             onAddAnnotation={handleAdd}
             onUpdateAnnotation={handleUpdateComment}
             onDeleteAnnotation={handleDelete}
             onExportAnnotation={handleExport}
+            onOpenInZotero={(key) => {
+              void openZoteroItem(key).catch((e) => toast.error(e instanceof Error ? e.message : '无法在 Zotero 中定位条目'))
+            }}
           />
         </Suspense>
       </div>
@@ -387,6 +438,17 @@ export function LiteratureAttachments({ note, onChange, onFullscreenRead, childr
           </Button>
         )}
       </div>
+
+      {/* Zotero 标注与子笔记：与全屏阅读工作台共用同一份 sidecar；没有 Zotero key 时按钮自带禁用原因 */}
+      {showZoteroMarkup && (
+        <ZoteroNotesPanel
+          compact
+          view={markup}
+          content={note.content}
+          onExportNote={exportZoteroNote}
+          onExportAnnotation={exportZoteroAnnotation}
+        />
+      )}
 
       {/* 编辑区 + PDF 面板：布局给了挂载点（并列视图）就把面板 portal 到独立一列
           —— 面板才有上下一整列、图谱也才知道该收窄；没有挂载点（单栏视图、手机端）就就地分栏 */}
