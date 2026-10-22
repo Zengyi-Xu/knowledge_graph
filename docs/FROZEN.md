@@ -243,7 +243,7 @@ Alt+F9 可见域代码）。守护测试 `test:lit` 的 H 组（8 项，含转�
 - 2026-10-23：`desktop-bridge` 增加只读 `readZoteroMarkup`（27→28 个方法、24→25 个 IPC 通道），
   用于导入单篇文献的 Zotero 高亮与子笔记。**只读**：不写 Zotero、不改 front matter、不复制 PDF；
   标注镜像存独立的 `attachments/<storeId>.zotero.json`，与本软件自己的 `.annotations.json` 分开。
-  设计与已知限制见 [ZOTERO_MARKUP.md](ZOTERO_MARKUP.md)；新增 `test:zotero-markup`（58 项）、
+  设计与已知限制见 [ZOTERO_MARKUP.md](ZOTERO_MARKUP.md)；新增 `test:zotero-markup`（59 项）、
   `test:zotero-panel`（17 项），`test:zotero` 扩到 40 项、`test:web` 扩到 72 项。
 - 2026-10-23（同日第二版）：`desktop-bridge` 增加 `zoteroLocalApi`（28→29 个方法、25→26 个 IPC 通道），
   走 Zotero 10+ 本地写入 API 把本软件画的高亮**回写**成 annotation（只增；不删、不改 Zotero 已有对象）。

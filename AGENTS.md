@@ -327,7 +327,7 @@
      密钥只在宿主进程内存：单次密钥写入后即失效 → 401 时重新 authorize 再试一次；用户选 Always Allow 才长期复用；
      `Zotero-Server-ID` 变了要清缓存。`annotationType` 必须排在其它 annotation 字段之前（Zotero 校验顺序）。
      **导入要退出 Zotero（SQLite 锁），回写要 Zotero 在运行**，两者分先后操作；一次最多 50 条。
-   - 回归：`npm run test:zotero`（40，合成库）、`test:zotero-markup`（58，纯逻辑）、`test:zotero-panel`（17，SSR）、
+   - 回归：`npm run test:zotero`（40，合成库）、`test:zotero-markup`（59，纯逻辑）、`test:zotero-panel`（17，SSR）、
      `test:zotero-writeback`（41，回写纯逻辑）、`test:zotero-local-api`（28，假 Zotero 服务器）、
      `test:web`（75，网页桥）。真实库只读实测与限制见 [docs/ZOTERO_MARKUP.md](docs/ZOTERO_MARKUP.md)。
 

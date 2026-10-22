@@ -197,7 +197,7 @@ itemNotes.parentItemID       ──► items(书目) 或 itemAttachments.itemID�
 | 命令 | 覆盖 |
 | --- | --- |
 | `npm run test:zotero` | 合成库：标注→附件→书目、类型映射、缺文字/坏 position、多 PDF 归属、子笔记两种挂法、只读哈希（40 项） |
-| `npm run test:zotero-markup` | 纯逻辑：页码 +1、稳定 id、颜色、合并、幂等/删除/更新、HTML→文本、路径匹配、导出标记（58 项） |
+| `npm run test:zotero-markup` | 纯逻辑：页码 +1、稳定 id、颜色、合并、幂等/删除/更新、HTML→文本、路径匹配、导出标记（59 项） |
 | `npm run test:zotero-panel` | 面板 SSR：禁用原因、数量、只读、导出幂等、HTML 不进 DOM（17 项） |
 | `npm run test:zotero-writeback` | 回写纯逻辑：计划/跳过原因/请求体/落地/合并/文案（41 项） |
 | `npm run test:zotero-local-api` | 假本地 API：探测、授权、单次密钥、部分失败、401/403/429/412（28 项） |
