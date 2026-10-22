@@ -16,7 +16,7 @@ for (const file of ['C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:
 if (!executable) throw new Error('Chromium is unavailable')
 const tw = spawn(process.execPath, ['node_modules/tailwindcss/lib/cli.js', '-i', 'src/index.css', '-o', path.join(out, 'app.css')], { cwd: root, windowsHide: true, stdio: 'ignore' })
 await new Promise((resolve, reject) => tw.on('exit', (code) => code === 0 ? resolve() : reject(new Error('Tailwind build failed'))))
-await esbuild.build({ entryPoints: ['scripts/wysiwyg-fixture.tsx'], bundle: true, outfile: path.join(out, 'app.js'), format: 'iife', platform: 'browser', jsx: 'automatic', alias: { '@': path.join(root, 'src') }, define: { __APP_ENV__: '"development"', __APP_VERSION__: '"editor-test"' }, plugins: [{ name: 'inline-css', setup(build) {
+await esbuild.build({ entryPoints: ['scripts/wysiwyg-fixture.tsx'], bundle: true, outfile: path.join(out, 'bundle.js'), format: 'iife', platform: 'browser', jsx: 'automatic', alias: { '@': path.join(root, 'src') }, define: { __APP_ENV__: '"development"', __APP_VERSION__: '"editor-test"' }, plugins: [{ name: 'inline-css', setup(build) {
   build.onResolve({ filter: /\?url$/ }, ({ path: file }) => ({ path: file, namespace: 'asset-url' }))
   build.onLoad({ filter: /.*/, namespace: 'asset-url' }, () => ({ contents: 'export default "/unused-pdf-worker.mjs"', loader: 'js' }))
   build.onResolve({ filter: /\?inline$/ }, ({ path: file, resolveDir }) => ({ path: file.startsWith('@/') ? path.join(root, 'src', file.slice(2, -7)) : /^(vditor|katex)\//.test(file) ? path.join(root, 'node_modules', file.slice(0, -7)) : path.resolve(resolveDir, file.slice(0, -7)), namespace: 'inline-css' }))
@@ -26,7 +26,8 @@ const html = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewp
 const server = http.createServer(async (req, res) => {
   try {
     const url = req.url.split('?')[0]
-    if (url === '/app.js' || url === '/app.css') { res.setHeader('Content-Type', url.endsWith('.js') ? 'text/javascript' : 'text/css'); res.end(await fs.readFile(path.join(out, url.slice(1)))) }
+    if (url === '/app.js') { res.setHeader('Content-Type', 'text/javascript'); res.end(await fs.readFile(path.join(out, 'bundle.js'))) }
+    else if (url === '/app.css') { res.setHeader('Content-Type', 'text/css'); res.end(await fs.readFile(path.join(out, 'app.css'))) }
     else if (url.startsWith('/vditor/')) { res.setHeader('Content-Type', url.endsWith('.css') ? 'text/css' : 'application/javascript'); res.end(await fs.readFile(path.join(root, 'public', url.slice(1)))) }
     else res.end(html)
   } catch { res.statusCode = 500; res.end() }
@@ -86,6 +87,9 @@ try {
   if (!storedFormula) console.log('  存储末尾:', await evaluate(`JSON.stringify(fixture.note.content.slice(-200))`))
   check('输入的公式源码进入正文存储', storedFormula)
   check('标题/粗斜删除线/任务列表/引用/表格/代码/分割线/链接图片渲染', await evaluate(`(() => { const c=${content}; return ['h1','strong','em','s','input[type=checkbox]','blockquote','table','pre code','hr','a','img'].every(q=>c.querySelector(q)) })()`))
+  // Tailwind preflight 会把 ol 的 list-style 清成 none（Vditor 只补回了 ul），有序列表因此没有序号
+  check('有序列表显示数字序号', await wait(`(() => { const ol = ${content}.querySelector('ol'); return Boolean(ol) && getComputedStyle(ol).listStyleType === 'decimal' })()`))
+  check('有序列表左侧留出序号空间', await evaluate(`(() => { const ol = ${content}.querySelector('ol'); return ol ? parseFloat(getComputedStyle(ol).paddingLeft) >= 20 : false })()`))
   check('双链按字面文本保留', await evaluate(`${content}.textContent.includes('[[已有笔记]]')`))
   check('双链渲染为样式化标记', await wait(`${content}.querySelectorAll('.kg-wiki').length >= 2`))
   check('双链括号隐藏（与经典一致）', await evaluate(`(() => {
@@ -125,10 +129,167 @@ try {
   check('所见即所得为默认（未写过设置）', await evaluate('localStorage.getItem("kg-dev-editor-mode-v1") === null'))
   await act('fixture.setContent("外部同步更新")')
   check('外部写入同步进编辑器', await wait(`${content}?.textContent.includes('外部同步更新')`))
-  await act('[...document.querySelectorAll(".vditor-toolbar__item button")].find(e=>e.innerHTML.includes("M5.5 2.5"))?.click()')
-  check('双链工具栏插入模板', await wait(`fixture.note.content.includes('[[笔记标题]]')`))
   await act('fixture.remount()')
   check('组件重载后仍是所见即所得且内容不重写', await wait(`${content}?.textContent.includes('外部同步更新')`))
+  // 双链工具栏：只插一对空括号、光标居中；以前插的是 [[笔记标题]] 占位芯片，点一下就按占位标题新建了笔记
+  // 用空笔记测：新建笔记后第一件事就是点双链，最容易踩到「占位芯片被点开」
+  await act('fixture.setContent("")')
+  await delay(300)
+  await act(`(() => {
+    const root = ${content}.querySelector('.vditor-reset')
+    root.focus()
+    const p = root.querySelector('p') ?? root
+    const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT)
+    const node = walker.nextNode() ?? p
+    const range = document.createRange()
+    range.setStart(node, node.nodeType === Node.TEXT_NODE ? node.nodeValue.length : 0)
+    range.collapse(true)
+    const sel = window.getSelection()
+    sel.removeAllRanges()
+    sel.addRange(range)
+    return true
+  })()`)
+  const eventsBeforeWiki = await evaluate('fixture.events.length')
+  await act('[...document.querySelectorAll(".vditor-toolbar__item button")].find(e=>e.innerHTML.includes("M5.5 2.5"))?.click()')
+  await wait(`fixture.note.content.includes('[[]]')`)
+  const wikiPair = await evaluate(`(() => {
+    const sel = window.getSelection()
+    const root = ${content}.querySelector('.vditor-reset')
+    const range = sel?.rangeCount ? sel.getRangeAt(0) : null
+    let before = ''
+    let after = ''
+    if (root && range) {
+      const pre = document.createRange()
+      pre.setStart(root, 0)
+      pre.setEnd(range.startContainer, range.startOffset)
+      before = pre.toString()
+      const post = document.createRange()
+      post.setStart(range.endContainer, range.endOffset)
+      post.setEnd(root, root.childNodes.length)
+      after = post.toString()
+    }
+    return {
+      content: fixture.note.content,
+      before,
+      after,
+      activeInEditor: Boolean(document.activeElement?.closest?.('.vditor-wysiwyg')),
+    }
+  })()`)
+  check('双链工具栏只插入一对空括号', wikiPair.content.includes('[[]]') && !wikiPair.content.includes('笔记标题'))
+  if (!wikiPair.content.includes('[[]]')) console.log('  双链插入诊断:', JSON.stringify(wikiPair))
+  if (!(wikiPair.before.endsWith('[[') && wikiPair.after.startsWith(']]'))) console.log('  双链光标诊断:', JSON.stringify(wikiPair))
+  check('插入后光标停在两个中括号中间', wikiPair.before.endsWith('[[') && wikiPair.after.startsWith(']]'))
+  check('插入双链不新建笔记', (await evaluate('fixture.events.length')) === eventsBeforeWiki)
+  await send('Input.insertText', { text: '已有' })
+  check('括号内输入触发标题补全', await wait(`document.querySelector('[aria-label=匹配笔记]')?.textContent.includes('已有笔记')`))
+  await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
+  await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
+  const pickedOk = await wait(`fixture.note.content.includes('[[已有笔记]]') && !fixture.note.content.includes(']]]]')`)
+  if (!pickedOk) console.log('  选中候选后的内容:', JSON.stringify(await evaluate('fixture.note.content')))
+  check('选中候选后只留一对括号', pickedOk)
+  // 标题快捷键：Alt+1…6（浏览器把 Ctrl+1…8 留给切标签页，不能占用）
+  await act('fixture.setContent("ALT 标题测试")')
+  await wait(`${content}?.textContent.includes('ALT 标题测试')`)
+  await act(`(() => {
+    const root = ${content}.querySelector('.vditor-reset')
+    root.focus()
+    const p = root.querySelector('p') ?? root
+    const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT)
+    const node = walker.nextNode() ?? p
+    const range = document.createRange()
+    range.setStart(node, 2)
+    range.collapse(true)
+    const sel = window.getSelection()
+    sel.removeAllRanges()
+    sel.addRange(range)
+    return true
+  })()`)
+  await send('Input.dispatchKeyEvent', { type: 'keyDown', key: '2', code: 'Digit2', windowsVirtualKeyCode: 50, modifiers: 1 })
+  await send('Input.dispatchKeyEvent', { type: 'keyUp', key: '2', code: 'Digit2', windowsVirtualKeyCode: 50, modifiers: 1 })
+  const headingOk = await wait(`(() => { const h = ${content}.querySelector('h2'); return Boolean(h?.textContent.includes('ALT 标题测试')) && fixture.note.content.includes('## ALT 标题测试') })()`)
+  if (!headingOk) console.log('  标题快捷键诊断:', JSON.stringify(await evaluate(`(() => ({
+    content: fixture.note.content,
+    active: document.activeElement?.className ?? '',
+    sel: window.getSelection()?.toString(),
+    tags: [...${content}.querySelectorAll('.vditor-reset *')].slice(0, 6).map((e) => e.tagName),
+  }))()`)))
+  check('Alt+2 把当前段落设为二级标题', headingOk)
+  // 选中文字浮出排版条（Word 迷你工具栏）：只在桌面宽度出现（<768px 交给手机端原生选择菜单）
+  await send('Emulation.setDeviceMetricsOverride', { width: 1024, height: 768, deviceScaleFactor: 1, mobile: false })
+  await delay(200)
+  await act('fixture.setContent("需要加粗的文字")')
+  await wait(`${content}?.textContent.includes('需要加粗的文字')`)
+  await delay(300)
+  await act(`(() => {
+    const root = ${content}.querySelector('.vditor-reset')
+    root.focus()
+    const p = [...${content}.querySelectorAll('.vditor-reset p')].find((el) => el.textContent.includes('需要加粗的文字')) ?? root.querySelector('p')
+    const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT)
+    const text = walker.nextNode()
+    const range = document.createRange()
+    range.setStart(text, 0)
+    range.setEnd(text, text.nodeValue.length)
+    const sel = window.getSelection()
+    sel.removeAllRanges()
+    sel.addRange(range)
+    document.dispatchEvent(new Event('selectionchange'))
+    return true
+  })()`)
+  const bubbleShown = await wait(`document.querySelector('[data-testid=wysiwyg-bubble]')`)
+  if (!bubbleShown) console.log('  浮动条诊断:', JSON.stringify(await evaluate(`(() => {
+    const host = document.querySelector('[data-testid=wysiwyg-editor] .kg-vditor')
+    const sel = window.getSelection()
+    const range = sel?.rangeCount ? sel.getRangeAt(0) : null
+    const rects = range ? [...range.getClientRects()].map((r) => ({ w: r.width, h: r.height, t: r.top })) : []
+    return {
+      vw: window.innerWidth,
+      collapsed: sel?.isCollapsed,
+      rangeCount: sel?.rangeCount ?? 0,
+      text: sel?.toString(),
+      inHost: range ? Boolean(host?.contains(range.commonAncestorContainer)) : false,
+      rects,
+      active: document.activeElement?.className ?? '',
+    }
+  })()`)))
+  check('选中文字后浮出排版条', bubbleShown)
+  const bubblePos = await evaluate(`(() => {
+    const bar = document.querySelector('[data-testid=wysiwyg-bubble]')
+    if (!bar) return null
+    const box = bar.getBoundingClientRect()
+    const cs = getComputedStyle(bar)
+    return { width: box.width, top: box.top, left: box.left, vw: window.innerWidth, visible: cs.display !== 'none' }
+  })()`)
+  check('排版条完整落在视口内', Boolean(bubblePos?.visible) && bubblePos.width > 200 && bubblePos.top >= 0 && bubblePos.left >= 0 && bubblePos.left + bubblePos.width <= bubblePos.vw)
+  if (!(Boolean(bubblePos?.visible) && bubblePos.width > 200 && bubblePos.top >= 0 && bubblePos.left >= 0 && bubblePos.left + bubblePos.width <= bubblePos.vw)) console.log('  排版条位置诊断:', JSON.stringify(bubblePos))
+  await act(`document.querySelector('[data-testid=wysiwyg-bubble] button[aria-label="加粗"]')?.click()`)
+  const boldOk = await wait(`fixture.note.content.includes('**需要加粗的文字**')`)
+  if (!boldOk) console.log('  加粗诊断:', JSON.stringify(await evaluate(`({ content: fixture.note.content, sel: window.getSelection()?.toString(), html: ${content}.innerHTML.slice(0, 200) })`)))
+  check('排版条上的加粗按钮生效', boldOk)
+  await send('Emulation.clearDeviceMetricsOverride')
+  await delay(200)
+  // 流式滚动：工具栏吸在滚动容器顶端（单栏「笔记」/并列视图两种 flow 容器共用这条 CSS）
+  const longText = Array.from({ length: 60 }, (_, i) => `第 ${i + 1} 段：用于验证流式滚动时工具栏是否留在原位。`).join('\n\n')
+  await act('fixture.setFlow(true)')
+  await act(`fixture.setContent(${JSON.stringify(longText)})`)
+  await wait(`${content}?.textContent.includes('第 60 段')`)
+  await delay(200)
+  const sticky = await evaluate(`(() => {
+    const scroll = document.querySelector('[data-testid=flow-scroll]')
+    const toolbar = document.querySelector('[data-testid=wysiwyg-editor] .vditor-toolbar')
+    if (!scroll || !toolbar) return { failed: 'missing flow containers' }
+    const topEdge = scroll.getBoundingClientRect().top
+    scroll.scrollTop = 500
+    return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve({
+      position: getComputedStyle(toolbar).position,
+      moved: scroll.scrollTop,
+      topEdge,
+      toolbarTop: toolbar.getBoundingClientRect().top,
+    }))))
+  })()`)
+  if (sticky.failed) console.log('  吸顶诊断:', JSON.stringify(sticky))
+  check('流式滚动时工具栏吸顶', sticky.position === 'sticky' && sticky.moved > 100 && Math.abs(sticky.toolbarTop - sticky.topEdge) <= 1)
+  await act('fixture.setFlow(false)')
+  await delay(200)
   // 语法错误不能进入「渲染 → 写回纯文本 → MutationObserver 再次触发渲染」的循环。
   await act(String.raw`fixture.setContent('坏公式 $\\frac{1}{$')`)
   const errorPreview = `[...${content}.querySelectorAll('.vditor-wysiwyg__block[data-type="math-inline"]')].find((item) => item.querySelector('code[data-type="math-inline"]')?.textContent.includes('frac{1}{'))?.querySelector('.vditor-wysiwyg__preview .language-math')`

@@ -56,6 +56,13 @@
   outline: none;
 }
 
+/* 有序列表：Tailwind preflight 把 ol/ul 的 list-style 清成 none，Vditor 只补回了 ul 的圆点，
+   所以 `1. 第一项` 在所见即所得里没有序号（阅读面板的 #write ol 是好的，只有编辑器缺）。
+   分三级恢复：阿拉伯数字 / 小写字母 / 小写罗马数字，与阅读面板一致。 */
+.kg-vditor .vditor-reset ol { list-style-type: decimal; }
+.kg-vditor .vditor-reset ol ol { list-style-type: lower-alpha; }
+.kg-vditor .vditor-reset ol ol ol { list-style-type: lower-roman; }
+
 .kg-vditor .vditor-reset pre.vditor-reset {
   max-width: none;
   margin: 0;
@@ -112,6 +119,17 @@
  */
 .kg-vditor-flow {
   overflow: visible;
+}
+
+/* 流式滚动时整篇内容都在动，工具栏跟着滚出屏幕 = 滚到正文中段想加粗却没按钮可点。
+   flow 档把工具栏吸在滚动容器（App 的 note-flow-scroll / 并列视图那张卡片）顶端：
+   背景不透明 + 分隔线（沿用上面那条 border-bottom），正文从它下面滚过去；
+   z-index 压在正文之上、双链补全下拉（z-20）之下。 */
+.kg-vditor-flow .vditor-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--toolbar-background-color);
 }
 
 .kg-vditor-flow .vditor,

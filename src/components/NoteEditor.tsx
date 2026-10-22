@@ -366,7 +366,10 @@ export function NoteEditor({
   const editorArea = editorMode === 'wysiwyg' ? (
     <div className={flow ? 'flex flex-col' : 'flex min-h-0 flex-1 flex-col'}>
       <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2 md:px-4">
-        <span className="text-xs text-muted-foreground">正文即打即排版，与 Word 一致；Markdown 自动保存</span>
+        <span className="text-xs text-muted-foreground">
+          正文即打即排版，与 Word 一致；Markdown 自动保存
+          <span className="hidden md:inline"> · 标题 Alt+1…6 · 选中文字浮出排版条</span>
+        </span>
         {themeControls}
       </div>
       <Suspense fallback={<div className="p-4 text-sm text-muted-foreground" role="status">正在加载编辑器…</div>}>
