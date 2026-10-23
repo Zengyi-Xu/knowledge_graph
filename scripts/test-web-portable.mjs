@@ -23,8 +23,8 @@ if (archiveIndex >= 0) {
 assert.equal(fs.existsSync(path.join(dir, 'dist', 'notes.json')), false, '禁止携带 public 中的本地笔记快照')
 assert.deepEqual(fs.readdirSync(path.join(dir, 'dist')).sort(),
   ['assets', 'icons', 'index.html', 'manifest.webmanifest', 'sw.js', 'vditor'])
-// 三个入口都在：双击 .wsf 是无窗口启动/停止，.cmd 是排查用的窗口版
-for (const entry of ['启动知识图谱.wsf', '停止知识图谱.wsf', '启动知识图谱.cmd']) {
+// 三个入口都在：双击 .pyw 是无窗口启动，.wsf 停止，.cmd 是排查用的窗口版
+for (const entry of ['启动知识图谱.pyw', '停止知识图谱.wsf', '启动知识图谱.cmd']) {
   assert.ok(fs.existsSync(path.join(dir, entry)), `缺少启动入口 ${entry}`)
 }
 const env = {
@@ -74,10 +74,12 @@ try {
   // Only terminate the process tree created by this test.
   if (child.pid) spawnSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
 }
-// 无窗口启动器：双击 启动知识图谱.wsf 走的就是这条路径（wscript + 隐藏窗口的 .cmd）。
-// 这里用 cscript 起同一个脚本，验证它真的把服务拉起来、并把输出写进 data/temp/web-server.log。
+// 无窗口启动器：双击 启动知识图谱.pyw 由 pythonw 执行；测试用当前 Python
+// 解释器运行同一脚本，以便拿到进程句柄并在验收后结束整棵进程树。
+// 验证它真的把服务拉起来、并把输出写进 data/temp/web-server.log。
 const hiddenLog = path.join(dir, 'data', 'temp', 'web-server.log')
-const launcher = spawn('cscript.exe', ['//nologo', '启动知识图谱.wsf', '--no-open', '--port', '0'], {
+const python = process.env.PYTHON || 'python'
+const launcher = spawn(python, ['启动知识图谱.pyw', '--no-open', '--port', '0'], {
   cwd: dir, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
 })
 try {
@@ -95,9 +97,9 @@ try {
   })
   assert.equal((await (await fetch(origin + '/api/health')).json()).service, 'knowledge-graph-local')
   const log = fs.readFileSync(hiddenLog, 'utf8')
-  assert.ok(log.includes('=== kg-launch '), '无窗口启动器应写下启动分隔线')
+  assert.ok(log.includes('=== kg-launcher-ui '), '启动面板应写下启动分隔线')
   assert.ok(/知识图谱 v[\d.]+/.test(log) && log.includes('免安装网页端'), '日志应保留中文启动信息：' + log)
-  console.log('✓ 无窗口启动器（启动知识图谱.wsf）真的起了服务：隐藏窗口、日志落 data/temp/web-server.log、中文不乱码')
+  console.log('✓ 无窗口启动器（启动知识图谱.pyw）真的起了服务：隐藏窗口、日志落 data/temp/web-server.log、中文不乱码')
 } finally {
   if (launcher.pid) spawnSync('taskkill.exe', ['/PID', String(launcher.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
 }

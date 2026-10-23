@@ -33,6 +33,12 @@ notes-backup/
 _backup/
 backup/
 
+# 本地运行数据（服务日志、临时脚本等，不进仓库）
+/data/
+
+# 主题建议清单（含真实笔记标题，按需本地生成，不进仓库）
+theme-plan/
+
 # 本机 Zotero 诊断库与本地导出（含真实书目 / 分类 / 标题，绝不入库）
 *.sqlite
 *.sqlite-wal

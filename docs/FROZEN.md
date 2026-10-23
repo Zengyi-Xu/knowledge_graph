@@ -179,7 +179,11 @@ splitRow(line: string): string[]
 契约 = `copyCitationFor`（GB/T 7714 / APA / BibTeX 三格式进剪贴板）与 `rtfField` 的 RTF 域代码函数
 （`buildCitationFieldRtf` / `bibliographyRtfFromText` / `buildClipboardParts` / `writeCitationClipboard` /
 `writeBibliographyClipboard`）：产物必须是 Word 可更新的真实域（`ADDIN ZOTERO_ITEM`，与 Zotero 兼容，
-Alt+F9 可见域代码）。守护测试 `test:lit` 的 H 组（8 项，含转义快照与多 key 选取）。
+Alt+F9 可见域代码）。**域代码 JSON 的每个 citationItem 必带 `uris` 与 `itemData.URI`**
+（`http://zotero.org/users/local/kg/items/<key>`，key 优先取 Zotero key、退回 citekey）——
+Zotero 插件靠 uris 把引用映射回本机库条目并生成文献表，缺失时 Add/Edit Bibliography 直接抛错
+（2026-10-23 对照 Zotero 7 源码修复）。守护测试 `test:lit` 的 H 组（9 项，含转义快照、多 key 选取
+与 uris 断言）。
 
 ### pdf-source（契约冻结）
 
@@ -251,3 +255,14 @@ Alt+F9 可见域代码）。守护测试 `test:lit` 的 H 组（8 项，含转�
   回写成功后把返回的 key 记回本地标注，重新同步时按 key 去重；本地 API 密钥只留在宿主进程内存。
   新增 `test:zotero-writeback`（41 项）与 `test:zotero-local-api`（28 项，假 Zotero 服务器），
   `test:web` 扩到 75 项。细节见 [ZOTERO_MARKUP.md](ZOTERO_MARKUP.md) 第 7 节。
+- 2026-10-23（同日第三版）：`citation-copy` 的域代码 JSON 每个 citationItem 补 `uris` 与
+  `itemData.URI`（`http://zotero.org/users/local/kg/items/<key>`，key 优先 Zotero key、退回 citekey）。
+  修复 1.2.6 的缺陷：payload 缺 `uris` 时 Zotero 插件 `loadItemData` 查不到条目、embedded 兜底分支
+  对 `uris` 未判空必抛 TypeError，导致 Word 里插入引用后 Add/Edit Bibliography 出不来文献表。
+  H 组守护测试 8→9 项（新增 uris 断言），`test:lit` 49 项全绿。
+- 2026-10-24：`desktop-bridge` 的 AI 网关增加第三个提供方 `ollama`（本机 Qwen，无 key），
+  方法名与 IPC 通道数不变（29 方法 / 26 通道）：`aiStatus`/`aiComplete` 的 provider 枚举加
+  `'ollama'`，两边都新增可选 `baseUrl`（渲染端设置传入，默认 `http://127.0.0.1:11434`，
+  环境变量 `OLLAMA_BASE_URL` 兜底）；`aiStatus` 探测 `/api/tags` 返回本机模型列表，
+  `aiComplete` 走 `/api/chat` 并固定 `think: false`（qwen3 思考模型默认把 num_predict
+  预算耗在思考链上、正文为空）。用于「研究追问」：生成追问只走本地，绝不出本机。

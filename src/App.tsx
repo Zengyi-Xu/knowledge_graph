@@ -39,6 +39,7 @@ import {
   PanelLeft,
   Columns2,
   BookOpen,
+  Quote,
 } from 'lucide-react'
 import { toast, Toaster } from 'sonner'
 import {
@@ -59,13 +60,14 @@ import { loadPhysics, savePhysics, type GraphPhysics } from '@/lib/graphPhysics'
 
 const GraphView = lazy(() => import('@/components/GraphView').then((m) => ({ default: m.GraphView })))
 const LiteratureView = lazy(() => import('@/components/LiteratureView').then((m) => ({ default: m.LiteratureView })))
+const CitationsView = lazy(() => import('@/components/CitationsView').then((m) => ({ default: m.CitationsView })))
 const PdfReadingWorkspace = lazy(() => import('@/components/PdfReadingWorkspace').then((m) => ({ default: m.PdfReadingWorkspace })))
 const AiPanel = lazy(() => import('@/components/AiPanel').then((m) => ({ default: m.AiPanel })))
 // 笔记正文（预览 + 编辑）整条链都按需加载：Markdown 渲染、主题 CSS、md/tex 解析器、编辑器
 // 都跟着它走，入口 chunk 不再为「还没打开笔记」的首页付费（预算见 docs/BUNDLE_BUDGET.md）
 const NoteEditor = lazy(() => import('@/components/NoteEditor').then((m) => ({ default: m.NoteEditor })))
 
-type View = 'notes' | 'graph' | 'both' | 'literature'
+type View = 'notes' | 'graph' | 'both' | 'literature' | 'citations'
 
 const AI_LOG_KEY = 'ai-log-v1'
 interface AiLogEntry {
@@ -828,6 +830,9 @@ export default function App() {
   const literatureView = (
     <LiteratureView notes={notes} activeId={active?.id ?? null} onOpenNote={openNote} onReadPdf={openPdfReader} onImport={importLiterature} onApplySync={applyZoteroSync} />
   )
+  const citationsView = (
+    <CitationsView notes={notes} onOpenNote={openNote} onGoLiterature={() => setView('literature')} />
+  )
 
   return (
     <div className="kg-shell flex flex-col bg-background text-foreground">
@@ -903,9 +908,12 @@ export default function App() {
                 <TabsTrigger className="h-7 gap-1 px-2 text-xs" value="literature">
                   <BookOpen className="h-3.5 w-3.5" /> 文献
                 </TabsTrigger>
+                <TabsTrigger className="h-7 gap-1 px-2 text-xs" value="citations">
+                  <Quote className="h-3.5 w-3.5" /> 引用
+                </TabsTrigger>
               </TabsList>
             </Tabs>
-            {view !== 'notes' && (
+            {(view === 'graph' || view === 'both') && (
               <span className="text-xs text-muted-foreground">
                 {view === 'both'
                   ? '单击节点打开笔记 · 右键聚焦/取消聚焦 · 拖动可移动节点'
@@ -937,6 +945,8 @@ export default function App() {
               )
             ) : effectiveView === 'literature' ? (
               literatureView
+            ) : effectiveView === 'citations' ? (
+              citationsView
             ) : (
               <div className="flex min-h-0 flex-1 flex-col gap-2 p-2">
                 <div className="max-h-[38vh] min-h-0 shrink overflow-y-auto">{filterPanel}</div>
@@ -957,6 +967,8 @@ export default function App() {
             )
           ) : view === 'literature' ? (
             literatureView
+          ) : view === 'citations' ? (
+            citationsView
           ) : view === 'graph' ? (
             <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 xl:flex-row">
               {filterPanel}
@@ -1050,7 +1062,7 @@ export default function App() {
       {/* 手机端底部主导航：与顶部 Tabs 同一套视图语义（并列栏位在手机端不存在） */}
       {isMobile && (
         <MobileTabBar
-          active={effectiveView === 'literature' ? 'literature' : effectiveView === 'graph' ? 'graph' : 'notes'}
+          active={effectiveView === 'citations' ? 'citations' : effectiveView === 'literature' ? 'literature' : effectiveView === 'graph' ? 'graph' : 'notes'}
           onSelect={(tab: MobileTab) => {
             if (tab === 'settings') {
               setStorageOpen(true)

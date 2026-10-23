@@ -122,29 +122,32 @@ declare global {
       selectZoteroItem: (zoteroKey: string) => Promise<{ error: string | null }>
 
       // AI 网关：状态里的 keyPreview 已脱敏，绝不包含完整 key。
-      // provider 默认 kimi；deepseek 的 key 从本机 ZCode / DSH 配置只读提取。
-      aiStatus: (request?: { provider?: 'kimi' | 'deepseek'; configPath?: string }) => Promise<
+      // provider 默认 kimi；deepseek 的 key 从本机 ZCode / DSH 配置只读提取；
+      // ollama = 本机 Qwen（Ollama，无 key，baseUrl 由渲染端设置传入，默认 127.0.0.1:11434）。
+      aiStatus: (request?: { provider?: 'kimi' | 'deepseek' | 'ollama'; configPath?: string; baseUrl?: string }) => Promise<
         | {
             configured: true
-            provider?: 'kimi' | 'deepseek'
+            provider?: 'kimi' | 'deepseek' | 'ollama'
             baseUrl: string
             model: string
             models?: string[]
             keyPreview: string
           }
-        | { configured: false; provider?: 'kimi' | 'deepseek'; error: string }
+        | { configured: false; provider?: 'kimi' | 'deepseek' | 'ollama'; error: string }
       >
       aiComplete: (payload: {
-        provider?: 'kimi' | 'deepseek'
+        provider?: 'kimi' | 'deepseek' | 'ollama'
         /** 单轮请求；与 messages 二选一 */
         prompt?: string
         /** 多轮对话（自由提问用）；必须至少有一条 user 消息 */
         messages?: { role: 'user' | 'assistant'; content: string }[]
         system?: string
-        /** deepseek 可指定模型；kimi 始终用配置里的模型 */
+        /** deepseek/ollama 可指定模型；kimi 始终用配置里的模型 */
         model?: string
         maxTokens?: number
         configPath?: string
+        /** ollama 的服务地址（OpenAI 兼容 loopback） */
+        baseUrl?: string
       }) => Promise<
         | { ok: true; text: string; model: string; usage: unknown }
         | { ok: false; error: string }

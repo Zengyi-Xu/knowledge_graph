@@ -113,6 +113,8 @@ const LABEL_GAP = 14
 /** 标签随视野缩放的上下限：放大时倍率封顶（免得字大到盖住图谱），缩小时倍率下限即「大节点优先」阈值 */
 const LABEL_MAX_ZOOM = 2
 const LABEL_CROWDED_ZOOM = 0.8
+/** 放大到此倍率以上时，视野内的节点全部显示标题（含文献），不再只标大节点——都放这么大了就是来看字的 */
+const LABEL_FULL_ZOOM = 1.5
 
 /** 只标大节点：按连接数取前 N 个「笔记」节点（文献本来就不标标题，不占名额），其余虚化 + 缩小且不标字。
  *  用排名而不是固定度数阈值：档位/筛选一变节点规模就差几十倍，固定阈值要么标满屏、要么一个不标。 */
@@ -536,6 +538,17 @@ export function GraphView({
   /** 聚焦只在焦点节点真的在屏上时才生效（可能被筛选条件或聚类下钻挡住） */
   const focusActive = Boolean(focusId) && shownIds.has(focusId ?? '')
 
+  /** 悬停节点的一阶邻居：悬停时邻居补标标签、其连线高亮，其余连线再淡一层 */
+  const hoverNeighbors = useMemo(() => {
+    const set = new Set<string>()
+    if (!hoverId) return set
+    for (const e of shownEdges) {
+      if (e.source === hoverId) set.add(e.target)
+      else if (e.target === hoverId) set.add(e.source)
+    }
+    return set
+  }, [hoverId, shownEdges])
+
   /**
    * 大节点集合：连接数排前 LABEL_HUB_COUNT 的节点（文献默认不标标题，不占名额）。
    * 度数相同的按 id 排序，保证同一份数据每次选中同一批，标签不会跳来跳去。
@@ -762,6 +775,7 @@ export function GraphView({
    * 缩到 LABEL_CROWDED_ZOOM 以下时文字已挤不下 → 自动进入「大节点优先」渲染：
    * 只给 labelHubs（连接数前 LABEL_HUB_COUNT 的笔记）标字（字号停在阈值倍率上，不再继续变小），
    * 其余节点虚化 + 缩小，也不显示文字。用户也可用「只标大节点」开关强制开启，无视视野大小。
+   * 反向地，放到 LABEL_FULL_ZOOM 以上时视野内节点全部标字（见渲染循环里的 showAll）。
    */
   const labelZoom = clamp(cam.zoom, LABEL_CROWDED_ZOOM, LABEL_MAX_ZOOM)
   const crowded = cam.zoom < LABEL_CROWDED_ZOOM
@@ -1215,7 +1229,7 @@ export function GraphView({
         {/* 大节点优先：无视视野大小，强制只标连接数前 N 的笔记 */}
         <label
           className="pointer-events-auto flex cursor-pointer items-center gap-1.5 rounded-lg border bg-background/95 px-2 py-1 text-xs shadow backdrop-blur"
-          title={`无视视野大小，只标注连接数前 ${LABEL_HUB_COUNT} 的笔记节点；其余节点虚化 + 缩小且不显示文字（悬停/聚焦仍可看）`}
+          title={`无视视野大小，只标注连接数前 ${LABEL_HUB_COUNT} 的笔记节点；其余节点虚化 + 缩小且不显示文字（悬停/聚焦仍可看；放大到 ${Math.round(LABEL_FULL_ZOOM * 100)}% 以上时视野内节点仍全部标字）`}
         >
           <input
             type="checkbox"
@@ -1463,8 +1477,10 @@ export function GraphView({
             // 枢纽渲染层：不在任何枢纽 2 跳范围内的边全部虚化
             const fadedByHub =
               !focusActive && Boolean(hubLayer) && (!hubLayer!.sharp.has(e.source) || !hubLayer!.sharp.has(e.target))
-            let opacity = focusActive ? (nearFocus ? 0.6 : 0.07) : active ? 0.7 : 0.22
-            if (isTopic) opacity = focusActive ? (nearFocus ? 0.4 : 0.05) : active ? 0.55 : 0.12
+            let opacity = focusActive ? (nearFocus ? 0.6 : 0.07) : active ? 0.7 : 0.14
+            if (isTopic) opacity = focusActive ? (nearFocus ? 0.4 : 0.05) : active ? 0.55 : 0.08
+            // 悬停某个节点时，与它不沾边的连线再淡一层，视线自然聚到这一小片
+            if (hoverId && !active && !focusActive) opacity = Math.min(opacity, 0.05)
             if (fadedByHub && !active) opacity = Math.min(opacity, 0.08)
             const width = focusActive ? (nearFocus ? 1.6 : 1) : active ? 1.8 : 1.2
             // 两端属于同一个中心的边跟着中心的色号走（一小簇同色的连线，归属一眼看得出来）
@@ -1501,15 +1517,21 @@ export function GraphView({
             const meta = NOTE_TYPE_META[n.type]
             const isFocus = n.id === focusId
             const isHover = n.id === hoverId
+            const isHoverNbr = hoverNeighbors.has(n.id)
             const typeColor = n.type === 'person' && n.grade ? GRADE_COLORS[n.grade] : meta.color
             // 成员层按「连到哪个中心」上色（中心自己也是它那个色号）；没有中心时按笔记类型
             const hubColor = hubColors.get(n.id)
             const color = hubColor ?? typeColor
             const degree = degreeById.get(n.id) ?? 0
-            // 疏布模式下文献缩成小圆点（半径按度数分级），普通节点保持原尺寸
+            // 疏布模式下文献缩成小圆点（半径按度数分级）；
+            // 普通节点半径也映射度数（√ 缩放防枢纽过大）：8–14，悬停/聚焦固定 13
             const isLit = n.type === 'literature'
             const rBase =
-              isFocus || isHover ? 13 : sparseActive && isLit ? clamp(3 + degree * 0.6, 3.5, 8) : 10
+              isFocus || isHover
+                ? 13
+                : sparseActive && isLit
+                  ? clamp(3 + degree * 0.6, 3.5, 8)
+                  : clamp(8 + Math.sqrt(degree) * 2, 8, 14)
             // 大节点优先：视野缩到阈值以下自动生效，或用户强制开启（无视视野大小）
             const hubMode = crowded || hubOnly
             const isLabelHub = labelHubs.set.has(n.id)
@@ -1524,16 +1546,28 @@ export function GraphView({
             const textZoom = isHover || isFocus ? Math.max(labelZoom, 1) : labelZoom
             const dims = noteDims(n)
             const lvl = focusActive ? blurLevel(hopById.get(n.id)) : 0
-            // 枢纽渲染层：枢纽 + 2 跳内清晰，其余虚化（悬停时恢复）
+            // 枢纽渲染层：枢纽 + 2 跳内清晰，其余虚化（悬停及其邻居恢复）
             const fadedByHub =
-              !focusActive && Boolean(hubLayer) && !isHover && !hubLayer!.sharp.has(n.id)
+              !focusActive &&
+              Boolean(hubLayer) &&
+              !isHover &&
+              !isHoverNbr &&
+              !hubLayer!.sharp.has(n.id)
             // 标签策略：文献默认不显示标题（数量太大）；疏布模式下被枢纽层虚化的节点也不显示；
-            // 大节点优先时只有连接数前 N 的笔记还有文字（悬停/聚焦的节点例外）
+            // 大节点优先时只有连接数前 N 的笔记还有文字（悬停/聚焦的节点及其悬停邻居例外）。
+            // 例外中的例外：放到 LABEL_FULL_ZOOM 以上时，视野内的节点全部标字（含文献）——
+            // 放大到这个程度就是来看标题的；视野外的反正看不见，不渲染也省 SVG 节点。
+            const sx = (node.x - cam.x) * cam.zoom + size.w / 2
+            const sy = (node.y - cam.y) * cam.zoom + size.h / 2
+            const showAll =
+              cam.zoom >= LABEL_FULL_ZOOM &&
+              sx > -120 && sx < size.w + 120 && sy > -60 && sy < size.h + 60
             const showLabel =
-              (!hubMode || isLabelHub || isHover || isFocus) &&
-              (isHover || isFocus || !isLit || paperMode) &&
-              (!sparseActive || !isLit || isHover || isFocus) &&
-              (!fadedByHub || !isLit)
+              showAll ||
+              ((!hubMode || isLabelHub || isHover || isFocus || isHoverNbr) &&
+                (isHover || isFocus || isHoverNbr || !isLit || paperMode) &&
+                (!sparseActive || !isLit || isHover || isFocus || isHoverNbr) &&
+                (!fadedByHub || !isLit || isHoverNbr))
             return (
               <g
                 key={n.id}
@@ -1580,6 +1614,10 @@ export function GraphView({
                   strokeWidth={isFocus ? 3 : 1.5}
                   style={{ transition: 'r 0.15s' }}
                 />
+                {/* 标签枢纽（连接数前 N，入口页一般在此列）加一圈同色细环：远处一眼找到锚点 */}
+                {isLabelHub && !isFocus && dims.length === 0 && (
+                  <circle r={r + 3} fill="none" stroke={color} strokeOpacity={0.55} strokeWidth={1.8} />
+                )}
                 {dims.length === 1 && (
                   <circle r={r + 4} fill="none" stroke={DIM_META[dims[0]].color} strokeWidth={4} />
                 )}
@@ -1606,6 +1644,11 @@ export function GraphView({
                       textAnchor="middle"
                       className="pointer-events-none fill-foreground"
                       fontSize={LABEL_FONT}
+                      stroke="hsl(var(--background))"
+                      strokeWidth={3}
+                      strokeLinejoin="round"
+                      strokeOpacity={0.85}
+                      paintOrder="stroke"
                       style={{ userSelect: 'none' }}
                     >
                       {n.title.length > 14 ? n.title.slice(0, 13) + '…' : n.title}
@@ -1681,6 +1724,11 @@ export function GraphView({
                     className="pointer-events-none fill-foreground"
                     fontSize={LABEL_FONT + 1}
                     fontWeight={600}
+                    stroke="hsl(var(--background))"
+                    strokeWidth={3}
+                    strokeLinejoin="round"
+                    strokeOpacity={0.85}
+                    paintOrder="stroke"
                     style={{ userSelect: 'none' }}
                   >
                     {c.cluster.label.length > 18 ? c.cluster.label.slice(0, 17) + '…' : c.cluster.label}

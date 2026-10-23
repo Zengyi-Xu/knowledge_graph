@@ -4,7 +4,10 @@ import type { Note, NoteType, Grade, LiteratureMeta } from '@/types/note'
 import { emptyLiterature } from '@/types/note'
 import { makeCitekey } from '@/lib/citekey'
 import { PreviewContent } from './PreviewContent'
-import type { PreviewTheme } from './PreviewContent'
+import type { HeadingJump, PreviewTheme } from './PreviewContent'
+import { NoteRelations } from './NoteRelations'
+import { isTopicTag, normalizeTopic, topicCounts, topicOf, withTopic } from '@/lib/topics'
+import { outlineOf, scrollElementIntoView } from '@/lib/noteRelations'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -24,17 +27,19 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Trash2, Download, Check, Upload, Palette, MoreVertical, RefreshCw, Pencil, ClipboardCopy, Sparkles, ExternalLink, FileText, ArrowLeft } from 'lucide-react'
+import { Trash2, Download, Check, Upload, Palette, MoreVertical, RefreshCw, Pencil, ClipboardCopy, Sparkles, ExternalLink, FileText, ArrowLeft, Link2, CircleHelp } from 'lucide-react'
 import { toast } from 'sonner'
 import { readSetting, writeSetting } from '@/lib/env'
 import { attachmentsSupported, openPdfExternal } from '@/lib/attachments'
 import { useInlinePdfPanelOpen } from '@/lib/inlinePdfPanel'
+import { appendToContent } from '@/lib/research/insert'
 
 const THEME_KEY = 'preview-theme-v1'
 const CUSTOM_THEME_KEY = 'custom-preview-theme-v1'
 const EDITOR_MODE_KEY = 'editor-mode-v1'
 const WysiwygEditor = lazy(() => import('./WysiwygEditor'))
 const LiteratureAttachments = lazy(() => import('./LiteratureAttachments').then((module) => ({ default: module.LiteratureAttachments })))
+const ResearchPanel = lazy(() => import('./ResearchPanel').then((module) => ({ default: module.ResearchPanel })))
 
 async function copyCitation(note: Note, format: 'gb' | 'apa' | 'bibtex') {
   const { copyCitationFor } = await import('@/lib/copyCitation')
@@ -106,9 +111,48 @@ export function NoteEditor({
   })
   const cssRef = useRef<HTMLInputElement>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
+  /** 编辑器根节点：大纲跳转在所见即所得模式下要从这里找 `.vditor-reset` 里的标题 */
+  const rootRef = useRef<HTMLDivElement>(null)
+  const [relationsOpen, setRelationsOpen] = useState(false)
+  const [headingJump, setHeadingJump] = useState<HeadingJump | null>(null)
+  const [newTopicOpen, setNewTopicOpen] = useState(false)
+  const [newTopic, setNewTopic] = useState('')
   const [saved, setSaved] = useState(false)
+  /** 研究追问右侧面板（可收起；窄屏为覆盖式抽屉，见下方布局） */
+  const [researchOpen, setResearchOpen] = useState(false)
   /** 内嵌 PDF 面板展开了：详情信息与正文各占半列，别让正文被挤成一行（见 src/lib/inlinePdfPanel.ts） */
   const pdfPanelOpen = useInlinePdfPanelOpen()
+
+  /** 主题（`主题:` 标签）：一篇笔记一个；选项来自全库非文献笔记 */
+  const currentTopic = topicOf(note)
+  const topicOptions = useMemo(
+    () => topicCounts(allNotes.filter((n) => n.type !== 'literature')).map((entry) => entry.topic),
+    [allNotes],
+  )
+  const applyTopic = (topic: string) => {
+    onChange({ tags: withTopic(note.tags, topic) })
+    setNewTopic('')
+    setNewTopicOpen(false)
+  }
+
+  /** 大纲跳转：所见即所得走 Vditor 的 DOM，经典模式预览走 Shadow DOM，源码模式定位到偏移 */
+  const jumpToHeading = (index: number) => {
+    // 默认就是所见即所得：这时「预览/编辑」页签并不参与渲染，不能按 tab 判断
+    if (editorMode === 'wysiwyg') {
+      const headings = rootRef.current?.querySelectorAll<HTMLElement>('.vditor-reset h1, .vditor-reset h2, .vditor-reset h3, .vditor-reset h4, .vditor-reset h5, .vditor-reset h6')
+      scrollElementIntoView(headings?.[index] ?? null, 56)
+      return
+    }
+    if (readOnly || tab === 'preview') {
+      setHeadingJump({ index, nonce: Date.now() })
+      return
+    }
+    const entry = outlineOf(note.content)[index]
+    const ta = taRef.current
+    if (!entry || !ta) return
+    ta.focus()
+    ta.setSelectionRange(entry.index, entry.index)
+  }
 
   /** 流式布局（flow）下正文改用页面级滚动：textarea 不会自己长高，按内容高度顶开，
    *  底部留白留在自己身上（40vh），滚到底时最后一行不会贴住屏幕下沿 */
@@ -199,6 +243,7 @@ export function NoteEditor({
     const spelling = new Map<string, string>()
     for (const n of allNotes) {
       for (const t of n.tags) {
+        if (isTopicTag(t)) continue
         const key = t.toLowerCase()
         counts.set(key, (counts.get(key) ?? 0) + 1)
         if (!spelling.has(key)) spelling.set(key, t)
@@ -230,6 +275,13 @@ export function NoteEditor({
 
   const addTag = (value?: string) => {    const raw = (value ?? tagInput).trim().replace(/^#/, '')
     if (!raw) {
+      setTagInput('')
+      return
+    }
+    // 手输 `主题:xxx` 不当作普通标签：主题有专门的控件，避免造出第二个主题
+    if (isTopicTag(raw)) {
+      const topic = normalizeTopic(raw)
+      if (topic) applyTopic(topic)
       setTagInput('')
       return
     }
@@ -307,6 +359,7 @@ export function NoteEditor({
       theme={theme}
       customCss={customTheme?.css ?? ''}
       flow={flow}
+      headingJump={headingJump}
     />
   )
 
@@ -409,7 +462,7 @@ export function NoteEditor({
   )
 
   return (
-    <div className={flow ? 'flex min-h-full flex-col' : 'flex h-full min-h-0 flex-col'}>
+    <div ref={rootRef} className={flow ? 'flex min-h-full flex-col' : 'flex h-full min-h-0 flex-col'}>
       {/* 头部：标题与元信息。面板展开时和「文献信息」各占 1/4 列（正文 1/2）。
           必须写成固定高度的 1/4（不是 basis-0 + grow）：那两个量块会被浏览器按
           「内容自动最小高度」卡住，正文实测只剩 45%（见 AGENTS.md 第 11 条） */}
@@ -460,6 +513,15 @@ export function NoteEditor({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuItem className="min-h-11" onSelect={() => setResearchOpen((v) => !v)}>
+                  <CircleHelp className="mr-2 h-4 w-4" />
+                  研究追问
+                </DropdownMenuItem>
+                <DropdownMenuItem className="min-h-11" onSelect={() => setRelationsOpen(true)}>
+                  <Link2 className="mr-2 h-4 w-4" />
+                  关系与大纲
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem className="min-h-11" onSelect={() => exportMd()}>
                   <Download className="mr-2 h-4 w-4" />
                   导出为 Obsidian 兼容 .md
@@ -477,6 +539,25 @@ export function NoteEditor({
             </DropdownMenu>
           </div>
           <div className="hidden shrink-0 items-center gap-2 md:flex">
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => setResearchOpen((v) => !v)}
+              title="研究追问：完成笔记后生成 3 个针对性问题"
+              aria-label="研究追问"
+              aria-pressed={researchOpen}
+            >
+              <CircleHelp className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => setRelationsOpen(true)}
+              title="关系与大纲：反向链接 / 本文大纲 / 缺失链接"
+              aria-label="关系与大纲"
+            >
+              <Link2 className="h-4 w-4" />
+            </Button>
             <Button variant="outline" size="icon" onClick={exportMd} title="导出为 Obsidian 兼容的 .md 文件">
               <Download className="h-4 w-4" />
             </Button>
@@ -495,6 +576,58 @@ export function NoteEditor({
           </div>
         )}
         <div className="flex flex-wrap items-center gap-2">
+          {note.type !== 'literature' && (
+            <div className="flex items-center gap-1.5">
+            <span className="hidden text-xs text-muted-foreground md:inline">主题</span>
+            <Select
+              value={currentTopic || '__none__'}
+              onValueChange={(value) => {
+                if (value === '__new__') {
+                  setNewTopicOpen(true)
+                  return
+                }
+                applyTopic(value === '__none__' ? '' : value)
+              }}
+            >
+              <SelectTrigger className="h-9 w-[150px] text-xs md:h-8" title="主题（落盘为 主题:标签）">
+                <SelectValue placeholder="未设主题" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">未设主题</SelectItem>
+                {topicOptions.map((topic) => (
+                  <SelectItem key={topic} value={topic}>
+                    {topic}
+                  </SelectItem>
+                ))}
+                <SelectItem value="__new__">+ 新建主题…</SelectItem>
+              </SelectContent>
+            </Select>
+            {newTopicOpen && (
+              <Input
+                autoFocus
+                value={newTopic}
+                onChange={(e) => setNewTopic(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    applyTopic(newTopic)
+                  }
+                  if (e.key === 'Escape') {
+                    setNewTopic('')
+                    setNewTopicOpen(false)
+                  }
+                }}
+                onBlur={() => {
+                  if (newTopic.trim()) applyTopic(newTopic)
+                  else setNewTopicOpen(false)
+                }}
+                placeholder="主题名称"
+                aria-label="新建主题"
+                className="h-9 w-40 text-xs md:h-8"
+              />
+            )}
+          </div>
+          )}
           <Select
             value={note.type}
             onValueChange={(v) => {
@@ -537,7 +670,7 @@ export function NoteEditor({
             </Select>
           )}
           <div className="flex min-w-0 flex-wrap items-center gap-1">
-            {note.tags.map((t) => (
+            {note.tags.filter((t) => !isTopicTag(t)).map((t) => (
               <Badge
                 key={t}
                 variant="secondary"
@@ -629,25 +762,61 @@ export function NoteEditor({
         </div>
       </div>
 
-      {/* 文献元数据编辑区：仅文献类型显示。面板展开时它和头部各占 1/4 列（流式布局不参与分列） */}
-      {note.type === 'literature' && (
-        <div className={!flow && pdfPanelOpen ? 'h-1/4 min-h-0 shrink-0 overflow-y-auto overflow-x-hidden' : 'contents'}>
-          <LiteratureFields note={note} allNotes={allNotes} onChange={onChange} />
-        </div>
-      )}
+      {/* 正文区 + 研究追问面板：宽屏右侧面栏，窄屏/手机覆盖式抽屉（不挤压编辑区） */}
+      <div className="relative flex min-h-0 flex-1">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          {/* 文献元数据编辑区：仅文献类型显示。面板展开时它和头部各占 1/4 列（流式布局不参与分列） */}
+          {note.type === 'literature' && (
+            <div className={!flow && pdfPanelOpen ? 'h-1/4 min-h-0 shrink-0 overflow-y-auto overflow-x-hidden' : 'contents'}>
+              <LiteratureFields note={note} allNotes={allNotes} onChange={onChange} />
+            </div>
+          )}
 
-      {/* 编辑区；文献笔记外包一层附件工作区（附件工具条 + PDF 面板）。
-          面板展开时正文拿半列（剩下的 1/4+1/4 归详情信息） */}
-      {note.type === 'literature' ? (
-        <Suspense fallback={editorArea}>
-          <div className={!flow && pdfPanelOpen ? 'flex h-1/2 min-h-0 shrink-0 flex-col' : 'contents'}>
-            <LiteratureAttachments note={note} onChange={onChange} onFullscreenRead={onReadPdf}>
-              {editorArea}
-            </LiteratureAttachments>
+          {/* 编辑区；文献笔记外包一层附件工作区（附件工具条 + PDF 面板）。
+              面板展开时正文拿半列（剩下的 1/4+1/4 归详情信息） */}
+          {note.type === 'literature' ? (
+            <Suspense fallback={editorArea}>
+              <div className={!flow && pdfPanelOpen ? 'flex h-1/2 min-h-0 shrink-0 flex-col' : 'contents'}>
+                <LiteratureAttachments note={note} onChange={onChange} onFullscreenRead={onReadPdf}>
+                  {editorArea}
+                </LiteratureAttachments>
+              </div>
+            </Suspense>
+          ) : (
+            editorArea
+          )}
+        </div>
+
+        {researchOpen && (
+          <div className="absolute inset-y-0 right-0 z-30 w-[min(92vw,360px)] border-l bg-card shadow-2xl lg:static lg:z-auto lg:w-[340px] lg:shadow-none">
+            <Suspense
+              fallback={
+                <div className="flex h-full items-center justify-center text-xs text-muted-foreground" role="status">
+                  正在打开研究追问…
+                </div>
+              }
+            >
+              <ResearchPanel
+                note={note}
+                allNotes={allNotes}
+                readOnly={readOnly}
+                onInsertSection={(section) => onChange({ content: appendToContent(note.content, section) })}
+                onClose={() => setResearchOpen(false)}
+              />
+            </Suspense>
           </div>
-        </Suspense>
-      ) : (
-        editorArea
+        )}
+      </div>
+
+      {!relationsOpen ? null : (
+        <NoteRelations
+          open={relationsOpen}
+          note={note}
+          allNotes={allNotes}
+          onClose={() => setRelationsOpen(false)}
+          onOpenNote={onOpenNote}
+          onJumpHeading={jumpToHeading}
+        />
       )}
     </div>
   )

@@ -340,6 +340,20 @@ async function main() {
     assert.equal(payload.citationItems[0].itemData.id, 'Q4DVYK39')
     assert.equal(payload.citationItems[0].itemData._zoteroKey, undefined)
   })
+  await check('citationItems 每条必带 uris 与 itemData.URI（Zotero 生成文献表的前提）', async () => {
+    // Zotero loadItemData 靠 uris 认回本机条目；embedded 兜底分支无条件遍历 uris，
+    // 缺失会抛 TypeError，Add/Edit Bibliography 出不来文献表（2026-10-23 修复）
+    const csl = [litToCSL(litNote({ zoteroKey: 'Q4DVYK39' }))]
+    const payload = extractPayload(buildCitationFieldRtf(csl, 'gb', await formatCitationMarker(csl, 'gb')))
+    assert.deepEqual(payload.citationItems[0].uris, ['http://zotero.org/users/local/kg/items/Q4DVYK39'])
+    assert.equal(payload.citationItems[0].itemData.URI, 'http://zotero.org/users/local/kg/items/Q4DVYK39')
+    // 无 Zotero key 的条目退回 citekey，uris 仍必须存在且确定（同一篇多次复制同一 URI，embedded 归并不重复计数）
+    const plain = [rtfItem]
+    const p1 = extractPayload(buildCitationFieldRtf(plain, 'gb', await formatCitationMarker(plain, 'gb')))
+    const p2 = extractPayload(buildCitationFieldRtf(plain, 'gb', await formatCitationMarker(plain, 'gb')))
+    assert.deepEqual(p1.citationItems[0].uris, ['http://zotero.org/users/local/kg/items/zhang2024silicon'])
+    assert.deepEqual(p2.citationItems[0].uris, p1.citationItems[0].uris)
+  })
   await check('特殊字符快照：中文标题与非 ASCII 作者正确转义', async () => {
     const zhNote = {
       ...litNote(),

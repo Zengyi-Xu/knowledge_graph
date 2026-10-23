@@ -4,14 +4,15 @@
  * 桌面/平板（≥768px）不渲染它 —— 那两端继续用顶部的 Tabs 与左侧列表栏。
  * 每个标签都是 ≥44px 的触摸目标；`data-testid` 供响应式验证脚本断言。
  */
-import { BookOpen, Network, NotebookText, Settings2 } from 'lucide-react'
+import { BookOpen, Network, NotebookText, Quote, Settings2 } from 'lucide-react'
 
-export type MobileTab = 'notes' | 'graph' | 'literature' | 'settings'
+export type MobileTab = 'notes' | 'graph' | 'literature' | 'citations' | 'settings'
 
 const ITEMS: { tab: MobileTab; label: string; Icon: typeof NotebookText }[] = [
   { tab: 'notes', label: '笔记', Icon: NotebookText },
   { tab: 'graph', label: '图谱', Icon: Network },
   { tab: 'literature', label: '文献', Icon: BookOpen },
+  { tab: 'citations', label: '引用', Icon: Quote },
   { tab: 'settings', label: '存储', Icon: Settings2 },
 ]
 

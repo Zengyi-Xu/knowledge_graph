@@ -49,6 +49,7 @@ export function CitationsView({ notes, onOpenNote, onGoLiterature }: Props) {
   const [search, setSearch] = useState('')
   const [styleId, setStyleId] = useState<CitationStyleId>('gb')
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
 
   const literature = useMemo(
     () =>
@@ -77,6 +78,31 @@ export function CitationsView({ notes, onOpenNote, onGoLiterature }: Props) {
     })
   }, [literature, search])
 
+  const selectedRows = useMemo(
+    () => literature.filter((note) => selectedIds.has(note.id)),
+    [literature, selectedIds],
+  )
+  const allFilteredSelected = rows.length > 0 && rows.every((note) => selectedIds.has(note.id))
+  const exportRows = selectedRows.length > 0 ? selectedRows : rows
+
+  const toggleSelected = (id: string) => {
+    setSelectedIds((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const toggleAllFiltered = () => {
+    setSelectedIds((current) => {
+      const next = new Set(current)
+      if (allFilteredSelected) rows.forEach((note) => next.delete(note.id))
+      else rows.forEach((note) => next.add(note.id))
+      return next
+    })
+  }
+
   const copyCitekey = async (n: Note) => {
     const key = n.literature?.citekey
     if (!key) {
@@ -99,7 +125,7 @@ export function CitationsView({ notes, onOpenNote, onGoLiterature }: Props) {
       <div className="flex items-center gap-3 rounded-lg border bg-card p-3 text-sm">
         <Quote className="h-4 w-4 shrink-0 text-primary" />
         <p className="min-w-0 text-muted-foreground">
-          复制单篇引用粘贴到论文或笔记；「复制参考文献表」按所选样式把当前筛选结果排成文献表（富文本 + 纯文本），在 Word 里粘贴即可生成域代码。
+          勾选一篇或多篇文献后，可复制 Zotero 兼容的 Word 引用域；「复制参考文献表」会优先导出已选文献，未勾选时导出当前筛选结果。
         </p>
       </div>
 
@@ -113,8 +139,10 @@ export function CitationsView({ notes, onOpenNote, onGoLiterature }: Props) {
             className="pl-7"
           />
         </div>
-        <span className="text-xs text-muted-foreground">{rows.length} / {literature.length} 篇文献</span>
-        <div className="ml-auto flex items-center gap-2">
+        <span className="text-xs text-muted-foreground">
+          {rows.length} / {literature.length} 篇文献{selectedRows.length > 0 ? ` · 已选 ${selectedRows.length} 篇` : ''}
+        </span>
+        <div className="ml-auto flex flex-wrap items-center gap-2">
           <Select value={styleId} onValueChange={(v) => setStyleId(v as CitationStyleId)}>
             <SelectTrigger className="h-8 w-[130px] text-xs" aria-label="引用样式">
               <SelectValue />
@@ -126,13 +154,25 @@ export function CitationsView({ notes, onOpenNote, onGoLiterature }: Props) {
             </SelectContent>
           </Select>
           <Button
+            size="sm"
+            disabled={selectedRows.length === 0}
+            title="把已选文献复制为 Zotero 兼容的 Word 引用域，随后在 Word 中粘贴"
+            onClick={() => void writeCitationClipboard(selectedRows.map(litToCSL), styleId)}
+          >
+            <Quote className="mr-1 h-3.5 w-3.5" /> 插入 Word 引用{selectedRows.length > 0 ? `（${selectedRows.length}）` : ''}
+          </Button>
+          <Button
             variant="outline"
             size="sm"
-            title="把当前筛选出的文献按所选样式排成文献表，复制为 RTF 富文本 + 纯文本"
-            onClick={() => void writeBibliographyClipboard(rows.map(litToCSL), styleId)}
+            disabled={exportRows.length === 0}
+            title={selectedRows.length > 0 ? '把已选文献排成参考文献表' : '把当前筛选结果排成参考文献表'}
+            onClick={() => void writeBibliographyClipboard(exportRows.map(litToCSL), styleId)}
           >
-            <ClipboardCopy className="mr-1 h-3.5 w-3.5" /> 复制参考文献表
+            <ClipboardCopy className="mr-1 h-3.5 w-3.5" /> 复制参考文献表{selectedRows.length > 0 ? `（${selectedRows.length}）` : ''}
           </Button>
+          {selectedRows.length > 0 && (
+            <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())}>清除选择</Button>
+          )}
         </div>
       </div>
 
@@ -140,6 +180,16 @@ export function CitationsView({ notes, onOpenNote, onGoLiterature }: Props) {
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-12 text-center">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 align-middle accent-primary"
+                  checked={allFilteredSelected}
+                  aria-label="选择当前筛选结果"
+                  title="选择当前筛选结果"
+                  onChange={toggleAllFiltered}
+                />
+              </TableHead>
               <TableHead className="w-40">引用键</TableHead>
               <TableHead>文献</TableHead>
               <TableHead className="w-56">作者 · 年份</TableHead>
@@ -149,6 +199,15 @@ export function CitationsView({ notes, onOpenNote, onGoLiterature }: Props) {
           <TableBody>
             {rows.slice(0, visibleCount).map((n) => (
               <TableRow key={n.id} className="cursor-pointer" onClick={() => onOpenNote(n.id)}>
+                <TableCell className="text-center" onClick={(e) => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 align-middle accent-primary"
+                    checked={selectedIds.has(n.id)}
+                    aria-label={`选择 ${cleanLiteratureTitle(n.title)}`}
+                    onChange={() => toggleSelected(n.id)}
+                  />
+                </TableCell>
                 <TableCell>
                   <button
                     type="button"
@@ -189,7 +248,7 @@ export function CitationsView({ notes, onOpenNote, onGoLiterature }: Props) {
             ))}
             {rows.length > visibleCount && (
               <TableRow>
-                <TableCell colSpan={4} className="py-3 text-center">
+                <TableCell colSpan={5} className="py-3 text-center">
                   <Button variant="outline" size="sm" onClick={() => setVisibleCount((v) => v + PAGE_SIZE)}>
                     显示更多（还有 {rows.length - visibleCount} 篇）
                   </Button>
@@ -198,7 +257,7 @@ export function CitationsView({ notes, onOpenNote, onGoLiterature }: Props) {
             )}
             {rows.length === 0 && (
               <TableRow>
-                <TableCell colSpan={4} className="py-12 text-center text-muted-foreground">
+                <TableCell colSpan={5} className="py-12 text-center text-muted-foreground">
                   <BookOpen className="mx-auto mb-2 h-6 w-6" />
                   {literature.length === 0 ? (
                     <>

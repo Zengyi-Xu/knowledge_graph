@@ -1,10 +1,10 @@
 # 知识图谱
 
-当前 v1.2.6 同时提供 Windows / macOS / Linux 三端桌面安装包，以及附带 Node 的 Windows x64 免安装网页包。
+当前 v1.2.7 同时提供 Windows / macOS / Linux 三端桌面安装包，以及附带 Node 的 Windows x64 免安装网页包。
 桌面版在 [最新 Release](https://github.com/Zengyi-Xu/knowledge_graph/releases/latest) 下载；网页包解压后双击
-`启动知识图谱.wsf`（无窗口启动），无需安装 Node、npm 或 Electron。
+`启动知识图谱.pyw`（由 Python 3 无窗口启动，不经过 Windows Script Host）；Node 已随包附带，无需安装 npm 或 Electron。
 详见 [免安装网页使用说明](docs/WEB_PORTABLE.md)；完整功能用法见 [使用手册](docs/USAGE.md)。
-开发目录网页端仍可双击 `启动网页端.wsf`，
+开发目录网页端可用 Python 运行 `启动网页端.pyw`，
 或按 [本地网页端说明](docs/LOCAL_WEB.md) 启动。
 
 本地优先的 Markdown 笔记 + 知识图谱应用。笔记之间用 `[[双链]]` 关联，在图谱视图里
@@ -20,6 +20,8 @@ front matter 字段；`release-archive/` 里的旧桌面 EXE 不要用于真实 
 - **笔记 / 图谱 / 并列** 三种布局，可互相跳转
 - 五种笔记类型：人物、项目、技能、学习、其他（各有专属颜色，按类型分文件夹）
 - `[[双链]]`（输入 `[[` 自动补全）、`#标签`、Markdown 渲染、表格、上下标
+- **主题分组**：每篇笔记一个 `主题:xxx` 标签，侧栏按「类型 / 主题」切换；「关系与大纲」抽屉列出
+  反向链接（谁引用了这篇）、本文大纲（点击跳转）与缺失链接；搜索结果显示正文命中片段
 - 图谱支持按 **类型 / 年级 / 标签** 组合筛选；标签按 `前缀:` 分组，组内「或」、跨组「与」
 - 单击节点选中、再次单击打开笔记；右键聚焦，按到焦点的跳数逐层虚化
 - **图谱力参数可调**：节点斥力、双链引力、连线长度、中心聚集四根滑杆 +
@@ -73,7 +75,7 @@ macOS 已装旧版时：退出旧版 → 打开新 dmg → 把 `KnowledgeGraph` 
 
 | | 开发版 | 发布版（桌面安装包 / 网页包） |
 | --- | --- | --- |
-| 谁在用 | `npm run dev`（浏览器）；必要时 `npm run desktop:dev` 验证兼容层 | 双击安装后的 App；或解压 ZIP 后双击 `启动知识图谱.wsf`（无窗口；`启动知识图谱.cmd` 是窗口版） |
+| 谁在用 | `npm run dev`（浏览器）；必要时 `npm run desktop:dev` 验证兼容层 | 双击安装后的 App；或解压 ZIP 后双击 `启动知识图谱.pyw`（Python 无窗口；`启动知识图谱.cmd` 是窗口版） |
 | 前端产物 | Vite 开发服务；兼容测试使用 `dist-dev/` | 安装包内置 `dist/`；网页包为 `dist/` + 本地服务 + 随包 Node |
 | 数据 | 使用专门的测试 vault | 用户明确选择的 vault |
 | localStorage 键 | `kg-dev-*` | `kg-*` |

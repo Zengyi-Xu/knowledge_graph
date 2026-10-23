@@ -120,19 +120,58 @@ function loadDeepSeekConfig(configPath = process.env.DEEPSEEK_CONFIG || DEFAULT_
 
 /** 兼容旧调用：字符串参数视为 Kimi 的 configPath */
 function normalizeStatusRequest(options) {
-  if (typeof options === 'string') return { provider: 'kimi', configPath: options || undefined }
+  if (typeof options === 'string') return { provider: 'kimi', configPath: options || undefined, baseUrl: undefined }
   if (options && typeof options === 'object') {
     return {
-      provider: options.provider === 'deepseek' ? 'deepseek' : 'kimi',
+      provider: options.provider === 'deepseek' || options.provider === 'ollama' ? options.provider : 'kimi',
       configPath: typeof options.configPath === 'string' && options.configPath ? options.configPath : undefined,
+      baseUrl: typeof options.baseUrl === 'string' && options.baseUrl ? options.baseUrl : undefined,
     }
   }
-  return { provider: 'kimi', configPath: undefined }
+  return { provider: 'kimi', configPath: undefined, baseUrl: undefined }
+}
+
+/**
+ * 本地 Ollama（OpenAI 兼容 loopback，无 key）：baseUrl 由渲染端设置传入，
+ * 可用 OLLAMA_BASE_URL 环境变量兜底；模型列表探测 /api/tags。
+ */
+function ollamaBaseUrl(payload) {
+  const fromPayload = payload && typeof payload.baseUrl === 'string' && payload.baseUrl.trim()
+  return (fromPayload || process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434').replace(/\/+$/, '')
+}
+
+async function ollamaStatus(baseUrl) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 6000)
+  try {
+    const res = await fetch(`${baseUrl}/api/tags`, { signal: controller.signal })
+    if (!res.ok) return { configured: false, provider: 'ollama', error: `Ollama 返回 ${res.status}` }
+    const data = await res.json()
+    const models = (Array.isArray(data.models) ? data.models : [])
+      .map((m) => (m && typeof m.name === 'string' ? m.name : ''))
+      .filter(Boolean)
+    return {
+      configured: true,
+      provider: 'ollama',
+      baseUrl,
+      model: models[0] || '',
+      models,
+      keyPreview: '本机服务，无需 key',
+    }
+  } catch (error) {
+    if (error && error.name === 'AbortError') {
+      return { configured: false, provider: 'ollama', error: `Ollama 连接超时（6 秒无响应）：${baseUrl}` }
+    }
+    return { configured: false, provider: 'ollama', error: `Ollama 不可达：${String((error && error.message) || error).slice(0, 200)}` }
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 /** 渲染端可见的状态：脱敏，绝不包含完整 key */
 function aiStatus(options) {
-  const { provider, configPath } = normalizeStatusRequest(options)
+  const { provider, configPath, baseUrl } = normalizeStatusRequest(options)
+  if (provider === 'ollama') return ollamaStatus(baseUrl || ollamaBaseUrl(null))
   if (provider === 'deepseek') {
     const cfg = loadDeepSeekConfig(configPath)
     if (!cfg.ok) return { configured: false, provider, error: cfg.error }
@@ -276,12 +315,58 @@ async function deepseekComplete(payload, cfg, conversation) {
   }
 }
 
+async function ollamaComplete(payload, conversation) {
+  const baseUrl = ollamaBaseUrl(payload)
+  const requested = typeof payload.model === 'string' && /^[A-Za-z0-9._:-]+$/.test(payload.model) ? payload.model : ''
+  if (!requested) return { ok: false, error: 'Ollama 未指定模型名（可用 aiStatus 探测本机模型列表）' }
+  const messages = payload.system ? [{ role: 'system', content: payload.system }, ...conversation] : conversation
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 300_000)
+  try {
+    const res = await fetch(`${baseUrl}/api/chat`, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: requested,
+        messages,
+        stream: false,
+        // qwen3 系思考模型默认先吐长思考链，num_predict 预算会被思考吃光、正文为空：
+        // 追问/问答场景要的是直接答案，关掉思考（Ollama 对不支持 think 参数的模型会忽略）
+        think: false,
+        options: { num_predict: clamp(payload.maxTokens, 256, 8192, 2048) },
+      }),
+    })
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      let detail = ''
+      try {
+        const j = JSON.parse(body)
+        detail = j?.error ? String(j.error).slice(0, 200) : ''
+      } catch {
+        detail = ''
+      }
+      return { ok: false, error: `Ollama 返回 ${res.status}${detail ? `：${detail}` : ''}` }
+    }
+    const data = await res.json()
+    const text = typeof data?.message?.content === 'string' ? data.message.content : ''
+    if (!text.trim()) return { ok: false, error: 'Ollama 返回了空内容' }
+    return { ok: true, text, model: data.model || requested, usage: data.eval_count != null ? { evalCount: data.eval_count } : null }
+  } catch (error) {
+    if (error && error.name === 'AbortError') return { ok: false, error: 'Ollama 请求超时（300 秒）' }
+    return { ok: false, error: `Ollama 网络错误：${String((error && error.message) || error).slice(0, 200)}` }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 /**
  * 调模型网关（非流式，取完整文本）。
  * @param {{
- *   provider?: 'kimi'|'deepseek', prompt?: string,
+ *   provider?: 'kimi'|'deepseek'|'ollama', prompt?: string,
  *   messages?: { role: 'user'|'assistant', content: string }[],
- *   system?: string, model?: string, maxTokens?: number, configPath?: string
+ *   system?: string, model?: string, maxTokens?: number, configPath?: string,
+ *   baseUrl?: string
  * }} payload
  * @returns {{ ok: true, text, model, usage? } | { ok: false, error }}
  */
@@ -290,6 +375,7 @@ async function aiComplete(payload) {
   const conversation = normalizeConversation(payload)
   if (!conversation) return { ok: false, error: '缺少 prompt' }
 
+  if (payload.provider === 'ollama') return ollamaComplete(payload, conversation)
   if (payload.provider === 'deepseek') {
     const cfg = loadDeepSeekConfig(payload.configPath)
     if (!cfg.ok) return { ok: false, error: cfg.error }

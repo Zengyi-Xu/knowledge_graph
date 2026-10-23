@@ -62,7 +62,10 @@ async function writeClipboardRtf(rtf, text) {
   await fs.writeFile(rtfFile, rtf, 'utf8')
   await fs.writeFile(txtFile, text, 'utf8')
   const quote = (p) => `'${p.replace(/'/g, "''")}'`
-  await fs.writeFile(psFile, [
+  // Windows PowerShell 5.1 treats a UTF-8 script without BOM as the current
+  // ANSI code page.  On Chinese Windows that can corrupt the quoted Chinese
+  // diagnostic below and make the whole script fail to parse.
+  await fs.writeFile(psFile, '\uFEFF' + [
     'Add-Type -AssemblyName System.Windows.Forms',
     `$rtf = [System.IO.File]::ReadAllText(${quote(rtfFile)}, [System.Text.Encoding]::UTF8)`,
     `$text = [System.IO.File]::ReadAllText(${quote(txtFile)}, [System.Text.Encoding]::UTF8)`,
@@ -72,14 +75,25 @@ async function writeClipboardRtf(rtf, text) {
     "$ms.Write($bytes, 0, $bytes.Length); $ms.Position = 0",
     "$do.SetData('Rich Text Format', $false, $ms)",
     "$do.SetData([System.Windows.Forms.DataFormats]::UnicodeText, $true, $text)",
-    "[System.Windows.Forms.Clipboard]::SetDataObject($do, $true)",
-    "$written = [System.Windows.Forms.Clipboard]::GetDataObject()",
-    "if (-not $written.GetDataPresent('Rich Text Format')) { throw 'CF_RTF 写入后校验失败' }",
+    "$written = $false",
+    "for ($attempt = 1; $attempt -le 8; $attempt++) {",
+    "  try {",
+    "    [System.Windows.Forms.Clipboard]::SetDataObject($do, $true, 10, 100)",
+    "    $check = [System.Windows.Forms.Clipboard]::GetDataObject()",
+    "    if ($check -and $check.GetDataPresent('Rich Text Format')) { $written = $true; break }",
+    "  } catch { if ($attempt -eq 8) { throw }; Start-Sleep -Milliseconds (75 * $attempt) }",
+    "}",
+    "if (-not $written) { throw 'CF_RTF 写入后校验失败' }",
   ].join('\n'), 'utf8')
   await new Promise((resolve, reject) => {
     const child = spawn('powershell.exe', ['-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', psFile], { windowsHide: true })
+    let stderr = ''
+    child.stderr?.setEncoding('utf8')
+    child.stderr?.on('data', (chunk) => { stderr += chunk })
     child.on('error', reject)
-    child.on('exit', (code) => code === 0 ? resolve() : reject(new Error(`写剪贴板失败（PowerShell 退出码 ${code}）`)))
+    child.on('exit', (code) => code === 0
+      ? resolve()
+      : reject(new Error(stderr.trim().split(/\r?\n/).filter(Boolean).at(-1) || `写剪贴板失败（PowerShell 退出码 ${code}）`)))
   }).finally(() => { fs.rm(dir, { recursive: true, force: true }).catch(() => {}) })
   return { error: null }
 }

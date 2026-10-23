@@ -65,7 +65,7 @@
           "src/components/ui/toggle.tsx": "ab2e52debb86451889ac9519dfe27daf3a86d70aa2833da8ed8f6cf3146197ff",
           "src/components/ui/tooltip.tsx": "cbc12f4086448f8a307ed5fbb160f79467c84a44c48ca0dbd2c62e39a2db6f5d"
         },
-        "baselineAt": "2026-10-23"
+        "baselineAt": "2026-10-24"
       }
     },
     {
@@ -83,7 +83,7 @@
           "src/lib/csl/locales-zh-CN.xml": "371bbfcb5dc3ee4e40c0805bd28999906f8b3dd6488f03dae85d46c8843db900",
           "src/lib/csl/styles.ts": "129d399fefc0c6b568b1148efe62b9f44538b4ce538bdd034bd17d31c08a9abf"
         },
-        "baselineAt": "2026-10-23"
+        "baselineAt": "2026-10-24"
       }
     },
     {
@@ -392,7 +392,7 @@
           "public/vditor/dist/js/icons/material.js": "6913130c4d4fcf0de4708a6a8538ac3e11bb52af3e147210ae3c7ad2d8d9b08c",
           "public/vditor/dist/js/lute/lute.min.js": "53b61b051a3dfd9ee5a5010c873233679e139d8e62c49da08b4c2f2c195587cb"
         },
-        "baselineAt": "2026-10-23"
+        "baselineAt": "2026-10-24"
       }
     },
     {
@@ -411,7 +411,7 @@
           "src/lib/md.ts": "629e4ff7db8166d6e9877ba335fa32bddca916defb5276d3d3e0a31abc4d4114",
           "src/lib/tex.ts": "0bd8e136b20131c12188d80846486ebb8aa08b2c5d6e0843b6c1c398e18ea718"
         },
-        "baselineAt": "2026-10-23"
+        "baselineAt": "2026-10-24"
       }
     },
     {
@@ -438,7 +438,7 @@
           "src/themes/vue-light.css": "5dd24f795e7a2c4ba47e71a91bb044d2dd6c7534d1c408043e34c75821bee709",
           "src/themes/vue-night.css": "0ad996b964d9592aed81ab79398b577a0d18a20ec0d8ead9e7fd1b81caf33451"
         },
-        "baselineAt": "2026-10-23"
+        "baselineAt": "2026-10-24"
       }
     },
     {
@@ -485,7 +485,7 @@
             "toMarkdown"
           ]
         },
-        "baselineAt": "2026-10-23"
+        "baselineAt": "2026-10-24"
       }
     },
     {
@@ -530,7 +530,7 @@
             "unknownKeys"
           ]
         },
-        "baselineAt": "2026-10-23"
+        "baselineAt": "2026-10-24"
       }
     },
     {
@@ -579,7 +579,7 @@
             "serializeNotes"
           ]
         },
-        "baselineAt": "2026-10-23"
+        "baselineAt": "2026-10-24"
       }
     },
     {
@@ -630,7 +630,7 @@
             "tagsForZoteroItem"
           ]
         },
-        "baselineAt": "2026-10-23"
+        "baselineAt": "2026-10-24"
       }
     },
     {
@@ -710,7 +710,7 @@
           "writeVault",
           "zoteroLocalApi"
         ],
-        "baselineAt": "2026-10-23"
+        "baselineAt": "2026-10-24"
       }
     },
     {
@@ -756,7 +756,7 @@
             "writeCachedNotes"
           ]
         },
-        "baselineAt": "2026-10-23"
+        "baselineAt": "2026-10-24"
       }
     },
     {
@@ -776,7 +776,7 @@
             "parseMdImport"
           ]
         },
-        "baselineAt": "2026-10-23"
+        "baselineAt": "2026-10-24"
       }
     },
     {
@@ -806,7 +806,7 @@
             "installKatexStyles"
           ]
         },
-        "baselineAt": "2026-10-23"
+        "baselineAt": "2026-10-24"
       }
     },
     {
@@ -882,7 +882,7 @@
             "readSyncPlan"
           ]
         },
-        "baselineAt": "2026-10-23"
+        "baselineAt": "2026-10-24"
       }
     },
     {
@@ -913,7 +913,7 @@
             "writeCitationClipboard"
           ]
         },
-        "baselineAt": "2026-10-23"
+        "baselineAt": "2026-10-24"
       }
     },
     {
@@ -952,7 +952,7 @@
             "subscribeLocalPdfFallback"
           ]
         },
-        "baselineAt": "2026-10-23"
+        "baselineAt": "2026-10-24"
       }
     },
     {
@@ -988,7 +988,7 @@
             "buildTask"
           ]
         },
-        "baselineAt": "2026-10-23"
+        "baselineAt": "2026-10-24"
       }
     },
     {
@@ -1039,7 +1039,7 @@
             "toastDegraded"
           ]
         },
-        "baselineAt": "2026-10-23"
+        "baselineAt": "2026-10-24"
       }
     }
   ],
@@ -1129,6 +1129,21 @@
         "desktop-bridge"
       ],
       "reason": "desktop-bridge 新增 zoteroLocalApi（Zotero 10+ 本地写入：把本软件画的高亮只增回写成 annotation，IPC zotero:local-api）"
+    },
+    {
+      "at": "2026-10-23",
+      "units": [],
+      "reason": "citation-copy 域代码 payload 补 uris/itemData.URI：修复 Zotero 插件无法解析条目、生成文献表（loadItemData 无 uris 走 Items.get 数字 ID 查不到，embedded 分支对 uris 未判空必崩）"
+    },
+    {
+      "at": "2026-10-23",
+      "units": [],
+      "reason": "citation-copy 域代码 payload 补 uris/itemData.URI（同上理由，改后重新锁定）"
+    },
+    {
+      "at": "2026-10-24",
+      "units": [],
+      "reason": "desktop-bridge AI 网关新增 ollama 提供方（本机 Qwen，研究追问用），aiStatus/aiComplete 增加可选 baseUrl"
     }
   ]
 }

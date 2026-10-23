@@ -57,7 +57,7 @@ if (!args.includes('--zip-only')) {
   }
   await build({
     absWorkingDir: root,
-    entryPoints: ['electron/vaultFs.cjs', 'electron/attachmentFs.cjs', 'electron/zoteroFs.cjs', 'electron/aiGateway.cjs'],
+    entryPoints: ['electron/vaultFs.cjs', 'electron/attachmentFs.cjs', 'electron/zoteroFs.cjs', 'electron/zoteroLocalApi.cjs', 'electron/aiGateway.cjs'],
     bundle: true, platform: 'node', format: 'cjs', target: 'node24', external: ['better-sqlite3'],
     outdir: path.join(stage, 'electron'), outExtension: { '.js': '.cjs' }, logLevel: 'warning',
   })
@@ -65,14 +65,15 @@ if (!args.includes('--zip-only')) {
   const target = path.join(stage, 'node_modules', 'better-sqlite3')
   for (const file of ['lib', 'package.json', 'LICENSE']) copy(path.join(sqlite, file), path.join(target, file))
   copy(path.join(sqlite, 'prebuilds', 'win32-x64.node'), path.join(target, 'prebuilds', 'win32-x64.node'))
-  // 三个 Windows 启动器：.cmd 是窗口版（排查用），.wsf 是无窗口启动/停止（双击的默认入口）。
-  // 换行一律用 CRLF：.cmd 被 LF 截断过（echo 变 ho），.wsf 也跟 Windows 编辑器保持一致。
-  for (const launcher of ['启动知识图谱.cmd', '启动知识图谱.wsf', '停止知识图谱.wsf']) {
+  // .pyw 是默认无窗口入口（不经过 Windows Script Host），.cmd 是排查用的窗口版。
+  // 停止入口暂时保留 .wsf；换行一律用 CRLF，避免 Windows 脚本宿主/编辑器误判。
+  for (const launcher of ['启动知识图谱.cmd', '启动知识图谱.pyw', '停止知识图谱.wsf']) {
     const source = path.join(root, 'build', 'web-portable', launcher)
     const destination = path.join(stage, launcher)
     copy(source, destination)
     fs.writeFileSync(destination, fs.readFileSync(destination, 'utf8').replace(/\r?\n/g, '\r\n'))
   }
+  copy(path.join(root, 'build', 'web-portable', '知识图谱.ico'), path.join(stage, '知识图谱.ico'))
   copy(path.join(root, 'build', 'web-portable', '配置.json'), path.join(stage, '配置.json'))
   copy(path.join(root, 'docs', 'WEB_PORTABLE.md'), path.join(stage, '使用说明.md'))
   copy(path.join(root, 'LICENSE'), path.join(stage, 'LICENSE'))

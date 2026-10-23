@@ -55,6 +55,11 @@ function displayToRtf(displayText: string, styleId: CitationStyleId): string {
  * citationItems 的 id 优先用 Zotero key，itemData 是完整 CSL-JSON。
  * 注意：`\fldinst` 后的指令必须是**不带花括号**的空格分隔文本
  * （`{\*\fldinst{ … }}` 在 Word 里会退化成字面文本，实测 2026-10-13）。
+ *
+ * 每条 citationItem 必带 `uris`（与 `itemData.URI` 一致）：Zotero 插件解析文档时
+ * 靠 uris 把引用映射回本机库条目（users/local/ 段不校验，按 key 解析），
+ * 条目不在库里时 embedded 兜底分支也会无条件遍历 uris —— 缺失会直接导致
+ * 「Add/Edit Bibliography」抛错出不来文献表（2026-10-23 对照 Zotero 7 源码修复）。
  */
 export function buildCitationFieldRtf(
   cslItems: CslItem[],
@@ -63,13 +68,15 @@ export function buildCitationFieldRtf(
 ): string {
   const display = displayText
   const citationId = `kg-${globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`}`
+  const itemURI = (id: string) => `http://zotero.org/users/local/kg/items/${encodeURIComponent(id)}`
   const payload = {
     citationID: citationId,
     properties: { formattedCitation: display, plainCitation: display, noteIndex: 0 },
     citationItems: cslItems.map((it) => {
       const { _zoteroKey, ...itemData } = it
       const id = typeof _zoteroKey === 'string' && _zoteroKey ? _zoteroKey : String(it.id ?? '')
-      return { id, itemData: { ...itemData, id } }
+      const uri = itemURI(id)
+      return { id, uris: [uri], itemData: { ...itemData, id, URI: uri } }
     }),
     schema: 'https://github.com/citation-style-language/schema/raw/master/csl-citation.json',
   }
