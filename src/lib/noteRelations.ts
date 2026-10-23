@@ -55,7 +55,7 @@ export function outlineOf(content: string): OutlineEntry[] {
 export function linksIn(content: string): { title: string; index: number }[] {
   const links: { title: string; index: number }[] = []
   eachLineOutsideFence(content, (line, offset) => {
-    const re = /\[\[([^\[\]]+)\]\]/g
+    const re = /\[\[([^[\]]+)\]\]/g
     let match: RegExpExecArray | null
     while ((match = re.exec(line)) !== null) {
       const title = match[1].split('|')[0].split('#')[0].trim()

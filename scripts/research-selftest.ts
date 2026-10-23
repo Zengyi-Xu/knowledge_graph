@@ -208,7 +208,7 @@ const dd = buildDeepDivePrompt({
   relatedNotes: [rel],
   task: '比较两篇的矛盾',
 })
-check('深入分析只含当前+勾选笔记', dd.prompt.includes('当前') && dd.prompt.includes('相关正文') && !dd.prompt.includes('绝密内容'))
+check('深入分析只含当前+勾选笔记', dd.prompt.includes('当前') && dd.prompt.includes('相关正文') && !dd.prompt.includes(other.title) && !dd.prompt.includes(other.content))
 check('深入分析含问答草稿', dd.prompt.includes('草稿回答'))
 check('材料 id 去重且只含授权', deepDiveMaterialIds('n4', new Set(['n5', 'n4'])) .join(',') === 'n4,n5')
 

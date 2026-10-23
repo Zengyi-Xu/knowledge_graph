@@ -127,7 +127,7 @@ const local: PdfAnnotation = {
 const merged = mergeViewerAnnotations([local], [mapped!, mapZoteroAnnotation(record({ key: 'ANNKEY02', pageIndex: 1 }))!])
 check('本地标注永远在前且保留', merged[0].id === 'local-1' && merged.length === 3)
 check('同一 Zotero 标注只出现一次（重复输入去重）', mergeViewerAnnotations([local], [mapped!, mapped!]).length === 2)
-check('没有 Zotero 标注时原样返回本地数组', mergeViewerAnnotations([local], []) === [local] || mergeViewerAnnotations([local], []).length === 1)
+check('没有 Zotero 标注时原样返回本地数组', (() => { const only = mergeViewerAnnotations([local], []); return only.length === 1 && only[0] === local })())
 
 // ---- 同步计划 ----
 const plan = planZoteroMarkupSync({ noteId: 'note-1', bundle, now: 1790000000000 })
