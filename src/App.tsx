@@ -17,6 +17,8 @@ import { ConflictDialog } from '@/components/ConflictDialog'
 import { FolderMoveDialog } from '@/components/FolderMoveDialog'
 import { DataSafetyStatus } from '@/components/DataSafetyStatus'
 import { BackupTransferMenu } from '@/components/BackupTransferMenu'
+import { RecentNotesMenu } from '@/components/RecentNotesMenu'
+import { loadRecent, saveRecent, touchRecent, type RecentNoteEntry } from '@/lib/recentNotes'
 import { NOTE_TYPE_META, GRADE_META } from '@/types/note'
 import type { NoteType, Note } from '@/types/note'
 import { parseMdImport } from '@/lib/mdImport'
@@ -101,6 +103,17 @@ export default function App() {
   // 启动默认进「并列」视图（图谱 + 笔记同屏），不再默认单栏「笔记」
   const [view, setView] = useState<View>('both')
   const [activeId, setActiveId] = useState<string | null>(null)
+  /** 「最近笔记」打开顺序表（新→旧），见 src/lib/recentNotes.ts */
+  const [recentNotes, setRecentNotes] = useState<RecentNoteEntry[]>(() => loadRecent())
+  // 任何入口打开笔记（列表/图谱/引用/文献/Alt+← 返回）都统一记进最近表
+  useEffect(() => {
+    if (!activeId) return
+    setRecentNotes((prev) => {
+      const next = touchRecent(prev, activeId)
+      if (next !== prev) saveRecent(next)
+      return next
+    })
+  }, [activeId])
   const [readingNoteId, setReadingNoteId] = useState<string | null>(null)
   const [focusId, setFocusId] = useState<string | null>(null)
   const [listOpen, setListOpen] = useState(() => readSetting('list-open-v1') !== '0')
@@ -866,6 +879,7 @@ export default function App() {
           onOpenAi={() => { setAiTask(null); setAiOpen(true) }}
           onExportJson={exportJson}
         />
+        <RecentNotesMenu notes={notes} entries={recentNotes} onOpen={openNote} />
       </header>
 
       {/* 本地存储 + 同步状态栏：桌面/平板显示在顶部；手机端收进底部「存储」面板 */}

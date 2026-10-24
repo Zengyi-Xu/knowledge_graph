@@ -30,6 +30,7 @@
     "test:note-list": "esbuild scripts/note-list-selftest.tsx --bundle --platform=node --format=cjs --target=node20 --jsx=automatic --alias:@=./src --outfile=.tmp-vault-test/note-list-selftest.cjs && node .tmp-vault-test/note-list-selftest.cjs",
     "test:organize": "esbuild scripts/notes-organize-selftest.ts --bundle --platform=node --format=cjs --target=node20 --alias:@=./src --outfile=.tmp-vault-test/notes-organize.cjs && node .tmp-vault-test/notes-organize.cjs",
     "test:research": "esbuild scripts/research-selftest.ts --bundle --platform=node --format=cjs --target=node20 --alias:@=./src --outfile=.tmp-vault-test/research-selftest.cjs && node .tmp-vault-test/research-selftest.cjs",
+    "test:recent": "esbuild scripts/recent-notes-selftest.ts --bundle --platform=node --format=cjs --target=node20 --alias:@=./src --outfile=.tmp-vault-test/recent-notes-selftest.cjs && node .tmp-vault-test/recent-notes-selftest.cjs",
     "topics:build": "esbuild scripts/tag-topics.ts --bundle --platform=node --format=cjs --target=node20 --alias:@=./src --outfile=.tmp-vault-test/tag-topics.cjs",
     "topics:suggest": "npm run topics:build && node .tmp-vault-test/tag-topics.cjs",
     "topics:apply": "npm run topics:build && node .tmp-vault-test/tag-topics.cjs --apply",
