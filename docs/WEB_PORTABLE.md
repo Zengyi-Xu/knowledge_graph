@@ -1,16 +1,18 @@
 # 知识图谱免安装网页端
 
-适用于 Windows x64。压缩包已附带 Node 与 SQLite，不需要安装 Node、npm、Electron 或管理员权限。
+适用于 Windows x64。压缩包已附带 Node 与 SQLite，不需要安装 Node、npm、Electron 或管理员权限。Qt 桌面窗口需要 Python 3 与 PySide6；原浏览器入口不需要 PySide6。
 
 ## 第一次使用
 
 1. 从 GitHub 最新 Release 下载 `knowledge-graph-web-<版本>-windows-x64.zip`（本版本即 `1.2.1`）。
 2. 完整解压到一个可写的固定文件夹，不能直接在压缩包内运行。
-3. 用 Python 3 运行 `启动知识图谱.pyw`，默认浏览器打开 `http://127.0.0.1:4173`。推荐关联到 `pythonw.exe`，桌面**不会出现命令窗口**，也不会经过 Windows Script Host；服务输出写进 `data/temp/web-server.log`，真正启动失败时才会弹出错误提示。
-4. 关闭服务：双击 `停止知识图谱.wsf`（本机所有知识图谱本地服务进程都会停）。
+3. 使用 Qt 桌面窗口：在程序目录运行 `python -m pip install -r requirements-qt.txt`，再用 Python 3 运行 `启动知识图谱-Qt.pyw`。推荐关联到 `pythonw.exe`，不会出现命令窗口；网页 UI 原样显示在 Qt 窗口中，本地服务输出写进 `data/temp/qt-web-server.log`。关闭 Qt 窗口会停止本次启动的服务；若连接的是已有服务，则不会停止它。
+4. 使用默认浏览器：用 Python 3 运行 `启动知识图谱.pyw`，打开 `http://127.0.0.1:4173`。服务输出写进 `data/temp/web-server.log`。没有 PySide6 时可始终使用这个入口。
+5. 关闭浏览器版服务：双击 `停止知识图谱.wsf`（本机所有知识图谱本地服务进程都会停）。
    想看实时输出或排查启动问题时，双击 `启动知识图谱.cmd`（窗口版，行为与以前一致，关窗口即停止）。
 
 首次启动使用程序文件夹中的 `data/vault` 保存笔记。顶栏可选择已有笔记目录；配置文件中也可以设置固定路径。
+Qt 的浏览器存储位于 `data/qt-profile`，缓存位于 `data/qt-cache`；它们与原浏览器入口的设置互不共用，笔记正文仍都在 vault 中。
 程序本体可分享给其他人；分享前不要把自己的 `data` 文件夹或个人配置一起发出。
 
 ## Zotero、PDF 与已有笔记

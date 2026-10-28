@@ -23,6 +23,7 @@ import { NOTE_TYPE_META, GRADE_META } from '@/types/note'
 import type { NoteType, Note } from '@/types/note'
 import { parseMdImport } from '@/lib/mdImport'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -140,8 +141,9 @@ export default function App() {
 
   const active = notes.find((n) => n.id === activeId) ?? notes[0] ?? null
   const readingNote = notes.find((n) => n.id === readingNoteId) ?? null
-  /** 流式排版（flow）的滚动容器：单栏「笔记」与「并列」各有一个，同一时刻只挂载一个。
-   *  换笔记/换视图时滚动位置归零，否则新笔记一打开就是「标题和工具条已经被滚走」的样子 */
+  /** 流式排版（flow）的挂载容器：单栏「笔记」与「并列」各有一个，同一时刻只挂载一个。
+   *  滚动发生在 NoteEditor 正文区内部（头部/工具条固定），这里的 scrollTo 只是兜底归零；
+   *  正文滚动位置的归零在 NoteEditor 里按 note.id 做 */
   const noteScrollRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     noteScrollRef.current?.scrollTo({ top: 0 })
@@ -194,6 +196,20 @@ export default function App() {
       return a[0].localeCompare(b[0], 'zh')
     })
   }, [allTags])
+
+  /** 图谱筛选面板的标签搜索词：标签几百个起步，滚动找不如直接搜 */
+  const [tagFilter, setTagFilter] = useState('')
+  /** 按搜索词过滤后的标签分组（空组整组不显示；已选中的标签即使不匹配也保留显示，免得找不到取消入口） */
+  const filteredTagGroups = useMemo(() => {
+    const q = tagFilter.trim().toLowerCase()
+    if (!q) return tagGroups
+    return tagGroups
+      .map(
+        ([prefix, ts]) =>
+          [prefix, ts.filter((t) => t.toLowerCase().includes(q) || filters.tags.has(t))] as [string, string[]],
+      )
+      .filter(([, ts]) => ts.length > 0)
+  }, [tagGroups, tagFilter, filters.tags])
 
   const toggle = (set: Set<string>, v: string, key: keyof Filters) => {
     const next = new Set(set)
@@ -683,7 +699,17 @@ export default function App() {
       {tagGroups.length > 0 && (
         <div>
           <div className="mb-1.5 font-medium">按标签（同组内「或」、跨组「与」）</div>
-          {tagGroups.map(([prefix, ts]) => (
+          <Input
+            value={tagFilter}
+            onChange={(e) => setTagFilter(e.target.value)}
+            placeholder="搜索标签…"
+            aria-label="搜索标签"
+            className="mb-2 h-8 text-xs"
+          />
+          {filteredTagGroups.length === 0 && (
+            <div className="mb-2 text-xs text-muted-foreground">没有匹配「{tagFilter.trim()}」的标签</div>
+          )}
+          {filteredTagGroups.map(([prefix, ts]) => (
             <div key={prefix || '其他'} className="mb-2">
               {prefix && <div className="mb-1 text-xs text-muted-foreground">{prefix}</div>}
               <div className="flex flex-wrap gap-1.5">
@@ -970,7 +996,7 @@ export default function App() {
             )
           ) : view === 'notes' ? (
             active && hydrated ? (
-              /* 单栏「笔记」：整篇随这个容器滚（头部/工具条/正文一起滚），而不是正文自己滚 */
+              /* 单栏「笔记」：头部/工具条固定，只有正文区在这个容器里自己滚 */
               <div ref={noteScrollRef} className="min-h-0 flex-1 overflow-y-auto" data-testid="note-flow-scroll">
                 {editorFor(active, true, true)}
               </div>

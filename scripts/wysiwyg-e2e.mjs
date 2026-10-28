@@ -267,14 +267,14 @@ try {
   check('排版条上的加粗按钮生效', boldOk)
   await send('Emulation.clearDeviceMetricsOverride')
   await delay(200)
-  // 流式滚动：工具栏吸在滚动容器顶端（单栏「笔记」/并列视图两种 flow 容器共用这条 CSS）
+  // 流式滚动：工具栏吸在正文滚动容器顶端（flow 下滚动发生在编辑区内部的 data-body-scroll）
   const longText = Array.from({ length: 60 }, (_, i) => `第 ${i + 1} 段：用于验证流式滚动时工具栏是否留在原位。`).join('\n\n')
   await act('fixture.setFlow(true)')
   await act(`fixture.setContent(${JSON.stringify(longText)})`)
   await wait(`${content}?.textContent.includes('第 60 段')`)
   await delay(200)
   const sticky = await evaluate(`(() => {
-    const scroll = document.querySelector('[data-testid=flow-scroll]')
+    const scroll = document.querySelector('[data-body-scroll]')
     const toolbar = document.querySelector('[data-testid=wysiwyg-editor] .vditor-toolbar')
     if (!scroll || !toolbar) return { failed: 'missing flow containers' }
     const topEdge = scroll.getBoundingClientRect().top

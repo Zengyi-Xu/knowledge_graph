@@ -23,8 +23,8 @@ if (archiveIndex >= 0) {
 assert.equal(fs.existsSync(path.join(dir, 'dist', 'notes.json')), false, '禁止携带 public 中的本地笔记快照')
 assert.deepEqual(fs.readdirSync(path.join(dir, 'dist')).sort(),
   ['assets', 'icons', 'index.html', 'manifest.webmanifest', 'sw.js', 'vditor'])
-// 三个入口都在：双击 .pyw 是无窗口启动，.wsf 停止，.cmd 是排查用的窗口版
-for (const entry of ['启动知识图谱.pyw', '停止知识图谱.wsf', '启动知识图谱.cmd']) {
+// 浏览器版与 Qt 版入口都随包发布；Qt 依赖清单位于包根目录。
+for (const entry of ['启动知识图谱.pyw', '启动知识图谱-Qt.pyw', '停止知识图谱.wsf', '启动知识图谱.cmd', 'requirements-qt.txt']) {
   assert.ok(fs.existsSync(path.join(dir, entry)), `缺少启动入口 ${entry}`)
 }
 const env = {
@@ -78,7 +78,9 @@ try {
 // 解释器运行同一脚本，以便拿到进程句柄并在验收后结束整棵进程树。
 // 验证它真的把服务拉起来、并把输出写进 data/temp/web-server.log。
 const hiddenLog = path.join(dir, 'data', 'temp', 'web-server.log')
-const python = process.env.PYTHON || 'python'
+const pythonProbe = spawnSync(process.env.PYTHON || 'python', ['-c', 'import sys; print(sys.executable)'], { encoding: 'utf8' })
+assert.equal(pythonProbe.status, 0, pythonProbe.stderr || '需要 Python 3 才能测试启动器')
+const python = pythonProbe.stdout.trim()
 const launcher = spawn(python, ['启动知识图谱.pyw', '--no-open', '--port', '0'], {
   cwd: dir, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
 })
@@ -102,6 +104,36 @@ try {
   console.log('✓ 无窗口启动器（启动知识图谱.pyw）真的起了服务：隐藏窗口、日志落 data/temp/web-server.log、中文不乱码')
 } finally {
   if (launcher.pid) spawnSync('taskkill.exe', ['/PID', String(launcher.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
+}
+// Qt 版也走完整启动链：离屏 QWebEngineView 加载真实 dist，并检查 React DOM 与本地桥。
+const qt = spawn(python, [path.join(root, 'scripts/qt-launcher-selftest.py'), path.join(dir, '启动知识图谱-Qt.pyw')], {
+  cwd: dir,
+  env: {
+    ...env, QT_QPA_PLATFORM: 'offscreen', QT_OPENGL: 'software', PYTHONUTF8: '1',
+    QTWEBENGINE_CHROMIUM_FLAGS: '--disable-gpu --disable-gpu-compositing --no-sandbox',
+  },
+  windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
+})
+let qtOutput = ''
+qt.stdout.setEncoding('utf8')
+qt.stderr.setEncoding('utf8')
+qt.stdout.on('data', (text) => { qtOutput += text })
+qt.stderr.on('data', (text) => { qtOutput += text })
+try {
+  const qtCode = await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('Qt 启动器测试超时：' + qtOutput)), 60000)
+    qt.on('error', reject)
+    qt.on('exit', (code) => { clearTimeout(timeout); resolve(code) })
+  })
+  assert.equal(qtCode, 0, qtOutput)
+  const qtLog = fs.readFileSync(path.join(dir, 'data', 'temp', 'qt-web-server.log'), 'utf8')
+  assert.ok(qtLog.includes('=== kg-qt-launcher '), 'Qt 启动器应写下独立日志')
+  const qtOrigin = qtLog.match(/http:\/\/127\.0\.0\.1:\d+/g)?.at(-1)
+  assert.ok(qtOrigin, 'Qt 启动器应识别动态端口')
+  await assert.rejects(fetch(qtOrigin + '/api/health'), '关闭 Qt 窗口后应停止本次启动的服务')
+  console.log('✓ Qt WebEngine 真实渲染、动态端口、本地桥与关窗清理')
+} finally {
+  if (qt.pid) spawnSync('taskkill.exe', ['/PID', String(qt.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
 }
 fs.copyFileSync(path.join(root, 'scripts/local-web-selftest.mjs'), path.join(dir, 'scripts/local-web-selftest.mjs'))
 const regression = spawnSync(path.join(dir, 'runtime/node.exe'), ['scripts/local-web-selftest.mjs'], {

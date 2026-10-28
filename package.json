@@ -36,6 +36,7 @@
     "topics:apply": "npm run topics:build && node .tmp-vault-test/tag-topics.cjs --apply",
     "test:lit-view": "esbuild scripts/literature-view-selftest.tsx --bundle --platform=node --format=cjs --target=node20 --jsx=automatic --alias:@=./src --outfile=.tmp-vault-test/lit-view-selftest.cjs && node .tmp-vault-test/lit-view-selftest.cjs",
     "test:lit-dom": "node scripts/lit-view-dom-test.mjs",
+    "test:note-editor-dom": "node scripts/note-editor-dom-test.mjs",
     "test:vault-e2e": "node scripts/vault-e2e.mjs",
     "test:md": "node scripts/md-selftest.mjs",
     "test:md-import": "esbuild scripts/md-import-selftest.ts --bundle --platform=node --format=cjs --target=node20 --alias:@=./src --outfile=.tmp-vault-test/md-import-selftest.cjs && node .tmp-vault-test/md-import-selftest.cjs",

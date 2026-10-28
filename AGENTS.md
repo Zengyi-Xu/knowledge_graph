@@ -19,7 +19,8 @@
 
 - 构建/类型：`npm run build`（tsc -b + vite build）。
 - 回归测试：`npm run test:vault | test:vault-gate | test:use-notes | test:lit | test:lit-view | test:lit-dom |
-  test:web | test:zotero | test:zotero-import | test:zotero-e2e | test:mobile | test:math | test:wysiwyg-e2e | test:organize`。
+  test:web | test:zotero | test:zotero-import | test:zotero-e2e | test:mobile | test:math | test:wysiwyg-e2e | test:organize |
+  test:note-editor-dom`。
 - 体积：`npm run budget:check`（先 `npm run budget:report` 刷 `perf/bundle-lanes.json`，否则哈希变了整片误报）、
   `npm run test:bundle-scenarios`。**别用 `manualChunks` 给懒加载 chunk 改名**（会被提升成静态 import，2.7MB citation
   chunk 上首屏）。口径见 `docs/BUNDLE_BUDGET.md`。
@@ -57,8 +58,9 @@
 
 - 打 `v*` tag → GitHub Actions 三端并行发 Release（Windows NSIS / macOS dmg+zip / Linux AppImage+deb）；
   Release 正文取根目录 `release-notes.md`。网页包：`npm run build` + `npm run release:web`。**不主动 push，用户明确要求才提交。**
-- `.cmd` 启动器必须 CRLF（LF 会被 cmd.exe 截断命令）；双击入口是 `.wsf`（无窗口，别改回 `.vbs`，中文会按 ACP 乱码）；
-  停止脚本会杀本机所有本地服务实例，自动化清场用 `taskkill /PID <pid> /T`。回归 `npm run test:web-portable`。
+- `.cmd` 启动器必须 CRLF（LF 会被 cmd.exe 截断命令）；`启动知识图谱-Qt.pyw` 用 PySide6 内嵌现有网页，
+  `启动知识图谱.pyw` 是默认浏览器回退，停止入口保留 `.wsf`（别改回 `.vbs`，中文会按 ACP 乱码）；
+  停止脚本会杀本机所有本地服务实例，自动化清场用 `taskkill /PID <pid> /T`。回归 `npm run test:web-portable`（含 Qt）。
 
 ## 代理工作纪律
 

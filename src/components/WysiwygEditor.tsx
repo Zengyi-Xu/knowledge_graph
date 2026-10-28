@@ -5,6 +5,7 @@ import Vditor from 'vditor'
 import { Bold, Code, Heading1, Heading2, Heading3, Italic, Link as LinkIcon, List, ListOrdered, Quote, Strikethrough } from 'lucide-react'
 import type { Note } from '@/types/note'
 import type { PreviewTheme } from '@/lib/previewTheme'
+import { resolveNoteImages } from '@/lib/noteImages'
 import vditorStyles from 'vditor/dist/index.css?inline'
 import liveStyles from './WysiwygEditor.css?inline'
 
@@ -358,6 +359,8 @@ export default function WysiwygEditor({ value, onChange, onOpenNote, onCreateNot
     const root = hostRef.current?.querySelector('.vditor-wysiwyg')
     if (!root) return
     decorateWikilinks(root as HTMLElement, navRef.current.notes)
+    // vault 插图（./attachments/img-…）：把编辑器渲染出的相对路径换成 blob URL
+    resolveNoteImages(root as HTMLElement)
     if (root.querySelector('.vditor-wysiwyg__block[data-type^="math-"]')) {
       void import('@/lib/katexRuntime').then(({ hydrateVditorMath }) => {
         if (hostRef.current?.contains(root)) hydrateVditorMath(root as HTMLElement)
@@ -395,6 +398,25 @@ export default function WysiwygEditor({ value, onChange, onOpenNote, onCreateNot
           const href = bom.getAttribute('href')
           if (href && /^https?:\/\//.test(href)) window.open(href, '_blank', 'noopener')
         },
+      },
+      upload: {
+        // 粘贴/拖入的图片自定义落盘：存进 vault 的 attachments/（短文件名），正文只写短路径。
+        // 不接这个 handler，Vditor 会把图片内嵌成 base64 data: URL，一张截图就把正文撑爆。
+        handler: (async (files: File[]) => {
+          const images = files.filter((f) => f.type.startsWith('image/'))
+          if (images.length === 0) return '只支持插入图片文件'
+          try {
+            const { saveNoteImage } = await import('@/lib/noteImages')
+            for (const f of images) {
+              const rel = await saveNoteImage(f)
+              vditorRef.current?.insertValue(`![图片](${rel})\n`)
+            }
+            return null
+          } catch (e) {
+            return e instanceof Error ? e.message : '插图保存失败'
+          }
+          // Vditor 的声明是 Promise<string> | Promise<null> 的联合而不是 Promise<string|null>
+        }) as (files: File[]) => Promise<null>,
       },
       input: (v) => {
         lastEmittedRef.current = v

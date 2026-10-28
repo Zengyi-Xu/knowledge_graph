@@ -7,6 +7,7 @@ import { previewCss } from '@/lib/previewTheme'
 import type { PreviewTheme } from '@/lib/previewTheme'
 import { prepareMathMarkdown } from '@/lib/mathMarkup'
 import { scrollElementIntoView } from '@/lib/noteRelations'
+import { resolveNoteImages } from '@/lib/noteImages'
 
 export type { PreviewTheme }
 
@@ -61,12 +62,18 @@ export function PreviewContent({ content, notes, onOpenNote, onCreateNote, theme
   useEffect(() => {
     if (!shadow || !headingJump) return
     // 阅读面板渲染在 Shadow DOM 里，标题只能从 shadowRoot 里取；滚动容器在影子树外面
-    // （note-flow-scroll 或并列那张卡片），scrollElementIntoView 会一路往上找。
+    // （flow 下是正文区的 [data-body-scroll]），scrollElementIntoView 会一路往上找。
     const headings = shadow.querySelectorAll<HTMLElement>(
       '#write h1, #write h2, #write h3, #write h4, #write h5, #write h6',
     )
     scrollElementIntoView(headings[headingJump.index], 56)
   }, [shadow, headingJump])
+
+  // vault 插图（./attachments/img-…）：浏览器直接按相对路径加载不到，统一换成 blob URL
+  useEffect(() => {
+    if (!shadow) return
+    resolveNoteImages(shadow)
+  }, [shadow, prepared])
 
   return (
     <div ref={hostRef} className={flow ? 'overflow-visible' : 'h-full overflow-y-auto'}>

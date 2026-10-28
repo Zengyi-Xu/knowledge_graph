@@ -65,9 +65,9 @@ if (!args.includes('--zip-only')) {
   const target = path.join(stage, 'node_modules', 'better-sqlite3')
   for (const file of ['lib', 'package.json', 'LICENSE']) copy(path.join(sqlite, file), path.join(target, file))
   copy(path.join(sqlite, 'prebuilds', 'win32-x64.node'), path.join(target, 'prebuilds', 'win32-x64.node'))
-  // .pyw 是默认无窗口入口（不经过 Windows Script Host），.cmd 是排查用的窗口版。
+  // .pyw 是无窗口入口（不经过 Windows Script Host），Qt 版内嵌网页，原版使用默认浏览器。
   // 停止入口暂时保留 .wsf；换行一律用 CRLF，避免 Windows 脚本宿主/编辑器误判。
-  for (const launcher of ['启动知识图谱.cmd', '启动知识图谱.pyw', '停止知识图谱.wsf']) {
+  for (const launcher of ['启动知识图谱.cmd', '启动知识图谱.pyw', '启动知识图谱-Qt.pyw', '停止知识图谱.wsf']) {
     const source = path.join(root, 'build', 'web-portable', launcher)
     const destination = path.join(stage, launcher)
     copy(source, destination)
@@ -75,6 +75,7 @@ if (!args.includes('--zip-only')) {
   }
   copy(path.join(root, 'build', 'web-portable', '知识图谱.ico'), path.join(stage, '知识图谱.ico'))
   copy(path.join(root, 'build', 'web-portable', '配置.json'), path.join(stage, '配置.json'))
+  copy(path.join(root, 'build', 'web-portable', 'requirements-qt.txt'), path.join(stage, 'requirements-qt.txt'))
   copy(path.join(root, 'docs', 'WEB_PORTABLE.md'), path.join(stage, '使用说明.md'))
   copy(path.join(root, 'LICENSE'), path.join(stage, 'LICENSE'))
   fs.writeFileSync(path.join(stage, 'package.json'), JSON.stringify({

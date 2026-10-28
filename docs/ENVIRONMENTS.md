@@ -6,7 +6,7 @@
 
 | | 开发版 | 正式发行版 |
 | --- | --- | --- |
-| 怎么起 | `npm run dev`；需要兼容验证时 `npm run desktop:dev` | 解压 `knowledge-graph-web-<版本>-windows-x64.zip` 后用 Python 运行 `启动知识图谱.pyw`（无窗口；`启动知识图谱.cmd` 是窗口版） |
+| 怎么起 | `npm run dev`；需要兼容验证时 `npm run desktop:dev` | 解压 `knowledge-graph-web-<版本>-windows-x64.zip` 后运行 `启动知识图谱-Qt.pyw`（PySide6 桌面窗口）或 `启动知识图谱.pyw`（默认浏览器；`启动知识图谱.cmd` 是窗口版） |
 | 前端产物 | Vite 开发服务；Electron 兼容验证使用 `dist-dev/` | `dist/`，由随包 Node 启动本地服务 |
 | 构建命令 | `npm run build:dev`（仅兼容验证） | `npm run build` 后 `npm run release:web` |
 | 构建期常量 | `__APP_ENV__ = 'development'` | `__APP_ENV__ = 'production'` |

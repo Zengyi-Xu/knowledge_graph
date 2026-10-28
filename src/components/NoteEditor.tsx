@@ -27,10 +27,11 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Trash2, Download, Check, Upload, Palette, MoreVertical, RefreshCw, Pencil, ClipboardCopy, Sparkles, ExternalLink, FileText, ArrowLeft, Link2, CircleHelp } from 'lucide-react'
+import { Trash2, Download, Check, Upload, Palette, MoreVertical, RefreshCw, Pencil, ClipboardCopy, Sparkles, ExternalLink, FileText, ArrowLeft, Link2, CircleHelp, ImagePlus } from 'lucide-react'
 import { toast } from 'sonner'
 import { readSetting, writeSetting } from '@/lib/env'
 import { attachmentsSupported, openPdfExternal } from '@/lib/attachments'
+import { noteImagesSupported, saveNoteImage } from '@/lib/noteImages'
 import { useInlinePdfPanelOpen } from '@/lib/inlinePdfPanel'
 import { appendToContent } from '@/lib/research/insert'
 
@@ -117,6 +118,12 @@ export function NoteEditor({
   const [headingJump, setHeadingJump] = useState<HeadingJump | null>(null)
   const [newTopicOpen, setNewTopicOpen] = useState(false)
   const [newTopic, setNewTopic] = useState('')
+  /** 点「+ 新建主题…」后焦点要给新出现的输入框：Radix Select 默认把焦点还给触发器，
+   *  会立刻触发输入框 blur 把它关掉（输入框一闪即没）；置位时拦掉这次焦点回还 */
+  const newTopicFocusRef = useRef(false)
+  /** 插图落盘中（粘贴/选文件 → attachments/）：防重入 */
+  const [insertingImage, setInsertingImage] = useState(false)
+  const imageInputRef = useRef<HTMLInputElement>(null)
   const [saved, setSaved] = useState(false)
   /** 研究追问右侧面板（可收起；窄屏为覆盖式抽屉，见下方布局） */
   const [researchOpen, setResearchOpen] = useState(false)
@@ -154,8 +161,9 @@ export function NoteEditor({
     ta.setSelectionRange(entry.index, entry.index)
   }
 
-  /** 流式布局（flow）下正文改用页面级滚动：textarea 不会自己长高，按内容高度顶开，
-   *  底部留白留在自己身上（40vh），滚到底时最后一行不会贴住屏幕下沿 */
+  /** 流式布局（flow）下正文在自己的滚动容器里滚（头部/工具条固定不滚动）：
+   *  textarea 不会自己长高，按内容高度顶开，底部留白留在自己身上（40vh），
+   *  滚到底时最后一行不会贴住屏幕下沿 */
   const autoGrow = () => {
     const ta = taRef.current
     if (!ta) return
@@ -171,6 +179,13 @@ export function NoteEditor({
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
   }, [flow, note.id, note.content, tab, editorMode, readOnly, splitView])
+
+  // flow 下滚动容器在正文区内部（data-body-scroll）：换笔记时归零，
+  // 否则新笔记一打开就停在上一篇的滚动位置
+  useEffect(() => {
+    if (!flow) return
+    rootRef.current?.querySelectorAll('[data-body-scroll]').forEach((el) => el.scrollTo({ top: 0 }))
+  }, [flow, note.id])
 
   const selectTheme = (value: PreviewTheme) => {
     setTheme(value)
@@ -316,6 +331,69 @@ export function NoteEditor({
     if (confirm(`确定删除笔记「${note.title}」吗？`)) onDelete()
   }
 
+  /**
+   * 插图：图片存进 vault 的 attachments/（短文件名），正文只写一行 `![图片](./attachments/img-….png)`。
+   * 粘贴与「插入图片」按钮共用。不再内嵌 base64 —— 一张截图几百 KB 的 data: URL 会把正文撑爆。
+   */
+  const insertImages = async (files: File[]) => {
+    const images = files.filter((f) => f.type.startsWith('image/'))
+    if (readOnly || images.length === 0) return
+    if (!noteImagesSupported()) {
+      toast.error('插入图片需要桌面版或本机网页服务（图片要存进笔记目录的 attachments/）')
+      return
+    }
+    setInsertingImage(true)
+    try {
+      // 经典模式的「预览」页签下没有 textarea：先切到「编辑」，插图追加到文末
+      if (editorMode === 'classic' && !splitView && tab !== 'edit') setTab('edit')
+      let text = note.content
+      let pos = taRef.current?.selectionStart ?? text.length
+      for (const file of images) {
+        const rel = await saveNoteImage(file)
+        const before = text.slice(0, pos)
+        const prefix = before && !before.endsWith('\n') ? '\n' : ''
+        const snippet = `${prefix}![图片](${rel})\n`
+        text = before + snippet + text.slice(pos)
+        pos += snippet.length
+      }
+      onChange({ content: text })
+      markSaved()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '插入图片失败')
+    } finally {
+      setInsertingImage(false)
+    }
+  }
+
+  /** 经典模式的「插入图片」按钮（所见即所得里插图走 Vditor 自己的粘贴/上传链） */
+  const imageControls = readOnly ? null : (
+    <>
+      <input
+        ref={imageInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          const files = [...(e.target.files ?? [])]
+          e.target.value = ''
+          if (files.length) void insertImages(files)
+        }}
+      />
+      <Button
+        variant="outline"
+        size="icon"
+        className="h-11 w-11 md:h-8 md:w-8"
+        title="插入图片（存到笔记目录 attachments/，正文只写短路径）；也可以直接把截图粘进编辑区"
+        aria-label="插入图片"
+        disabled={insertingImage}
+        onClick={() => imageInputRef.current?.click()}
+      >
+        <ImagePlus className="h-4 w-4" />
+      </Button>
+    </>
+  )
+
   // 左：Markdown 源码
   const editorBody = (
     <>
@@ -325,6 +403,13 @@ export function NoteEditor({
         onChange={(e) => {
           handleContentChange(e.target.value)
           markSaved()
+        }}
+        onPaste={(e) => {
+          // 剪贴板里有图片：落盘成附件再插图，不让浏览器塞 base64 进来
+          const images = [...e.clipboardData.files].filter((f) => f.type.startsWith('image/'))
+          if (images.length === 0) return
+          e.preventDefault()
+          void insertImages(images)
         }}
         placeholder={'用 Markdown 记录，用 [[笔记标题]] 建立关联，用 #标签 标记主题。\n\n## 小节标题\n- 列表项\n- [ ] 待办项\n**重点**、*斜体*、`代码`、~~删除线~~\n> 引用\n\n| 表头 | 表头 |\n|:---|---:|\n| 单元格 | 单元格 |\n\n[链接](https://example.com)\n```\n代码块\n```'}
         className={
@@ -415,61 +500,90 @@ export function NoteEditor({
     </div>
   )
 
-  // 编辑区：分栏（源码 | 渲染）或 预览/编辑切换
+  // 编辑工具行（「正文即打即排版…所见即所得」那行）：flow 下它是固定区的一部分
+  // （只有下面的正文区滚动），只要 shrink-0 不被压缩即可
+  const toolbarRowClass = 'flex shrink-0 flex-wrap items-center justify-between gap-2 border-b px-3 py-2 md:px-4'
+
+  // 编辑区：分栏（源码 | 渲染）或 预览/编辑切换。
+  // flow 下只有正文区滚动（data-body-scroll），工具行和上面的头部都固定
   const editorArea = editorMode === 'wysiwyg' ? (
-    <div className={flow ? 'flex flex-col' : 'flex min-h-0 flex-1 flex-col'}>
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2 md:px-4">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className={toolbarRowClass}>
         <span className="text-xs text-muted-foreground">
           正文即打即排版，与 Word 一致；Markdown 自动保存
           <span className="hidden md:inline"> · 标题 Alt+1…6 · 选中文字浮出排版条</span>
         </span>
         {themeControls}
       </div>
-      <Suspense fallback={<div className="p-4 text-sm text-muted-foreground" role="status">正在加载编辑器…</div>}>
-        <WysiwygEditor key={note.id} value={note.content} noteId={note.id} notes={allNotes} flow={flow}
-          onChange={(content) => { onChange({ content }); markSaved() }}
-          onOpenNote={onOpenNote} onCreateNote={onCreateNote} theme={theme} customCss={customTheme?.css ?? ''} />
-      </Suspense>
+      {flow ? (
+        <div data-body-scroll className="min-h-0 flex-1 overflow-y-auto">
+          <Suspense fallback={<div className="p-4 text-sm text-muted-foreground" role="status">正在加载编辑器…</div>}>
+            <WysiwygEditor key={note.id} value={note.content} noteId={note.id} notes={allNotes} flow={flow}
+              onChange={(content) => { onChange({ content }); markSaved() }}
+              onOpenNote={onOpenNote} onCreateNote={onCreateNote} theme={theme} customCss={customTheme?.css ?? ''} />
+          </Suspense>
+        </div>
+      ) : (
+        <Suspense fallback={<div className="p-4 text-sm text-muted-foreground" role="status">正在加载编辑器…</div>}>
+          <WysiwygEditor key={note.id} value={note.content} noteId={note.id} notes={allNotes} flow={flow}
+            onChange={(content) => { onChange({ content }); markSaved() }}
+            onOpenNote={onOpenNote} onCreateNote={onCreateNote} theme={theme} customCss={customTheme?.css ?? ''} />
+        </Suspense>
+      )}
     </div>
   ) : splitView ? (
-    <div className={flow ? 'flex flex-col' : 'flex min-h-0 flex-1 flex-col'}>
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2 md:px-4">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className={toolbarRowClass}>
         <span className="text-xs text-muted-foreground">左：Markdown 源码 · 右：渲染结果</span>
-        {themeControls}
+        <div className="flex items-center gap-2">{imageControls}{themeControls}</div>
       </div>
-      <div className={flow ? 'flex' : 'flex min-h-0 flex-1'}>
-        <div className={flow ? 'relative w-1/2 border-r' : 'relative min-h-0 w-1/2 border-r'}>{editorBody}</div>
-        <div className={flow ? 'w-1/2' : 'min-h-0 w-1/2 overflow-hidden'}>{previewBody}</div>
+      <div className="flex min-h-0 flex-1">
+        <div
+          data-body-scroll={flow ? '' : undefined}
+          className={flow ? 'relative min-h-0 w-1/2 overflow-y-auto border-r' : 'relative min-h-0 w-1/2 border-r'}
+        >
+          {editorBody}
+        </div>
+        <div
+          data-body-scroll={flow ? '' : undefined}
+          className={flow ? 'min-h-0 w-1/2 overflow-y-auto' : 'min-h-0 w-1/2 overflow-hidden'}
+        >
+          {previewBody}
+        </div>
       </div>
     </div>
   ) : (
     <Tabs
       value={readOnly ? 'preview' : tab}
       onValueChange={(v) => setTab(v as 'edit' | 'preview')}
-      className={flow ? 'flex flex-col' : 'flex min-h-0 flex-1 flex-col'}
+      className="flex min-h-0 flex-1 flex-col"
     >
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2 md:px-4">
+      <div className={toolbarRowClass}>
         <TabsList>
           <TabsTrigger value="preview">预览</TabsTrigger>
           <TabsTrigger value="edit" disabled={readOnly}>编辑</TabsTrigger>
         </TabsList>
-        {themeControls}
+        <div className="flex items-center gap-2">{imageControls}{themeControls}</div>
       </div>
-      <div className={flow ? 'relative' : 'relative min-h-0 flex-1'}>
+      <div
+        data-body-scroll={flow ? '' : undefined}
+        className={flow ? 'relative min-h-0 flex-1 overflow-y-auto' : 'relative min-h-0 flex-1'}
+      >
         {readOnly || tab === 'preview' ? previewBody : editorBody}
       </div>
     </Tabs>
   )
 
   return (
-    <div ref={rootRef} className={flow ? 'flex min-h-full flex-col' : 'flex h-full min-h-0 flex-col'}>
-      {/* 头部：标题与元信息。面板展开时和「文献信息」各占 1/4 列（正文 1/2）。
+    <div ref={rootRef} className="flex h-full min-h-0 flex-col">
+      {/* 头部：标题与元信息。flow 下整颗头部固定不滚动（shrink-0），只有正文区滚。
+          面板展开时和「文献信息」各占 1/4 列（正文 1/2）。
           必须写成固定高度的 1/4（不是 basis-0 + grow）：那两个量块会被浏览器按
           「内容自动最小高度」卡住，正文实测只剩 45%（见 AGENTS.md 第 11 条） */}
       <div
         className={`space-y-3 border-b p-3 md:p-4 ${
           !flow && pdfPanelOpen ? 'h-1/4 min-h-0 shrink-0 overflow-y-auto overflow-x-hidden' : ''
-        }`}
+        } ${flow ? 'shrink-0' : ''}`}
       >
         {readOnly && (
           <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700" role="status">
@@ -575,6 +689,7 @@ export function NoteEditor({
             </Button>
           </div>
         )}
+        {/* 主题/类型/标签工具行：flow 下整颗头部（含本行）固定不滚动，只有正文区滚 */}
         <div className="flex flex-wrap items-center gap-2">
           {note.type !== 'literature' && (
             <div className="flex items-center gap-1.5">
@@ -583,6 +698,7 @@ export function NoteEditor({
               value={currentTopic || '__none__'}
               onValueChange={(value) => {
                 if (value === '__new__') {
+                  newTopicFocusRef.current = true
                   setNewTopicOpen(true)
                   return
                 }
@@ -592,7 +708,16 @@ export function NoteEditor({
               <SelectTrigger className="h-9 w-[150px] text-xs md:h-8" title="主题（落盘为 主题:标签）">
                 <SelectValue placeholder="未设主题" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent
+                onCloseAutoFocus={(e) => {
+                  // 「+ 新建主题…」之后焦点要留在新出现的输入框上；默认行为会把焦点还给
+                  // 触发器，立刻触发输入框 blur → 输入框一闪即没（实测复现，见 DEV_MEMORY）
+                  if (newTopicFocusRef.current) {
+                    newTopicFocusRef.current = false
+                    e.preventDefault()
+                  }
+                }}
+              >
                 <SelectItem value="__none__">未设主题</SelectItem>
                 {topicOptions.map((topic) => (
                   <SelectItem key={topic} value={topic}>

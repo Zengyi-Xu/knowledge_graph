@@ -14,7 +14,7 @@ const events: string[] = []
 function Fixture() {
   const [note, setNote] = useState(base)
   const [mount, setMount] = useState(true)
-  // flow = 真应用的单栏「笔记」视图：外层容器滚，头部/工具条/正文一起动
+  // flow = 真应用的单栏「笔记」视图：头部/工具条固定，只有正文区（data-body-scroll）自己滚
   const [flow, setFlow] = useState(false)
   Object.assign(window, {
     fixture: {

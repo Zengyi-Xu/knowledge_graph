@@ -231,6 +231,14 @@ const DIM_ORDER = ['功能', '材料', '器件']
 // 聚焦景深：按到焦点的跳数决定模糊档位与不透明度
 const HOP_OPACITY = [1, 0.88, 0.62, 0.4]
 
+// 聚焦模式下连线按跳数分级：1 跳最粗最深，逐级变细变淡（深马卡龙蓝色阶，与节点景深同一套 blurLevel 档位）
+const EDGE_HOP_STYLE = [
+  { opacity: 0.7, width: 2.2, color: '#5b7ec9' },
+  { opacity: 0.38, width: 1.5, color: '#829bd3' },
+  { opacity: 0.18, width: 1.1, color: '#abbadd' },
+  { opacity: 0.07, width: 1, color: '#c6d0e6' },
+]
+
 function blurLevel(hop: number | undefined): number {
   if (hop === undefined) return 3
   if (hop <= 1) return 0
@@ -1472,17 +1480,39 @@ export function GraphView({
             const isTopic = e.topicWeight !== undefined
             const active =
               hoverId === e.source || hoverId === e.target || focusId === e.source || focusId === e.target
-            const nearFocus =
-              focusActive && (hopById.get(e.source) ?? 9) <= 1 && (hopById.get(e.target) ?? 9) <= 1
+            // 放大到阅读倍率（≥LABEL_FULL_ZOOM）后，只画两端都在视野内的边：
+            // 此刻是来看局部结构和标题的，横穿整个视野的长线全来自视野外节点，只会织成乱麻
+            if (cam.zoom >= LABEL_FULL_ZOOM && !active) {
+              const m = 160
+              const aIn =
+                Math.abs((a.x - cam.x) * cam.zoom) <= size.w / 2 + m &&
+                Math.abs((a.y - cam.y) * cam.zoom) <= size.h / 2 + m
+              const bIn =
+                Math.abs((b.x - cam.x) * cam.zoom) <= size.w / 2 + m &&
+                Math.abs((b.y - cam.y) * cam.zoom) <= size.h / 2 + m
+              if (!aIn || !bIn) return null
+            }
+            // 聚焦时按「离焦点几跳」分级：1 跳最粗最深，越远越细越淡
+            const hopTier = focusActive
+              ? blurLevel(Math.max(hopById.get(e.source) ?? 9, hopById.get(e.target) ?? 9))
+              : 0
+            const hopStyle = EDGE_HOP_STYLE[hopTier]
+            const hoverEdge = Boolean(hoverId) && (hoverId === e.source || hoverId === e.target)
             // 枢纽渲染层：不在任何枢纽 2 跳范围内的边全部虚化
             const fadedByHub =
               !focusActive && Boolean(hubLayer) && (!hubLayer!.sharp.has(e.source) || !hubLayer!.sharp.has(e.target))
-            let opacity = focusActive ? (nearFocus ? 0.6 : 0.07) : active ? 0.7 : 0.14
-            if (isTopic) opacity = focusActive ? (nearFocus ? 0.4 : 0.05) : active ? 0.55 : 0.08
+            let opacity = focusActive ? hopStyle.opacity : active ? 0.7 : 0.14
+            if (isTopic) opacity = focusActive ? hopStyle.opacity * 0.7 : active ? 0.55 : 0.08
             // 悬停某个节点时，与它不沾边的连线再淡一层，视线自然聚到这一小片
             if (hoverId && !active && !focusActive) opacity = Math.min(opacity, 0.05)
+            if (focusActive && hoverEdge) opacity = Math.min(1, opacity + 0.25)
             if (fadedByHub && !active) opacity = Math.min(opacity, 0.08)
-            const width = focusActive ? (nearFocus ? 1.6 : 1) : active ? 1.8 : 1.2
+            // 越放大边越淡（放大后主角是标题，连线只留归属感；悬停/聚焦的高亮不受影响）
+            if (!active && !focusActive && cam.zoom > 1) {
+              opacity *= clamp(1.3 - cam.zoom * 0.35, 0.45, 1)
+            }
+            let width = focusActive ? hopStyle.width : active ? 1.8 : 1.2
+            if (focusActive && hoverEdge) width += 0.6
             // 两端属于同一个中心的边跟着中心的色号走（一小簇同色的连线，归属一眼看得出来）
             const hubA = hubColors.get(e.source)
             const hubB = hubColors.get(e.target)
@@ -1495,13 +1525,17 @@ export function GraphView({
                 x2={b.x}
                 y2={b.y}
                 stroke={
-                  sameHub && !active
-                    ? sameHub
-                    : isTopic
-                      ? '#2aa1a8'
-                      : active
-                        ? 'hsl(var(--primary))'
-                        : 'hsl(var(--muted-foreground))'
+                  focusActive && !isTopic
+                    ? hoverEdge
+                      ? 'hsl(var(--primary))'
+                      : hopStyle.color
+                    : sameHub && !active
+                      ? sameHub
+                      : isTopic
+                        ? '#2aa1a8'
+                        : active
+                          ? 'hsl(var(--primary))'
+                          : 'hsl(224 14% 62%)'
                 }
                 strokeOpacity={opacity}
                 strokeWidth={(isTopic ? width * 0.8 : width) / cam.zoom}

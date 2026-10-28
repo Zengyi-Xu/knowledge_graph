@@ -121,8 +121,8 @@
   overflow: visible;
 }
 
-/* 流式滚动时整篇内容都在动，工具栏跟着滚出屏幕 = 滚到正文中段想加粗却没按钮可点。
-   flow 档把工具栏吸在滚动容器（App 的 note-flow-scroll / 并列视图那张卡片）顶端：
+/* 流式排版时整篇内容都在动，工具栏跟着滚出屏幕 = 滚到正文中段想加粗却没按钮可点。
+   flow 档把工具栏吸在正文滚动容器（NoteEditor 编辑区里的 [data-body-scroll]）顶端：
    背景不透明 + 分隔线（沿用上面那条 border-bottom），正文从它下面滚过去；
    z-index 压在正文之上、双链补全下拉（z-20）之下。 */
 .kg-vditor-flow .vditor-toolbar {
